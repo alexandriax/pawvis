@@ -172,12 +172,6 @@ final class OverlayController {
     }
 }
 
-private extension CGPoint {
-    func offset(dx: CGFloat, dy: CGFloat) -> CGPoint {
-        CGPoint(x: x + dx, y: y + dy)
-    }
-}
-
 // MARK: - Render model
 
 struct OverlayRenderModel {
