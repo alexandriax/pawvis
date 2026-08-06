@@ -64,14 +64,6 @@ private struct GeneralSettingsTab: View {
                     }),
                 range: 0.2...0.45)
 
-            Picker("Cursor follows", selection: $store.settings.gestures.pointerSource) {
-                Text("Index fingertip (recommended)").tag(PointerSource.indexTip)
-                Text("Thumb tip").tag(PointerSource.thumbTip)
-                Text("Thumb–index midpoint").tag(PointerSource.pinchMidpoint)
-            }
-            Text("Point with your index finger; clicks land where you were pointing before the pinch motion.")
-                .font(.caption).foregroundStyle(.secondary)
-
             Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
             Text("Leave on for a normal user-facing webcam.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -87,52 +79,23 @@ private struct GestureSettingsTab: View {
 
     var body: some View {
         Form {
-            Picker("Right-click pinch finger", selection: $store.settings.gestures.rightClickFinger) {
-                Text("Middle").tag(Finger.middle)
-                Text("Ring").tag(Finger.ring)
-                Text("Little").tag(Finger.little)
-            }
-
-            LabeledSlider(
-                label: "Pinch sensitivity",
-                caption: "How close thumb and finger must get to click.",
-                value: $store.settings.gestures.pinchEngageRatio,
-                range: 0.30...0.55)
+            Text("Open hand moves the cursor · close your hand to click · hold it closed and move to drag.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
             Divider()
 
-            Toggle("Two-finger scroll", isOn: $store.settings.gestures.scrollEnabled)
-            Toggle("Natural scrolling", isOn: $store.settings.gestures.naturalScroll)
-                .disabled(!store.settings.gestures.scrollEnabled)
             LabeledSlider(
-                label: "Scroll speed",
-                caption: nil,
-                value: $store.settings.gestures.scrollGainPixels,
-                range: 400...3000)
-                .disabled(!store.settings.gestures.scrollEnabled)
-
-            Toggle("Fist clutch (park the cursor)", isOn: $store.settings.gestures.clutchEnabled)
+                label: "Grab sensitivity",
+                caption: "How tightly you must close your hand to click. Right = a loose close counts; left = squeeze harder.",
+                value: $store.settings.gestures.grabCloseThreshold,
+                range: 0.10...0.30)
 
             Divider()
 
-            Picker("Dictation gesture", selection: $store.settings.gestures.dictationToggle) {
-                ForEach(DictationToggleGesture.allCases, id: \.self) { gesture in
-                    Text(gesture.displayName).tag(gesture)
-                }
-            }
-            LabeledSlider(
-                label: "Hold duration",
-                caption: "Seconds to hold the gesture before dictation toggles.",
-                value: $store.settings.gestures.dictationHoldSeconds,
-                range: 0.4...2.0)
-
-            Divider()
-
-            Toggle("Fingertip dots (thumb + index)", isOn: $store.settings.overlay.showFingertipDots)
-            Toggle("All five fingertips", isOn: $store.settings.overlay.showAllFingertips)
-                .disabled(!store.settings.overlay.showFingertipDots)
-            Toggle("Pinch ring on the cursor", isOn: $store.settings.overlay.showPinchRing)
-            Toggle("Cursor reticle", isOn: $store.settings.overlay.showCursorHalo)
+            Toggle("Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
+            Toggle("Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
+            Toggle("Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
             Toggle("Status pill", isOn: $store.settings.overlay.showStatusPill)
         }
         .padding(20)

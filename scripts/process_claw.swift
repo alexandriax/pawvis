@@ -97,6 +97,41 @@ func fitRect(glyph: CGImage, canvas: CGFloat, margin: CGFloat) -> CGRect {
     return CGRect(x: (canvas - w) / 2, y: (canvas - h) / 2, width: w, height: h)
 }
 
+/// "Closed" cursor variant: the paw pad with the claws retracted. The split
+/// point is the minimum-coverage row between the (narrow) claw region and the
+/// (wide) pad blob; the pad is whichever side has the wider rows.
+func makeClosedGlyph(_ glyph: CGImage) -> CGImage {
+    let (pixels, w, h) = rgbaPixels(of: glyph)
+    var coverage = [Int](repeating: 0, count: h)
+    for y in 0..<h {
+        for x in 0..<w where pixels[(y * w + x) * 4 + 3] > 12 {
+            coverage[y] += 1
+        }
+    }
+    let lo = Int(Double(h) * 0.25), hi = Int(Double(h) * 0.75)
+    var gapRow = lo
+    var best = Int.max
+    for y in lo..<hi where coverage[y] < best {
+        best = coverage[y]
+        gapRow = y
+    }
+    let maxAbove = coverage[..<gapRow].max() ?? 0
+    let maxBelow = coverage[gapRow...].max() ?? 0
+    let rect = maxBelow >= maxAbove
+        ? CGRect(x: 0, y: gapRow, width: w, height: h - gapRow)
+        : CGRect(x: 0, y: 0, width: w, height: gapRow)
+    guard let pad = glyph.cropping(to: rect) else { fail("closed-glyph crop failed") }
+
+    let size = 128
+    let ctx = CGContext(
+        data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.interpolationQuality = .high
+    ctx.draw(pad, in: fitRect(glyph: pad, canvas: 128, margin: 0.10))
+    return ctx.makeImage()!
+}
+
 func makeMenubarGlyph(_ glyph: CGImage) -> CGImage {
     let size = 128
     let ctx = CGContext(
@@ -165,5 +200,6 @@ guard FileManager.default.fileExists(atPath: sourcePath) else {
 
 let glyph = makeGlyph(from: loadImage(sourcePath))
 writePNG(makeMenubarGlyph(glyph), to: repo + "/Resources/menubar-claw.png")
+writePNG(makeClosedGlyph(glyph), to: repo + "/Resources/claw-closed.png")
 writePNG(makeAppIcon(glyph), to: repo + "/Resources/icon_1024.png")
 print("done — rebuild AppIcon.icns with the iconset flow")

@@ -42,7 +42,7 @@ func runSelfTest() -> Int32 {
 
     // Settings roundtrip.
     var settings = PawvisSettings.default
-    settings.gestures.scrollGainPixels = 1234
+    settings.gestures.grabCloseThreshold = 0.21
     if let data = try? JSONEncoder().encode(settings),
        let decoded = try? JSONDecoder().decode(PawvisSettings.self, from: data) {
         check("settings.roundtrip", decoded == settings)

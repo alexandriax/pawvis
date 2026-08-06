@@ -68,11 +68,6 @@ struct MenuContentView: View {
                           && !dictation.state.isActive)
             }
 
-            if controller.settingsStore.settings.gestures.dictationToggle != .off {
-                Text("Tip: \(dictationGestureHint)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -164,12 +159,7 @@ struct MenuContentView: View {
     }
 
     private var modeText: String {
-        switch controller.mode {
-        case .none: return "Tracking"
-        case .pointing: return "Pointing"
-        case .scrolling: return "Scrolling"
-        case .clutch: return "Clutched (cursor parked)"
-        }
+        controller.grabbing ? "Clicking (hand closed)" : "Pointing"
     }
 
     private var dictationStatusText: String {
@@ -200,12 +190,4 @@ struct MenuContentView: View {
         }
     }
 
-    private var dictationGestureHint: String {
-        switch controller.settingsStore.settings.gestures.dictationToggle {
-        case .oneHandSplayHold: return "hold an open, spread hand to toggle dictation"
-        case .twoHandSplay: return "show two open hands to toggle dictation"
-        case .shakaHold: return "hold a shaka 🤙 to toggle dictation"
-        case .off: return ""
-        }
-    }
 }

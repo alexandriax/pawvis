@@ -187,4 +187,13 @@ enum SyntheticHand {
                          thumbTipOffset: thumbExtendedOffset),
               wrist: wrist, scale: scale)
     }
+
+    /// All four fingers half-bent — openness lands between a fist and an open
+    /// hand (the grab hysteresis band).
+    static func halfClosed(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
+        build(pose: Pose(fingerDirs: relaxedDirs,
+                         semiCurled: [.index, .middle, .ring, .little],
+                         thumbTipOffset: thumbTuckedOffset),
+              wrist: wrist, scale: scale)
+    }
 }

@@ -22,6 +22,7 @@ cp "$BIN" "$APP/Contents/MacOS/Pawvis"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/icon_1024.png "$APP/Contents/Resources/icon_1024.png"
 [[ -f Resources/menubar-claw.png ]] && cp Resources/menubar-claw.png "$APP/Contents/Resources/"
+[[ -f Resources/claw-closed.png ]] && cp Resources/claw-closed.png "$APP/Contents/Resources/"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

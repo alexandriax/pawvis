@@ -46,17 +46,11 @@ final class SettingsStore: ObservableObject {
     }
 
     /// One-time migrations for settings persisted by older builds.
+    /// (Pointer-source migrations from earlier gesture models are obsolete —
+    /// the back-to-basics engine has no pointer-source setting, and removed
+    /// config keys are simply ignored by the tolerant decoders.)
     private func migrate() {
         let defaults = UserDefaults.standard
-        // v2: the default pointer source changed pinchMidpoint → palmCenter
-        // (palm holds still during pinches). Only remap users still on the old
-        // default; a deliberate choice of another source is preserved.
-        if !defaults.bool(forKey: "PawvisMigration.palmPointer") {
-            if settings.gestures.pointerSource == .pinchMidpoint {
-                settings.gestures.pointerSource = .palmCenter
-            }
-            defaults.set(true, forKey: "PawvisMigration.palmPointer")
-        }
         // v3: OpenAI default model moved to gpt-4o-transcribe (server VAD
         // works; the old default rejected our session config outright).
         if !defaults.bool(forKey: "PawvisMigration.gpt4oTranscribe") {
@@ -64,14 +58,6 @@ final class SettingsStore: ObservableObject {
                 settings.dictation.model = "gpt-4o-transcribe"
             }
             defaults.set(true, forKey: "PawvisMigration.gpt4oTranscribe")
-        }
-        // v4: palm tracking retired — the cursor follows the index fingertip,
-        // with pre-click stabilization handling pinch jostle.
-        if !defaults.bool(forKey: "PawvisMigration.indexPointer") {
-            if settings.gestures.pointerSource == .palmCenter {
-                settings.gestures.pointerSource = .indexTip
-            }
-            defaults.set(true, forKey: "PawvisMigration.indexPointer")
         }
     }
 

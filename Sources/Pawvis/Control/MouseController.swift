@@ -58,10 +58,6 @@ final class MouseController {
                      at: projector.toGlobal(at),
                      button: button == .left ? .left : .right,
                      clickCount: clickCount)
-            case .scroll(let dx, let dy, _):
-                postScroll(dx: dx, dy: dy)
-            case .dictationToggle:
-                break // handled by the dictation controller
             }
         }
     }
@@ -142,22 +138,6 @@ final class MouseController {
         guard let event = makeEvent(type: type, at: point, button: button, clickCount: clickCount) else {
             return
         }
-        postQueue.async {
-            self.paceAndPost(event)
-        }
-    }
-
-    private func postScroll(dx: Double, dy: Double) {
-        // Engine convention: positive dy = "hand up with natural scrolling" =
-        // content should move up (toward the document's end), which is a
-        // negative pixel-wheel value in CG's convention.
-        guard let event = CGEvent(
-            scrollWheelEvent2Source: source,
-            units: .pixel,
-            wheelCount: 2,
-            wheel1: Int32(-dy.rounded()),
-            wheel2: Int32(-dx.rounded()),
-            wheel3: 0) else { return }
         postQueue.async {
             self.paceAndPost(event)
         }

@@ -13,7 +13,7 @@ final class PawvisController: ObservableObject {
 
     @Published private(set) var trackingActive = false
     @Published private(set) var handsDetected = 0
-    @Published private(set) var mode: InteractionMode = .none
+    @Published private(set) var grabbing = false
     @Published private(set) var cameraPermission = Permissions.camera()
     @Published private(set) var accessibilityGranted = Permissions.accessibility() == .granted
     @Published private(set) var lastError: String?
@@ -123,7 +123,7 @@ final class PawvisController: ObservableObject {
         overlay.hide()
         trackingActive = false
         handsDetected = 0
-        mode = .none
+        grabbing = false
         permissionPollTimer?.invalidate()
         permissionPollTimer = nil
         Log.app.info("Tracking stopped")
@@ -150,11 +150,6 @@ final class PawvisController: ObservableObject {
         guard trackingActive else { return }
         let (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
 
-        for event in events {
-            if case .dictationToggle = event {
-                dictation.toggle()
-            }
-        }
         mouse.apply(events)
         overlay.render(
             overlay: overlayState,
@@ -164,7 +159,7 @@ final class PawvisController: ObservableObject {
 
         let count = overlayState.hands.count
         if count != handsDetected { handsDetected = count }
-        if overlayState.mode != mode { mode = overlayState.mode }
+        if overlayState.grabbed != grabbing { grabbing = overlayState.grabbed }
     }
 
     // MARK: - Settings propagation

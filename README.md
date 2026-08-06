@@ -21,23 +21,22 @@ all without touching a mouse or keyboard.
 
 ## Gestures
 
+Deliberately minimal — three motions, learned in seconds:
+
 | Gesture | Action |
 |---|---|
-| Open hand, move | Move the cursor (follows your palm, so it stays steady while fingers pinch) |
-| Thumb + index pinch, release quickly | **Left click** (twice = double-click, thrice = triple) |
-| Thumb + index pinch, hold + move | **Drag** — the button stays down as long as you hold the pinch |
-| Thumb + middle pinch | **Right click** (finger configurable; hold to right-drag) |
-| Index + middle extended, others folded, move hand | **Scroll** (cursor stays parked) |
-| Fist | **Clutch** — freezes the cursor like lifting a mouse; reopen your hand anywhere and continue from where it froze |
-| One hand splayed wide, hold ~0.75 s | **Toggle dictation** (also: two open hands, or shaka 🤙 — pick in Settings) |
+| Open hand, move | **Move** — the claw cursor follows your hand |
+| Close your hand (grab) | **Left click** — twice quickly = double-click, thrice = triple |
+| Keep it closed and move | **Drag** — open your hand to let go |
 
-Every threshold (pinch sensitivity, hold times, scroll speed and direction,
-smoothing, camera reach) is tunable in **Settings**, and the in-app
-**Gesture Guide** window always reflects your current configuration.
+The claw shows state at a glance: open paw while pointing, retracted purple
+paw while your hand is closed, a ring that tightens as you close, and a pulse
+on every registered click. Grab sensitivity, smoothing, and camera reach are
+tunable in **Settings**.
 
 ## Voice dictation
 
-1. Arm dictation with the gesture (or the menu bar toggle). An orange pill
+1. Arm dictation from the menu bar (Start next to Dictation). A pill
    appears: *listening*.
 2. Start a sentence with a **wake word** — `type`, `text`, `enter`, `write`,
    or `dictate` (editable): *"type hello world"* types `hello world` into
@@ -120,15 +119,16 @@ Sources/
 Design notes:
 
 - The gesture engine is **deterministic and clock-free** — timing comes from
-  frame timestamps, so click chaining, hold-to-drag, hysteresis, pose
-  debounce, and tracking-loss releases are all covered by unit tests.
-- Pinch detection follows the tuning proven in sporecaster's in-browser
-  MediaPipe tracker: pinch distance normalized by hand scale with a wide
-  hysteresis band (0.45 engage / 0.68 release), One Euro smoothing per joint,
-  and a 300 ms stale-slot reset.
-- A closing fist momentarily looks like a pinch; an openness guard keeps
-  fist-clutching from firing phantom clicks, and the clutch rolls the cursor
-  back to its pre-fist position.
+  frame timestamps, so click chaining, hold-to-drag, hysteresis, debounce,
+  and tracking-loss releases are all covered by unit tests.
+- Clicking is a **hand close**, detected on sporecaster's openness scalar
+  (mean fingertip-to-palm distance normalized by hand scale) with a
+  hysteresis band and a two-frame debounce. The cursor anchors on the palm,
+  which barely moves while the fingers curl — so clicks are inherently
+  position-stable with no correction machinery.
+- Landmark smoothing is One Euro per joint with sporecaster's slot tracking
+  and 300 ms stale reset; mouse events post through a paced serial queue
+  (≥6 ms apart — unpaced pairs get dropped by macOS and wedge apps).
 - If tracking drops mid-drag, held buttons release automatically after a
   grace window — nothing gets stuck down. Quitting the app does the same.
 

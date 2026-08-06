@@ -2,11 +2,11 @@ import Foundation
 
 /// Overlay appearance switches.
 public struct OverlayConfig: Codable, Equatable, Sendable {
+    /// Small dots on every detected fingertip.
     public var showFingertipDots: Bool = true
-    /// Show all five fingertips instead of just the pinch pair (thumb+index).
-    /// Off by default — a screenful of dots obscured which mark was the cursor.
-    public var showAllFingertips: Bool = false
+    /// The closing-progress ring around the claw cursor.
     public var showPinchRing: Bool = true
+    /// The claw cursor itself.
     public var showCursorHalo: Bool = true
     public var showStatusPill: Bool = true
     /// Dot diameter multiplier (1.0 = default sizes).
@@ -15,15 +15,13 @@ public struct OverlayConfig: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case showFingertipDots, showAllFingertips, showPinchRing
-        case showCursorHalo, showStatusPill, dotScale
+        case showFingertipDots, showPinchRing, showCursorHalo, showStatusPill, dotScale
     }
 
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showFingertipDots) { showFingertipDots = v }
-        if let v = try? c.decodeIfPresent(Bool.self, forKey: .showAllFingertips) { showAllFingertips = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showPinchRing) { showPinchRing = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showCursorHalo) { showCursorHalo = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showStatusPill) { showStatusPill = v }

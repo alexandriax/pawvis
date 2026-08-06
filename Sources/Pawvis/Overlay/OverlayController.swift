@@ -54,8 +54,7 @@ final class OverlayController {
         if wasVisible { show() }
     }
 
-    private var prevLeftEngaged = false
-    private var prevRightEngaged = false
+    private var prevGrabbed = false
 
     func render(
         overlay: OverlayState,
@@ -64,14 +63,8 @@ final class OverlayController {
         accessibilityBlocked: Bool = false
     ) {
         guard visible else { return }
-        let leftRose = overlay.leftEngaged && !prevLeftEngaged
-        let rightRose = overlay.rightEngaged && !prevRightEngaged
-        prevLeftEngaged = overlay.leftEngaged
-        prevRightEngaged = overlay.rightEngaged
-
-        let primary = overlay.hands.first(where: { $0.isPrimary })
-        let leftStrength = primary?.leftPinchStrength ?? 0
-        let rightStrength = primary?.rightPinchStrength ?? 0
+        let grabRose = overlay.grabbed && !prevGrabbed
+        prevGrabbed = overlay.grabbed
 
         for window in windows {
             var model = OverlayRenderModel()
@@ -84,15 +77,11 @@ final class OverlayController {
                 return CGPoint(x: global.x - bounds.minX, y: global.y - bounds.minY)
             }
 
-            // Fingertip dots: just the pinch pair (thumb + index) by default —
-            // five dots per hand made it unclear which mark was the cursor.
+            // Small dots for every detected fingertip.
             if config.showFingertipDots {
                 for hand in overlay.hands {
-                    let handAlpha: CGFloat = hand.isPrimary ? 0.85 : 0.4
+                    let handAlpha: CGFloat = hand.isPrimary ? 0.8 : 0.4
                     for (joint, point) in hand.fingertips {
-                        if !config.showAllFingertips, joint != .thumbTip, joint != .indexTip {
-                            continue
-                        }
                         guard let local = localize(point) else { continue }
                         let (radius, color) = Self.dotStyle(for: joint)
                         model.dots.append(.init(
@@ -104,58 +93,33 @@ final class OverlayController {
                 }
             }
 
-            // THE cursor: a filled dot inside a ring. The ring doubles as the
-            // pinch iris — it contracts and saturates as your pinch closes, and
-            // fills solid while a button is held. One reticle, no ambiguity.
+            // The claw IS the cursor: open paw while pointing, closed paw
+            // while the hand is closed (button down). The ring around it
+            // tightens as the hand closes and fills while grabbed.
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
-                let engaged = overlay.leftEngaged || overlay.rightEngaged
-                let strength = max(leftStrength, rightStrength)
-                let tint: NSColor = overlay.leftEngaged ? PawvisTheme.purple
-                    : overlay.rightEngaged ? PawvisTheme.blue
-                    : (rightStrength > leftStrength ? PawvisTheme.blue : PawvisTheme.purple)
+                model.clawCursor = .init(center: local, closed: overlay.grabbed)
 
-                // The claw IS the cursor (white at rest, colored while a
-                // button is held); a dot fallback lives in the view.
-                model.clawCursor = .init(
-                    center: local,
-                    tint: overlay.leftEngaged ? .left : (overlay.rightEngaged ? .right : .neutral))
-
-                let ringRadius: CGFloat
-                if engaged {
-                    ringRadius = overlay.isDragging ? 24 : 18
-                } else if config.showPinchRing {
-                    ringRadius = 26 - 15 * strength
-                } else {
-                    ringRadius = 15
-                }
-                let ringColor = engaged ? tint
-                    : (NSColor.white.blended(withFraction: strength, of: tint) ?? tint)
-                model.rings.append(.init(
-                    center: local,
-                    radius: ringRadius,
-                    lineWidth: engaged ? 3.5 : 2.5,
-                    strokeColor: ringColor,
-                    fillColor: engaged ? tint.withAlphaComponent(0.4) : nil,
-                    alpha: engaged ? 1 : 0.55 + 0.45 * strength))
-
-                switch overlay.mode {
-                case .scrolling:
-                    model.glyphs.append(.init(center: local.offset(dx: 0, dy: -34), text: "⇅", size: 20))
-                case .clutch:
-                    model.glyphs.append(.init(center: local.offset(dx: 0, dy: -34), text: "✊", size: 18))
-                default:
-                    break
+                if config.showPinchRing {
+                    let progress = overlay.closingProgress
+                    let ringRadius: CGFloat = overlay.grabbed
+                        ? (overlay.isDragging ? 26 : 20)
+                        : 30 - 12 * progress
+                    let ringColor = overlay.grabbed
+                        ? PawvisTheme.purple
+                        : (NSColor.white.blended(withFraction: progress, of: PawvisTheme.purple)
+                            ?? PawvisTheme.purple)
+                    model.rings.append(.init(
+                        center: local,
+                        radius: ringRadius,
+                        lineWidth: overlay.grabbed ? 3.5 : 2.5,
+                        strokeColor: ringColor,
+                        fillColor: overlay.grabbed
+                            ? PawvisTheme.purple.withAlphaComponent(0.35) : nil,
+                        alpha: overlay.grabbed ? 1 : 0.5 + 0.5 * progress))
                 }
 
-                if let progress = overlay.dictationHoldProgress {
-                    model.arcs.append(.init(center: local, radius: 30, progress: progress))
-                }
-
-                if leftRose {
+                if grabRose {
                     window.contentOverlayView.flash(at: local, color: PawvisTheme.purple)
-                }
-                if rightRose {
-                    window.contentOverlayView.flash(at: local, color: PawvisTheme.blue)
                 }
             }
 
@@ -171,9 +135,9 @@ final class OverlayController {
 
     private static func dotStyle(for joint: HandJoint) -> (CGFloat, NSColor) {
         switch joint {
-        case .indexTip: return (5.5, PawvisTheme.purpleLight)
-        case .thumbTip: return (5.5, PawvisTheme.blueLight)
-        default: return (3.5, NSColor.white.withAlphaComponent(0.55))
+        case .indexTip: return (4, PawvisTheme.purpleLight)
+        case .thumbTip: return (4, PawvisTheme.blueLight)
+        default: return (3.5, NSColor.white.withAlphaComponent(0.6))
         }
     }
 
@@ -233,44 +197,20 @@ struct OverlayRenderModel {
         var alpha: CGFloat
     }
 
-    struct Arc {
-        var center: CGPoint
-        var radius: CGFloat
-        var progress: Double
-    }
-
-    struct Glyph {
-        var center: CGPoint
-        var text: String
-        var size: CGFloat
-    }
-
     struct Pill: Equatable {
         var text: String
         var background: NSColor
     }
 
-    enum ClawTint: String {
-        case neutral, left, right
-
-        var color: NSColor {
-            switch self {
-            case .neutral: return .white
-            case .left: return PawvisTheme.purple
-            case .right: return PawvisTheme.blue
-            }
-        }
-    }
-
     struct ClawCursor {
         var center: CGPoint
-        var tint: ClawTint
+        /// Closed = hand is gripping (button down): the retracted-claw glyph,
+        /// tinted purple. Open = pointing: full claw, white.
+        var closed: Bool
     }
 
     var dots: [Dot] = []
     var rings: [Ring] = []
-    var arcs: [Arc] = []
-    var glyphs: [Glyph] = []
     var clawCursor: ClawCursor?
     var pill: Pill?
 }
@@ -315,8 +255,6 @@ final class OverlayContentView: NSView {
 
     private var dotLayers: [CAShapeLayer] = []
     private var ringLayers: [CAShapeLayer] = []
-    private var arcLayers: [CAShapeLayer] = []
-    private var glyphLayers: [CATextLayer] = []
     private let pillBackground = CALayer()
     private let pillText = CATextLayer()
 
@@ -329,16 +267,20 @@ final class OverlayContentView: NSView {
 
     private static let clawSize = CGSize(width: 24, height: 24)
 
-    private static let clawGlyph: CGImage? = {
-        guard let url = Bundle.main.url(forResource: "menubar-claw", withExtension: "png"),
+    private static func loadGlyph(_ name: String) -> CGImage? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "png"),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
         return image
-    }()
+    }
 
-    private func tintedClaw(_ key: String, color: NSColor) -> CGImage? {
+    /// Open paw = pointing; closed paw (claws retracted) = button down.
+    private static let clawOpenGlyph: CGImage? = loadGlyph("menubar-claw")
+    private static let clawClosedGlyph: CGImage? = loadGlyph("claw-closed") ?? loadGlyph("menubar-claw")
+
+    private func tintedClaw(_ key: String, glyph: CGImage?, color: NSColor) -> CGImage? {
         if let cached = clawTintCache[key] { return cached }
-        guard let glyph = Self.clawGlyph,
+        guard let glyph,
               let ctx = CGContext(
                 data: nil, width: glyph.width, height: glyph.height,
                 bitsPerComponent: 8, bytesPerRow: glyph.width * 4,
@@ -413,8 +355,6 @@ final class OverlayContentView: NSView {
 
         renderDots(model.dots)
         renderRings(model.rings)
-        renderArcs(model.arcs)
-        renderGlyphs(model.glyphs)
         renderClawCursor(model.clawCursor)
         renderPill(model.pill)
     }
@@ -438,14 +378,20 @@ final class OverlayContentView: NSView {
             return
         }
 
-        if Self.clawGlyph != nil {
+        let glyph = claw.closed ? Self.clawClosedGlyph : Self.clawOpenGlyph
+        if glyph != nil {
+            let stateKey = claw.closed ? "closed" : "open"
+            let fillColor: NSColor = claw.closed ? PawvisTheme.purple : .white
             clawShadowLayer.isHidden = false
             clawFillLayer.isHidden = false
             clawFallbackDot.isHidden = true
-            clawShadowLayer.contents = tintedClaw("shadow", color: .black)
-            clawFillLayer.contents = tintedClaw(claw.tint.rawValue, color: claw.tint.color)
+            clawShadowLayer.contents = tintedClaw("\(stateKey)-shadow", glyph: glyph, color: .black)
+            clawFillLayer.contents = tintedClaw("\(stateKey)-fill", glyph: glyph, color: fillColor)
+            // The closed paw reads slightly smaller — like a squeeze.
+            let scale: CGFloat = claw.closed ? 0.85 : 1.0
             clawShadowLayer.position = CGPoint(x: claw.center.x + 1, y: claw.center.y + 1.5)
-            clawShadowLayer.transform = CATransform3DMakeScale(1.08, 1.08, 1)
+            clawShadowLayer.transform = CATransform3DMakeScale(1.08 * scale, 1.08 * scale, 1)
+            clawFillLayer.transform = CATransform3DMakeScale(scale, scale, 1)
             clawFillLayer.position = claw.center
         } else {
             // No glyph asset (bare binary): a filled dot marks the cursor.
@@ -455,7 +401,7 @@ final class OverlayContentView: NSView {
             clawFallbackDot.path = CGPath(
                 ellipseIn: CGRect(x: claw.center.x - 4.5, y: claw.center.y - 4.5, width: 9, height: 9),
                 transform: nil)
-            clawFallbackDot.fillColor = claw.tint.color.cgColor
+            clawFallbackDot.fillColor = (claw.closed ? PawvisTheme.purple : .white).cgColor
         }
     }
 
@@ -499,42 +445,6 @@ final class OverlayContentView: NSView {
             l.fillColor = ring.fillColor?.cgColor ?? NSColor.clear.cgColor
             l.lineWidth = ring.lineWidth
             l.opacity = Float(ring.alpha)
-        }
-    }
-
-    private func renderArcs(_ arcs: [OverlayRenderModel.Arc]) {
-        pooled(&arcLayers, count: arcs.count) { CAShapeLayer() }
-        for (i, arc) in arcs.enumerated() {
-            let l = arcLayers[i]
-            let path = CGMutablePath()
-            path.addArc(
-                center: arc.center, radius: arc.radius,
-                startAngle: -.pi / 2, endAngle: -.pi / 2 + 2 * .pi * arc.progress,
-                clockwise: false)
-            l.path = path
-            l.strokeColor = PawvisTheme.purple.cgColor
-            l.fillColor = NSColor.clear.cgColor
-            l.lineWidth = 4
-            l.lineCap = .round
-            l.opacity = 0.95
-        }
-    }
-
-    private func renderGlyphs(_ glyphs: [OverlayRenderModel.Glyph]) {
-        pooled(&glyphLayers, count: glyphs.count) {
-            let t = CATextLayer()
-            t.alignmentMode = .center
-            t.contentsScale = 2
-            return t
-        }
-        for (i, glyph) in glyphs.enumerated() {
-            let l = glyphLayers[i]
-            l.string = glyph.text
-            l.fontSize = glyph.size
-            l.foregroundColor = NSColor.white.cgColor
-            l.frame = CGRect(
-                x: glyph.center.x - 20, y: glyph.center.y - glyph.size / 2,
-                width: 40, height: glyph.size + 8)
         }
     }
 
