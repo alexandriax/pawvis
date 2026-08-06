@@ -51,12 +51,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Pawvis launched")
+
+        // Single-instance guard: repeatedly launching the binary (or open -n)
+        // used to stack instances — two overlays, doubled synthetic events,
+        // general chaos. If another Pawvis is already running, bow out.
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+            if !others.isEmpty {
+                Log.app.warning("Another Pawvis instance is running (pid \(others[0].processIdentifier)) — exiting this one")
+                NSApp.terminate(nil)
+                return
+            }
+        }
+
+        // A previous instance that crashed or was force-killed mid-pinch can
+        // leave a synthetic mouse button logically down system-wide. Clear it.
+        MouseController.postDefensiveButtonRelease()
+
         // PAWVIS_NO_AUTOSTART lets automated smoke tests boot the app without
         // triggering the camera permission flow.
         if controller.settingsStore.settings.general.startTrackingOnLaunch,
            ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] == nil {
             controller.startTracking()
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Release camera/mic/buttons before the process starts tearing down —
+        // applicationWillTerminate alone can run too late for AVFoundation to
+        // wind down cleanly, which left ghost state across relaunch cycles.
+        controller.shutdown()
+        return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {

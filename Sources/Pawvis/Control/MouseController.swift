@@ -47,6 +47,19 @@ final class MouseController {
         }
     }
 
+    /// Clears any synthetic button a previous (crashed/killed) instance left
+    /// logically down. Posted at the current cursor position on launch; a
+    /// spurious button-up is harmless when nothing is pressed.
+    static func postDefensiveButtonRelease() {
+        let position = CGEvent(source: nil)?.location ?? .zero
+        for (type, button) in [(CGEventType.leftMouseUp, CGMouseButton.left),
+                               (CGEventType.rightMouseUp, CGMouseButton.right)] {
+            CGEvent(mouseEventSource: nil, mouseType: type,
+                    mouseCursorPosition: position, mouseButton: button)?
+                .post(tap: .cghidEventTap)
+        }
+    }
+
     /// Emergency release — called when tracking stops or the app quits, so a
     /// pinch in progress can never leave the system with a stuck button.
     func releaseAllButtons() {
