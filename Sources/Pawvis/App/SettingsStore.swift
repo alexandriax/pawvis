@@ -13,9 +13,14 @@ final class SettingsStore: ObservableObject {
     }
 
     /// Whether an API key is available from any source (keychain/env/.env).
-    @Published private(set) var apiKeyAvailable: Bool
+    /// Meaningful only after `ensureKeyStatusLoaded()` has run.
+    @Published private(set) var apiKeyAvailable = false
     /// Whether the key came from the keychain (i.e., user-entered in the UI).
-    @Published private(set) var apiKeyInKeychain: Bool
+    @Published private(set) var apiKeyInKeychain = false
+    /// Keychain access can show a system permission prompt, so the key status
+    /// is loaded lazily — only when the OpenAI engine is actually in play —
+    /// and at most once per launch.
+    @Published private(set) var keyStatusLoaded = false
 
     private let keychain = KeychainStore()
 
@@ -26,9 +31,18 @@ final class SettingsStore: ObservableObject {
         } else {
             settings = .default
         }
-        apiKeyInKeychain = keychain.read() != nil
-        apiKeyAvailable = APIKeyResolver.resolve() != nil
+        // Deliberately NO keychain access here: launching the app must never
+        // prompt. Status loads when the OpenAI dictation engine needs it.
         migrate()
+    }
+
+    /// One keychain read per launch, on demand.
+    func ensureKeyStatusLoaded() {
+        guard !keyStatusLoaded else { return }
+        keyStatusLoaded = true
+        let keychainKey = keychain.read()
+        apiKeyInKeychain = keychainKey != nil
+        apiKeyAvailable = keychainKey != nil || APIKeyResolver.resolveNonKeychain() != nil
     }
 
     /// One-time migrations for settings persisted by older builds.
@@ -69,16 +83,15 @@ final class SettingsStore: ObservableObject {
 
     func saveAPIKey(_ key: String) {
         keychain.write(key)
-        refreshKeyStatus()
+        keyStatusLoaded = true
+        apiKeyInKeychain = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        apiKeyAvailable = apiKeyInKeychain || APIKeyResolver.resolveNonKeychain() != nil
     }
 
     func clearAPIKey() {
         keychain.delete()
-        refreshKeyStatus()
-    }
-
-    private func refreshKeyStatus() {
-        apiKeyInKeychain = keychain.read() != nil
-        apiKeyAvailable = APIKeyResolver.resolve() != nil
+        keyStatusLoaded = true
+        apiKeyInKeychain = false
+        apiKeyAvailable = APIKeyResolver.resolveNonKeychain() != nil
     }
 }

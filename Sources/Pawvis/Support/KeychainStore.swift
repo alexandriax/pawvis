@@ -63,9 +63,16 @@ struct KeychainStore {
 /// then a `.env` file in the working directory or the repo the app was built
 /// from. The key is never bundled with the app.
 enum APIKeyResolver {
+    /// Full resolution: keychain first, then dev fallbacks. Touching the
+    /// keychain can show a system permission prompt, so call this only when
+    /// the OpenAI engine actually needs a key — never speculatively.
     static func resolve(keychain: KeychainStore = KeychainStore()) -> String? {
         if let key = keychain.read() { return key }
+        return resolveNonKeychain()
+    }
 
+    /// The prompt-free part of the chain: environment, then .env files.
+    static func resolveNonKeychain() -> String? {
         if let env = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
            !env.isEmpty {
             return env

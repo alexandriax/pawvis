@@ -228,11 +228,13 @@ private struct DictationSettingsTab: View {
                 Text("Headset / near-field").tag("near_field")
                 Text("No noise reduction").tag("")
             }
+            .onAppear { store.ensureKeyStatusLoaded() }
 
             Divider()
     }
 
     private var keyStatusText: String {
+        guard store.keyStatusLoaded else { return "" }
         if store.apiKeyInKeychain { return "Key in keychain" }
         if store.apiKeyAvailable { return "Using development key (.env)" }
         return "No key set"

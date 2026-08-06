@@ -109,7 +109,10 @@ struct MenuContentView: View {
                     Permissions.openAccessibilitySettings()
                 }))
         }
-        if !controller.settingsStore.apiKeyAvailable,
+        // Only meaningful once the (lazy, prompt-causing) keychain status has
+        // been loaded — opening the menu must never trigger a keychain prompt.
+        if controller.settingsStore.keyStatusLoaded,
+           !controller.settingsStore.apiKeyAvailable,
            controller.settingsStore.settings.dictation.enabled,
            controller.settingsStore.settings.dictation.engine == "openai" {
             result.append(Warning(
