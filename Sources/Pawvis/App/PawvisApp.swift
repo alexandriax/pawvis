@@ -12,7 +12,7 @@ struct PawvisApp: App {
                 controller: appDelegate.controller,
                 dictation: appDelegate.controller.dictation)
         } label: {
-            Image(systemName: menuBarSymbol)
+            MenuBarIcon(dictationActive: appDelegate.controller.dictation.state.isActive)
         }
         .menuBarExtraStyle(.window)
 
@@ -27,9 +27,36 @@ struct PawvisApp: App {
         .defaultPosition(.center)
     }
 
-    private var menuBarSymbol: String {
-        appDelegate.controller.dictation.state.isActive
-            ? "pawprint.circle.fill" : "pawprint.fill"
+}
+
+/// The status item: the sloth-claw template glyph (adapts to menu bar
+/// light/dark), with a small dot while dictation is live. Falls back to an
+/// SF Symbol if the glyph asset is missing (e.g. running the bare binary).
+private struct MenuBarIcon: View {
+    let dictationActive: Bool
+
+    private static let clawImage: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "menubar-claw", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        image.size = NSSize(width: 18, height: 18)
+        return image
+    }()
+
+    var body: some View {
+        if let claw = Self.clawImage {
+            ZStack(alignment: .topTrailing) {
+                Image(nsImage: claw)
+                if dictationActive {
+                    Circle()
+                        .fill(PawvisTheme.purpleUI)
+                        .frame(width: 5, height: 5)
+                        .offset(x: 2, y: -1)
+                }
+            }
+        } else {
+            Image(systemName: dictationActive ? "pawprint.circle.fill" : "pawprint.fill")
+        }
     }
 }
 
