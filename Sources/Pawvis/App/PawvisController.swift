@@ -36,10 +36,14 @@ final class PawvisController: ObservableObject {
         camera.onFrame = { [weak self] sampleBuffer in
             guard let self else { return }
             // Camera queue: run Vision synchronously, then hop to main.
+            // DispatchQueue.main (not Task) — the main queue is FIFO, so
+            // down/drag/up frame batches can never arrive reordered.
             let hands = self.tracking.detectHands(in: sampleBuffer)
             let time = CACurrentMediaTime()
-            Task { @MainActor in
-                self.processFrame(hands: hands, at: time)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.processFrame(hands: hands, at: time)
+                }
             }
         }
 

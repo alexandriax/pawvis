@@ -1,14 +1,26 @@
 import CoreGraphics
 import Foundation
 import PawvisCore
+import QuartzCore
 
 /// Posts synthetic mouse events for gesture-engine output. Requires the
 /// Accessibility permission; events go to the HID tap so every app sees them.
+///
+/// Delivery pacing is load-bearing: two mouse CGEvents posted back-to-back
+/// are intermittently dropped by the system (measured: 20% of mouseUps lost
+/// at 0 ms spacing, 0% at ≥4 ms — and a lost mouseUp wedges the target app,
+/// which then ignores every later click). All posts therefore run on a serial
+/// queue that enforces a minimum inter-event gap.
 final class MouseController {
     private(set) var projector: ScreenProjector
     private var leftDown = false
     private var rightDown = false
     private var lastPoint: CGPoint = .zero
+
+    private let source = CGEventSource(stateID: .hidSystemState)
+    private static let minPostInterval: TimeInterval = 0.006
+    private let postQueue = DispatchQueue(label: "com.pawvis.mouse.post", qos: .userInteractive)
+    private var lastPostTime: TimeInterval = 0 // touched only on postQueue
 
     init(projector: ScreenProjector) {
         self.projector = projector
@@ -19,7 +31,7 @@ final class MouseController {
     }
 
     func apply(_ events: [GestureEvent]) {
-        for event in events {
+        for (index, event) in events.enumerated() {
             switch event {
             case .move(let to):
                 post(type: .mouseMoved, at: projector.toGlobal(to), button: .left)
@@ -30,6 +42,13 @@ final class MouseController {
                      button: button == .left ? .left : .right,
                      clickCount: clickCount)
             case .drag(let button, let to):
+                // A drag immediately followed by the same button's up is
+                // redundant (the up carries the final position) — and it's
+                // exactly the tight pair that loses the mouseUp. Skip it.
+                if case .buttonUp(let upButton, _, _)? = events[safe: index + 1],
+                   upButton == button {
+                    continue
+                }
                 post(type: button == .left ? .leftMouseDragged : .rightMouseDragged,
                      at: projector.toGlobal(to),
                      button: button == .left ? .left : .right)
@@ -52,24 +71,36 @@ final class MouseController {
     /// spurious button-up is harmless when nothing is pressed.
     static func postDefensiveButtonRelease() {
         let position = CGEvent(source: nil)?.location ?? .zero
+        let source = CGEventSource(stateID: .hidSystemState)
         for (type, button) in [(CGEventType.leftMouseUp, CGMouseButton.left),
                                (CGEventType.rightMouseUp, CGMouseButton.right)] {
-            CGEvent(mouseEventSource: nil, mouseType: type,
-                    mouseCursorPosition: position, mouseButton: button)?
-                .post(tap: .cghidEventTap)
+            let event = CGEvent(mouseEventSource: source, mouseType: type,
+                                mouseCursorPosition: position, mouseButton: button)
+            event?.setIntegerValueField(.mouseEventClickState, value: 1)
+            event?.post(tap: .cghidEventTap)
+            usleep(8000) // pace the pair like everything else
         }
     }
 
     /// Emergency release — called when tracking stops or the app quits, so a
     /// pinch in progress can never leave the system with a stuck button.
+    /// Synchronous: flushes the posting queue before returning, so it is safe
+    /// to call on the way out of the process.
     func releaseAllButtons() {
-        if leftDown {
-            post(type: .leftMouseUp, at: lastPoint, button: .left)
-            leftDown = false
+        var events: [CGEvent] = []
+        if leftDown, let e = makeEvent(type: .leftMouseUp, at: lastPoint, button: .left, clickCount: 1) {
+            events.append(e)
         }
-        if rightDown {
-            post(type: .rightMouseUp, at: lastPoint, button: .right)
-            rightDown = false
+        if rightDown, let e = makeEvent(type: .rightMouseUp, at: lastPoint, button: .right, clickCount: 1) {
+            events.append(e)
+        }
+        leftDown = false
+        rightDown = false
+        guard !events.isEmpty else { return }
+        postQueue.sync {
+            for event in events {
+                self.paceAndPost(event)
+            }
         }
     }
 
@@ -80,21 +111,40 @@ final class MouseController {
         }
     }
 
+    private func makeEvent(
+        type: CGEventType,
+        at point: CGPoint,
+        button: CGMouseButton,
+        clickCount: Int
+    ) -> CGEvent? {
+        let clamped = clamp(point)
+        lastPoint = clamped
+        guard let event = CGEvent(
+            mouseEventSource: source, mouseType: type,
+            mouseCursorPosition: clamped, mouseButton: button) else { return nil }
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp:
+            // Downs/ups always carry a valid clickState (a clickState-0 up is
+            // malformed). Drags already default to clickState 1 / pressure 1.
+            event.setIntegerValueField(.mouseEventClickState, value: Int64(max(clickCount, 1)))
+        default:
+            break
+        }
+        return event
+    }
+
     private func post(
         type: CGEventType,
         at point: CGPoint,
         button: CGMouseButton,
         clickCount: Int = 0
     ) {
-        let clamped = clamp(point)
-        lastPoint = clamped
-        guard let event = CGEvent(
-            mouseEventSource: nil, mouseType: type,
-            mouseCursorPosition: clamped, mouseButton: button) else { return }
-        if clickCount > 0 {
-            event.setIntegerValueField(.mouseEventClickState, value: Int64(clickCount))
+        guard let event = makeEvent(type: type, at: point, button: button, clickCount: clickCount) else {
+            return
         }
-        event.post(tap: .cghidEventTap)
+        postQueue.async {
+            self.paceAndPost(event)
+        }
     }
 
     private func postScroll(dx: Double, dy: Double) {
@@ -102,13 +152,26 @@ final class MouseController {
         // content should move up (toward the document's end), which is a
         // negative pixel-wheel value in CG's convention.
         guard let event = CGEvent(
-            scrollWheelEvent2Source: nil,
+            scrollWheelEvent2Source: source,
             units: .pixel,
             wheelCount: 2,
             wheel1: Int32(-dy.rounded()),
             wheel2: Int32(-dx.rounded()),
             wheel3: 0) else { return }
+        postQueue.async {
+            self.paceAndPost(event)
+        }
+    }
+
+    /// Runs on `postQueue` only: enforce the minimum gap, then post.
+    private func paceAndPost(_ event: CGEvent) {
+        let now = CACurrentMediaTime()
+        let wait = Self.minPostInterval - (now - lastPostTime)
+        if wait > 0 {
+            usleep(UInt32(wait * 1_000_000))
+        }
         event.post(tap: .cghidEventTap)
+        lastPostTime = CACurrentMediaTime()
     }
 
     private func clamp(_ p: CGPoint) -> CGPoint {
@@ -116,5 +179,11 @@ final class MouseController {
         return CGPoint(
             x: min(max(p.x, r.minX), r.maxX - 1),
             y: min(max(p.y, r.minY), r.maxY - 1))
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

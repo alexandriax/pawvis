@@ -83,8 +83,11 @@ Pawvis needs, and will prompt for:
   won't land until granted.
 - **Microphone** — only when you first arm dictation.
 
-> Note: the bundle is ad-hoc signed, so after rebuilding you may need to
-> re-grant Accessibility (remove and re-add Pawvis in System Settings).
+> **Important (ad-hoc signing):** every rebuild changes the app's code
+> signature, and macOS then ignores the old Accessibility grant **while still
+> showing it as enabled** in System Settings. The symptom is "the cursor
+> halo moves but nothing clicks, in every app." Fix: remove Pawvis from
+> Privacy & Security → Accessibility and re-add it after each `make app`.
 
 ### OpenAI API key (only for the OpenAI engine)
 

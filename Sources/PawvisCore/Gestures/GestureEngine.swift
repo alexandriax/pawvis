@@ -500,8 +500,9 @@ public final class GestureEngine {
         var clickCount = 1
         if button == .left, lastUpButton == .left,
            time - lastUpTime <= config.doubleClickInterval,
-           pos.distance(to: lastUpPos) <= config.doubleClickSlop {
-            clickCount = min(lastUpClickCount + 1, 3)
+           pos.distance(to: lastUpPos) <= config.doubleClickSlop,
+           lastUpClickCount < 3 { // after a triple, the chain restarts at 1
+            clickCount = lastUpClickCount + 1
         }
         press = PressState(button: button, downAt: pos, downTime: time, clickCount: clickCount)
         events.append(.buttonDown(button, at: pos, clickCount: clickCount))

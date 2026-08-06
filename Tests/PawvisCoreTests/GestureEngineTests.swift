@@ -135,10 +135,16 @@ final class GestureEngineTests: XCTestCase {
             + feedFrames([SyntheticHand.openRelaxed()], from: 0.5667, count: 2)
         XCTAssertEqual(downs(c3, .left).map(\.1), [3])
 
-        // A slow follow-up resets to a single click.
-        let c4 = feedFrames([SyntheticHand.pinchIndex(gap: 0.1)], from: 2.0, count: 2)
-            + feedFrames([SyntheticHand.openRelaxed()], from: 2.0667, count: 2)
+        // A fourth quick click restarts the chain at 1 — it must not stay
+        // pinned at triple-click forever.
+        let c4 = feedFrames([SyntheticHand.pinchIndex(gap: 0.1)], from: 0.70, count: 2)
+            + feedFrames([SyntheticHand.openRelaxed()], from: 0.7667, count: 2)
         XCTAssertEqual(downs(c4, .left).map(\.1), [1])
+
+        // A slow follow-up also resets to a single click.
+        let c5 = feedFrames([SyntheticHand.pinchIndex(gap: 0.1)], from: 2.5, count: 2)
+            + feedFrames([SyntheticHand.openRelaxed()], from: 2.5667, count: 2)
+        XCTAssertEqual(downs(c5, .left).map(\.1), [1])
     }
 
     func testSecondClickFarAwayIsSingle() {
