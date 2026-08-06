@@ -22,6 +22,7 @@ struct GestureGuideView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minWidth: 520, minHeight: 560)
+        .tint(PawvisTheme.purpleUI)
     }
 
     private struct Row {

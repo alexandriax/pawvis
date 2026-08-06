@@ -89,19 +89,19 @@ final class OverlayController {
                     model.rings.append(Self.iris(
                         at: local, strength: primary.leftPinchStrength,
                         engaged: overlay.leftEngaged, dragging: overlay.isDragging,
-                        tint: .systemGreen))
+                        tint: PawvisTheme.purple))
                 }
                 if primary.rightPinchStrength > 0.15, let p = primary.rightPinchPoint, let local = localize(p) {
                     model.rings.append(Self.iris(
                         at: local, strength: primary.rightPinchStrength,
                         engaged: overlay.rightEngaged, dragging: overlay.isDragging,
-                        tint: .systemBlue))
+                        tint: PawvisTheme.blue))
                 }
             }
 
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
-                let tint: NSColor = overlay.leftEngaged ? .systemGreen
-                    : overlay.rightEngaged ? .systemBlue : .white
+                let tint: NSColor = overlay.leftEngaged ? PawvisTheme.purple
+                    : overlay.rightEngaged ? PawvisTheme.blue : .white
                 model.rings.append(.init(
                     center: local,
                     radius: overlay.isDragging ? 18 : 13,
@@ -137,8 +137,8 @@ final class OverlayController {
 
     private static func dotStyle(for joint: HandJoint) -> (CGFloat, NSColor) {
         switch joint {
-        case .indexTip: return (7, .systemMint)
-        case .thumbTip: return (7, .systemOrange)
+        case .indexTip: return (7, PawvisTheme.purpleLight)
+        case .thumbTip: return (7, PawvisTheme.blueLight)
         default: return (4.5, NSColor.white.withAlphaComponent(0.6))
         }
     }
@@ -166,11 +166,11 @@ final class OverlayController {
             return .init(text: "🎤 Connecting…", background: NSColor.systemGray.withAlphaComponent(0.85))
         case .listening:
             return .init(text: "🎤 Say a wake word (“type…”) to dictate",
-                         background: NSColor.systemOrange.withAlphaComponent(0.85))
+                         background: PawvisTheme.blue.withAlphaComponent(0.88))
         case .dictating(let snippet):
             let text = snippet.isEmpty ? "⌨️ Dictating — say “stop typing” to end"
                 : "⌨️ \(snippet)"
-            return .init(text: text, background: NSColor.systemRed.withAlphaComponent(0.85))
+            return .init(text: text, background: PawvisTheme.purple.withAlphaComponent(0.9))
         case .error(let message):
             return .init(text: "⚠️ \(message)", background: NSColor.systemRed.withAlphaComponent(0.9))
         }
@@ -358,7 +358,7 @@ final class OverlayContentView: NSView {
                 startAngle: -.pi / 2, endAngle: -.pi / 2 + 2 * .pi * arc.progress,
                 clockwise: false)
             l.path = path
-            l.strokeColor = NSColor.systemOrange.cgColor
+            l.strokeColor = PawvisTheme.purple.cgColor
             l.fillColor = NSColor.clear.cgColor
             l.lineWidth = 4
             l.lineCap = .round
