@@ -1,13 +1,17 @@
 import Foundation
 
 /// Encoding/decoding for the OpenAI Realtime API used in transcription-only
-/// mode (GA interface, August 2026: connect to wss://api.openai.com/v1/realtime
-/// with just an Authorization header — the beta `OpenAI-Beta: realtime=v1`
-/// header and `?intent=transcription` query param are gone — then immediately
-/// send `session.update` with `session.type: "transcription"`).
+/// mode. Live-verified against the GA API (August 2026):
+/// - the `?intent=transcription` query param is REQUIRED (without it the
+///   server errors `missing_model` and closes with code 4000)
+/// - the beta `OpenAI-Beta: realtime=v1` header must NOT be sent (fatal:
+///   `beta_api_shape_disabled`)
+/// - auth is `Authorization: Bearer sk-...` with the full key
+/// - send `session.update` (session.type "transcription") after
+///   `session.created` arrives.
 public enum RealtimeProtocol {
 
-    public static let websocketURL = URL(string: "wss://api.openai.com/v1/realtime")!
+    public static let websocketURL = URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!
 
     // MARK: - Session configuration (client → server)
 
@@ -40,6 +44,14 @@ public enum RealtimeProtocol {
         var usesLanguagesArray: Bool {
             model.hasPrefix("gpt-live-transcribe") || model.hasPrefix("gpt-transcribe")
         }
+
+        /// Live-verified: gpt-live-transcribe and gpt-realtime-whisper REJECT
+        /// `turn_detection` (session.update fails). Without server VAD the
+        /// client must delimit utterances with input_audio_buffer.commit.
+        /// (Distinct from `usesLanguagesArray`: gpt-transcribe accepts VAD.)
+        public var supportsServerVAD: Bool {
+            !(model.hasPrefix("gpt-live-transcribe") || model.hasPrefix("gpt-realtime-whisper"))
+        }
     }
 
     /// Full `session.update` client event JSON.
@@ -59,13 +71,15 @@ public enum RealtimeProtocol {
         var input: [String: Any] = [
             "format": ["type": "audio/pcm", "rate": 24000],
             "transcription": transcription,
-            "turn_detection": [
+        ]
+        if config.supportsServerVAD {
+            input["turn_detection"] = [
                 "type": "server_vad",
                 "threshold": 0.5,
                 "prefix_padding_ms": 300,
                 "silence_duration_ms": config.vadSilenceMs,
-            ],
-        ]
+            ]
+        }
         if !config.noiseReduction.isEmpty {
             input["noise_reduction"] = ["type": config.noiseReduction]
         }
@@ -84,6 +98,14 @@ public enum RealtimeProtocol {
     public static func audioAppendEvent(base64Audio: String) throws -> Data {
         try JSONSerialization.data(
             withJSONObject: ["type": "input_audio_buffer.append", "audio": base64Audio],
+            options: [.sortedKeys])
+    }
+
+    /// `input_audio_buffer.commit` — finalizes the current utterance. Required
+    /// to get `.completed` events from models without server VAD.
+    public static func commitEvent() throws -> Data {
+        try JSONSerialization.data(
+            withJSONObject: ["type": "input_audio_buffer.commit"],
             options: [.sortedKeys])
     }
 

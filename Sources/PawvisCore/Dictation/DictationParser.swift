@@ -22,8 +22,11 @@ public struct DictationConfig: Codable, Equatable, Sendable {
     /// Transcription engine: "apple" (on-device, default) or "openai" (cloud,
     /// needs an API key).
     public var engine: String = "apple"
-    /// OpenAI model (used only when engine == "openai").
-    public var model: String = "gpt-live-transcribe"
+    /// OpenAI model (used only when engine == "openai"). gpt-4o-transcribe is
+    /// the default because it supports server VAD (live-verified full
+    /// utterance lifecycle); gpt-live-transcribe streams lower-latency deltas
+    /// but needs client-side commit segmentation.
+    public var model: String = "gpt-4o-transcribe"
     /// ISO-639-1; empty = auto-detect.
     public var language: String = ""
     /// Saying one of these (as the first word of an utterance) starts typing.

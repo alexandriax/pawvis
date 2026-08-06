@@ -17,6 +17,12 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
     private var session: URLSession?
     private var pingTimer: Timer?
     private var intentionalClose = false
+    private var closeEmitted = false
+    /// The most informative failure reason seen (server `error` event payload
+    /// or close-frame reason). A bare POSIX receive error ("Socket is not
+    /// connected") arrives *before* the close frame, so failures are emitted
+    /// after a short deferral with whatever richer reason has landed by then.
+    private var bestFailureReason: String?
     private let apiKey: String
     private let config: RealtimeProtocol.TranscriptionSessionConfig
 
@@ -27,6 +33,8 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
 
     func connect() {
         intentionalClose = false
+        closeEmitted = false
+        bestFailureReason = nil
         var request = URLRequest(url: RealtimeProtocol.websocketURL)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
@@ -37,16 +45,8 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
         self.task = task
         task.resume()
         receiveLoop()
-
-        // Configure the transcription session immediately after connecting.
-        do {
-            let update = try RealtimeProtocol.sessionUpdateEvent(config: config)
-            send(text: String(decoding: update, as: UTF8.self))
-        } catch {
-            emit(.closed(reason: "failed to encode session config"))
-        }
-
         startPings()
+        // session.update is sent once session.created arrives (see receiveLoop).
     }
 
     func disconnect() {
@@ -72,6 +72,13 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
+    /// Finalize the current utterance. Needed for models without server VAD
+    /// (they never emit `.completed` on their own).
+    func commitUtterance() {
+        guard let event = try? RealtimeProtocol.commitEvent() else { return }
+        send(text: String(decoding: event, as: UTF8.self))
+    }
+
     private func send(text: String) {
         task?.send(.string(text)) { [weak self] error in
             if let error {
@@ -86,7 +93,7 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
             guard let self else { return }
             switch result {
             case .failure(let error):
-                self.handleFailure(reason: error.localizedDescription)
+                self.handleFailure(reason: error.localizedDescription, isTransportNoise: true)
             case .success(let message):
                 let data: Data
                 switch message {
@@ -95,8 +102,20 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
                 @unknown default: data = Data()
                 }
                 if let event = RealtimeProtocol.ServerEvent.decode(data) {
-                    if case .sessionUpdated = event {
+                    switch event {
+                    case .sessionCreated:
+                        // Now that the session exists, configure it.
+                        if let update = try? RealtimeProtocol.sessionUpdateEvent(config: self.config) {
+                            self.send(text: String(decoding: update, as: UTF8.self))
+                        }
+                    case .sessionUpdated:
                         self.emit(.ready)
+                    case .error(let code, let message):
+                        // Remember it: if the server closes on us next, this —
+                        // not the POSIX receive error — is the real reason.
+                        self.bestFailureReason = "\(message)\(code.map { " (\($0))" } ?? "")"
+                    default:
+                        break
                     }
                     self.emit(.serverEvent(event))
                 }
@@ -120,10 +139,18 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
-    private func handleFailure(reason: String) {
-        guard !intentionalClose else { return }
-        intentionalClose = true // one closed event per connection
-        emit(.closed(reason: reason))
+    private func handleFailure(reason: String, isTransportNoise: Bool = false) {
+        guard !intentionalClose, !closeEmitted else { return }
+        if !isTransportNoise, bestFailureReason == nil {
+            bestFailureReason = reason
+        }
+        closeEmitted = true
+        // Defer briefly: the close frame (with the real reason) often lands
+        // just after the receive failure. Emit the best reason we have then.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, !self.intentionalClose else { return }
+            self.onEvent?(.closed(reason: self.bestFailureReason ?? reason))
+        }
     }
 
     private func emit(_ event: ClientEvent) {
@@ -139,6 +166,11 @@ final class TranscriptionClient: NSObject, URLSessionWebSocketDelegate {
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?
     ) {
         let text = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "code \(closeCode.rawValue)"
+        // The close-frame reason beats transport noise but not a decoded
+        // server error event.
+        if bestFailureReason == nil {
+            bestFailureReason = text
+        }
         handleFailure(reason: text)
     }
 }

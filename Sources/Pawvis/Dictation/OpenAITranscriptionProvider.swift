@@ -14,6 +14,21 @@ final class OpenAITranscriptionProvider: TranscriptionProvider {
     private var reconnectAttempts = 0
     private var stopped = false
 
+    /// Models without server VAD never emit `.completed` on their own — the
+    /// client must send input_audio_buffer.commit after each pause in speech.
+    private var needsClientCommit: Bool { !sessionConfig.supportsServerVAD }
+    private var commitTimer: Timer?
+    private var hasUncommittedSpeech = false
+    private var commitSilence: TimeInterval {
+        Double(sessionConfig.vadSilenceMs) / 1000 + 0.25
+    }
+
+    /// Server error codes that no amount of reconnecting will fix.
+    private static let terminalErrorCodes: Set<String> = [
+        "invalid_api_key", "missing_model", "invalid_model",
+        "invalid_value", "beta_api_shape_disabled",
+    ]
+
     init(apiKey: String, config: DictationConfig) {
         self.apiKey = apiKey
         self.sessionConfig = RealtimeProtocol.TranscriptionSessionConfig(
@@ -31,7 +46,15 @@ final class OpenAITranscriptionProvider: TranscriptionProvider {
 
     func stop() {
         stopped = true
+        commitTimer?.invalidate()
+        commitTimer = nil
         audio.stop()
+        if hasUncommittedSpeech {
+            // Best effort: flush the in-flight utterance. Its completion may
+            // not arrive before the disconnect, but without this it never would.
+            client?.commitUtterance()
+            hasUncommittedSpeech = false
+        }
         client?.disconnect()
         client = nil
     }
@@ -75,21 +98,39 @@ final class OpenAITranscriptionProvider: TranscriptionProvider {
     private func handleServer(_ event: RealtimeProtocol.ServerEvent) {
         switch event {
         case .transcriptDelta(let itemId, let delta):
+            if needsClientCommit {
+                hasUncommittedSpeech = true
+                armCommitTimer()
+            }
             onEvent?(.delta(itemId: itemId, text: delta))
         case .transcriptCompleted(let itemId, let transcript):
+            hasUncommittedSpeech = false
             onEvent?(.completed(itemId: itemId, transcript: transcript))
         case .transcriptFailed(_, let message):
+            hasUncommittedSpeech = false
             Log.dictation.error("Transcription failed: \(message, privacy: .public)")
         case .error(let code, let message):
-            // Auth errors are terminal; most others are recoverable in-session.
-            if code == "invalid_api_key" {
+            // Config/auth errors are terminal — reconnecting would just replay
+            // them three times. Anything else is recoverable in-session.
+            if let code, Self.terminalErrorCodes.contains(code) {
                 stop()
-                onEvent?(.failed("Invalid OpenAI API key"))
+                onEvent?(.failed(code == "invalid_api_key" ? "Invalid OpenAI API key" : message))
             } else {
                 Log.dictation.error("Realtime error [\(code ?? "-", privacy: .public)]: \(message, privacy: .public)")
             }
         case .sessionCreated, .sessionUpdated, .speechStarted, .speechStopped, .other:
             break
+        }
+    }
+
+    /// Commit after a quiet gap in deltas — poor man's VAD for models that
+    /// stream one endless item (delta flow stops when you stop talking).
+    private func armCommitTimer() {
+        commitTimer?.invalidate()
+        commitTimer = Timer.scheduledTimer(withTimeInterval: commitSilence, repeats: false) { [weak self] _ in
+            guard let self, !self.stopped, self.hasUncommittedSpeech else { return }
+            self.client?.commitUtterance()
+            self.hasUncommittedSpeech = false
         }
     }
 

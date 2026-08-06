@@ -43,6 +43,14 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "PawvisMigration.palmPointer")
         }
+        // v3: OpenAI default model moved to gpt-4o-transcribe (server VAD
+        // works; the old default rejected our session config outright).
+        if !defaults.bool(forKey: "PawvisMigration.gpt4oTranscribe") {
+            if settings.dictation.model == "gpt-live-transcribe" {
+                settings.dictation.model = "gpt-4o-transcribe"
+            }
+            defaults.set(true, forKey: "PawvisMigration.gpt4oTranscribe")
+        }
     }
 
     private func persist() {

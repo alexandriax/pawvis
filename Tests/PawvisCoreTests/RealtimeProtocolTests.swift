@@ -31,12 +31,45 @@ final class RealtimeProtocolTests: XCTestCase {
         XCTAssertNil(transcription["language"])
         XCTAssertEqual(transcription["prompt"] as? String, "Pawvis dictation")
 
-        let vad = input["turn_detection"] as! [String: Any]
-        XCTAssertEqual(vad["type"] as? String, "server_vad")
-        XCTAssertEqual(vad["silence_duration_ms"] as? Int, 600)
+        // Live-verified: gpt-live-transcribe REJECTS turn_detection — the
+        // session.update must omit it entirely.
+        XCTAssertNil(input["turn_detection"])
 
         let nr = input["noise_reduction"] as! [String: Any]
         XCTAssertEqual(nr["type"] as? String, "far_field")
+    }
+
+    func testSessionUpdateIncludesVADForCapableModels() throws {
+        let config = RealtimeProtocol.TranscriptionSessionConfig(
+            model: "gpt-4o-transcribe", vadSilenceMs: 600)
+        let obj = json(try RealtimeProtocol.sessionUpdateEvent(config: config))
+        let session = obj["session"] as! [String: Any]
+        let input = (session["audio"] as! [String: Any])["input"] as! [String: Any]
+        let vad = input["turn_detection"] as! [String: Any]
+        XCTAssertEqual(vad["type"] as? String, "server_vad")
+        XCTAssertEqual(vad["silence_duration_ms"] as? Int, 600)
+    }
+
+    func testServerVADSupportMatrix() {
+        func supports(_ model: String) -> Bool {
+            RealtimeProtocol.TranscriptionSessionConfig(model: model).supportsServerVAD
+        }
+        XCTAssertFalse(supports("gpt-live-transcribe"))
+        XCTAssertFalse(supports("gpt-realtime-whisper"))
+        XCTAssertTrue(supports("gpt-transcribe"), "gpt-transcribe accepts VAD despite using the languages array")
+        XCTAssertTrue(supports("gpt-4o-transcribe"))
+        XCTAssertTrue(supports("whisper-1"))
+    }
+
+    func testCommitEvent() throws {
+        let obj = json(try RealtimeProtocol.commitEvent())
+        XCTAssertEqual(obj["type"] as? String, "input_audio_buffer.commit")
+    }
+
+    func testWebsocketURLCarriesTranscriptionIntent() {
+        // Live-verified: without ?intent=transcription the server errors
+        // missing_model and closes with code 4000.
+        XCTAssertEqual(RealtimeProtocol.websocketURL.query, "intent=transcription")
     }
 
     func testSessionUpdateUsesSingularLanguageForOlderModels() throws {

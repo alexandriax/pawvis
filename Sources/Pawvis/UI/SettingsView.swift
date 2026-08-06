@@ -214,8 +214,8 @@ private struct DictationSettingsTab: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             Picker("Model", selection: $store.settings.dictation.model) {
-                Text("gpt-live-transcribe (recommended)").tag("gpt-live-transcribe")
-                Text("gpt-4o-transcribe").tag("gpt-4o-transcribe")
+                Text("gpt-4o-transcribe (recommended)").tag("gpt-4o-transcribe")
+                Text("gpt-live-transcribe (lowest latency)").tag("gpt-live-transcribe")
                 Text("gpt-4o-mini-transcribe").tag("gpt-4o-mini-transcribe")
                 Text("whisper-1").tag("whisper-1")
             }
