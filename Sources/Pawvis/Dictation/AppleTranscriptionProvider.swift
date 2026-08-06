@@ -122,11 +122,14 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
         currentPartial = ""
         emittedForItem = ""
 
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+        var newTask: SFSpeechRecognitionTask?
+        newTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             DispatchQueue.main.async {
-                self?.handleResult(result, error: error)
+                guard let self, self.task === newTask else { return } // drop stale callbacks
+                self.handleResult(result, error: error)
             }
         }
+        task = newTask
     }
 
     private func handleResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
