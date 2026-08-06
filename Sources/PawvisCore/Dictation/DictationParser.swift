@@ -17,8 +17,12 @@ public enum TypingAction: Equatable, Sendable {
 
 /// Settings for voice dictation.
 public struct DictationConfig: Codable, Equatable, Sendable {
-    /// Master switch (also requires an API key at the app layer).
+    /// Master switch.
     public var enabled: Bool = true
+    /// Transcription engine: "apple" (on-device, default) or "openai" (cloud,
+    /// needs an API key).
+    public var engine: String = "apple"
+    /// OpenAI model (used only when engine == "openai").
     public var model: String = "gpt-live-transcribe"
     /// ISO-639-1; empty = auto-detect.
     public var language: String = ""
@@ -41,7 +45,7 @@ public struct DictationConfig: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case enabled, model, language, wakeWords, stopPhrases
+        case enabled, engine, model, language, wakeWords, stopPhrases
         case commandsEnabled, typeDeltasImmediately, vadSilenceMs, noiseReduction
     }
 
@@ -50,6 +54,7 @@ public struct DictationConfig: Codable, Equatable, Sendable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .enabled) { enabled = v }
+        if let v = try? c.decodeIfPresent(String.self, forKey: .engine) { engine = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .model) { model = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .language) { language = v }
         if let v = try? c.decodeIfPresent([String].self, forKey: .wakeWords) { wakeWords = v }

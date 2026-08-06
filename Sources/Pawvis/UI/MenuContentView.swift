@@ -25,6 +25,7 @@ struct MenuContentView: View {
         }
         .padding(12)
         .frame(width: 300)
+        .tint(PawvisTheme.purpleUI)
         .onAppear { controller.refreshPermissions() }
     }
 
@@ -109,9 +110,10 @@ struct MenuContentView: View {
                 }))
         }
         if !controller.settingsStore.apiKeyAvailable,
-           controller.settingsStore.settings.dictation.enabled {
+           controller.settingsStore.settings.dictation.enabled,
+           controller.settingsStore.settings.dictation.engine == "openai" {
             result.append(Warning(
-                text: "Add an OpenAI API key to enable voice dictation.",
+                text: "Add an OpenAI API key to enable cloud dictation.",
                 action: "Settings…",
                 handler: { openSettings() }))
         }

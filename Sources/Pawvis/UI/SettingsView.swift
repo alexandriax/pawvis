@@ -16,6 +16,7 @@ struct SettingsView: View {
                 .tabItem { Label("About", systemImage: "pawprint") }
         }
         .frame(width: 480)
+        .tint(PawvisTheme.purpleUI)
     }
 }
 
@@ -142,22 +143,52 @@ private struct DictationSettingsTab: View {
     @State private var apiKeyDraft = ""
     @State private var keySaved = false
 
+    private var usesOpenAI: Bool { store.settings.dictation.engine == "openai" }
+
     var body: some View {
         Form {
             Toggle("Enable voice dictation", isOn: $store.settings.dictation.enabled)
-            Text("Audio streams to OpenAI only while dictation is armed. Everything else runs on-device.")
+
+            Picker("Engine", selection: $store.settings.dictation.engine) {
+                Text("Apple (on-device, private)").tag("apple")
+                Text("OpenAI (cloud)").tag("openai")
+            }
+            Text(usesOpenAI
+                 ? "Audio streams to OpenAI only while dictation is armed."
+                 : "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.")
                 .font(.caption).foregroundStyle(.secondary)
 
             Divider()
 
+            if usesOpenAI {
+                openAISection
+            }
+
+            TextField("Language (ISO code, blank = auto)", text: $store.settings.dictation.language)
+
+            TextField("Wake words (comma-separated)", text: listBinding($store.settings.dictation.wakeWords))
+            Text("Start an utterance with one of these to begin typing.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            TextField("Stop phrases (comma-separated)", text: listBinding($store.settings.dictation.stopPhrases))
+
+            Toggle("Spoken commands (“new line”, “press enter”…)",
+                   isOn: $store.settings.dictation.commandsEnabled)
+            Toggle("Low-latency typing (experimental)",
+                   isOn: $store.settings.dictation.typeDeltasImmediately)
+            Text("Types words as you say them and corrects revisions with backspaces.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder
+    private var openAISection: some View {
             LabeledContent("OpenAI API key") {
                 VStack(alignment: .trailing, spacing: 6) {
                     SecureField("sk-proj-…", text: $apiKeyDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 240)
-                    Text("Paste the whole key, including its “sk-” prefix.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                     HStack {
                         if keySaved {
                             Text("Saved ✓").font(.caption).foregroundStyle(.green)
@@ -179,10 +210,8 @@ private struct DictationSettingsTab: View {
                     }
                 }
             }
-            Text("Stored in your login keychain — never in the app or its settings files.")
+            Text("Stored in your login keychain — never in the app or its settings files. Paste the whole key, including its “sk-” prefix.")
                 .font(.caption).foregroundStyle(.secondary)
-
-            Divider()
 
             Picker("Model", selection: $store.settings.dictation.model) {
                 Text("gpt-live-transcribe (recommended)").tag("gpt-live-transcribe")
@@ -191,28 +220,13 @@ private struct DictationSettingsTab: View {
                 Text("whisper-1").tag("whisper-1")
             }
 
-            TextField("Language (ISO code, blank = auto)", text: $store.settings.dictation.language)
-
-            TextField("Wake words (comma-separated)", text: listBinding($store.settings.dictation.wakeWords))
-            Text("Start an utterance with one of these to begin typing.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            TextField("Stop phrases (comma-separated)", text: listBinding($store.settings.dictation.stopPhrases))
-
-            Toggle("Spoken commands (“new line”, “press enter”…)",
-                   isOn: $store.settings.dictation.commandsEnabled)
-            Toggle("Low-latency typing (experimental)",
-                   isOn: $store.settings.dictation.typeDeltasImmediately)
-            Text("Types words as you say them and corrects revisions with backspaces.")
-                .font(.caption).foregroundStyle(.secondary)
-
             Picker("Microphone profile", selection: $store.settings.dictation.noiseReduction) {
                 Text("Built-in / far-field").tag("far_field")
                 Text("Headset / near-field").tag("near_field")
                 Text("No noise reduction").tag("")
             }
-        }
-        .padding(20)
+
+            Divider()
     }
 
     private var keyStatusText: String {
