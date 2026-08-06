@@ -86,4 +86,42 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     var mapper: CoordinateMapper {
         CoordinateMapper(box: interactionBox, mirrored: mirrorCamera)
     }
+
+    enum CodingKeys: String, CodingKey {
+        case pinchEngageRatio, pinchReleaseRatio, rightClickFinger
+        case doubleClickInterval, doubleClickSlop, dragActivationDistance
+        case pointerSource, smoothing, poseThresholds, poseHoldFrames
+        case scrollEnabled, scrollGainPixels, naturalScroll, clutchEnabled
+        case dictationToggle, dictationHoldSeconds
+        case minHandConfidence, minJointConfidence, trackingLossGrace
+        case interactionBox, mirrorCamera
+    }
+
+    /// Field-tolerant decoding: unknown/missing/mistyped fields keep their
+    /// defaults instead of failing the whole settings tree.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) { pinchEngageRatio = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseRatio) { pinchReleaseRatio = v }
+        if let v = try? c.decodeIfPresent(Finger.self, forKey: .rightClickFinger) { rightClickFinger = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) { doubleClickSlop = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) { dragActivationDistance = v }
+        if let v = try? c.decodeIfPresent(PointerSource.self, forKey: .pointerSource) { pointerSource = v }
+        if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) { smoothing = v }
+        if let v = try? c.decodeIfPresent(PoseThresholds.self, forKey: .poseThresholds) { poseThresholds = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .poseHoldFrames) { poseHoldFrames = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .scrollGainPixels) { scrollGainPixels = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .naturalScroll) { naturalScroll = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .clutchEnabled) { clutchEnabled = v }
+        if let v = try? c.decodeIfPresent(DictationToggleGesture.self, forKey: .dictationToggle) { dictationToggle = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dictationHoldSeconds) { dictationHoldSeconds = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .minHandConfidence) { minHandConfidence = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .minJointConfidence) { minJointConfidence = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .trackingLossGrace) { trackingLossGrace = v }
+        if let v = try? c.decodeIfPresent(InteractionBox.self, forKey: .interactionBox) { interactionBox = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .mirrorCamera) { mirrorCamera = v }
+    }
 }
