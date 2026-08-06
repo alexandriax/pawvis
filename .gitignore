@@ -1,0 +1,16 @@
+# Secrets — never commit API keys
+.env
+.env.*
+
+# Swift build artifacts
+.build/
+.swiftpm/
+build/
+*.xcodeproj
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Icon working files
+*.iconset/
