@@ -11,6 +11,9 @@ enum SyntheticHand {
         /// (extended) unless listed in `curled`.
         var fingerDirs: [Finger: Vec2]
         var curled: Set<Finger> = []
+        /// Half-bent fingers (~120° at the PIP): neither extended nor curled —
+        /// the natural relaxed curl people hold while pinching.
+        var semiCurled: Set<Finger> = []
         /// Thumb tip offset from the wrist, in scale units. Extended thumb is
         /// far from the index knuckle; tucked thumb is close to it.
         var thumbTipOffset: Vec2
@@ -64,6 +67,16 @@ enum SyntheticHand {
                 // Proximal segment out, then fold the tip back toward the palm.
                 let pip = mcp + dir * (0.45 * scale)
                 let tip = pip + Vec2(-dir.x * 0.30 + 0.10, -dir.y * 0.35) * scale
+                joints[finger.pip] = pip
+                joints[finger.dip] = pip.midpoint(with: tip)
+                joints[finger.tip] = tip
+            } else if pose.semiCurled.contains(finger) {
+                // ~120° bend at the PIP — in the neutral band between the
+                // extended (>2.15 rad) and curled (<1.75 rad) thresholds.
+                let pip = mcp + dir * (0.45 * scale)
+                let bent = Vec2(dir.x * 0.5 - dir.y * 0.8660254,
+                                dir.x * 0.8660254 + dir.y * 0.5)
+                let tip = pip + bent * (0.35 * scale)
                 joints[finger.pip] = pip
                 joints[finger.dip] = pip.midpoint(with: tip)
                 joints[finger.tip] = tip
@@ -130,6 +143,18 @@ enum SyntheticHand {
     static func pinchIndex(gap: Double, wrist: Vec2 = Vec2(0.5, 0.7),
                            scale: Double = 0.15) -> Hand {
         build(pose: Pose(fingerDirs: relaxedDirs,
+                         thumbTipOffset: thumbExtendedOffset,
+                         pinch: (.index, gap)),
+              wrist: wrist, scale: scale)
+    }
+
+    /// Thumb–index pinch with the other three fingers casually half-curled —
+    /// the natural way people actually pinch. (An earlier openness-based
+    /// engagement guard wrongly blocked exactly this pose.)
+    static func pinchIndexCasual(gap: Double, wrist: Vec2 = Vec2(0.5, 0.7),
+                                 scale: Double = 0.15) -> Hand {
+        build(pose: Pose(fingerDirs: relaxedDirs,
+                         semiCurled: [.middle, .ring, .little],
                          thumbTipOffset: thumbExtendedOffset,
                          pinch: (.index, gap)),
               wrist: wrist, scale: scale)

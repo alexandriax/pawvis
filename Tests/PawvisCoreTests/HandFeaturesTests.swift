@@ -118,6 +118,18 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertFalse(features(SyntheticHand.shaka()).isTwoFingerPoint())
     }
 
+    func testCasualPinchHasLowOpennessButIsNotAFist() {
+        // Documents the old bug: this natural pinch pose scores low on
+        // openness (the old engagement guard blocked it) yet is clearly not
+        // a fist — no finger is fully curled.
+        let f = features(SyntheticHand.pinchIndexCasual(gap: 0.1))
+        XCTAssertLessThan(f.openness()!, 0.30)
+        XCTAssertFalse(f.isFist())
+        for finger in [Finger.middle, .ring, .little] {
+            XCTAssertEqual(f.isCurled(finger), false, "\(finger) is half-bent, not curled")
+        }
+    }
+
     func testOpennessOrdering() {
         let open = features(SyntheticHand.openRelaxed()).openness()!
         let fist = features(SyntheticHand.fist()).openness()!
@@ -145,14 +157,22 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertEqual(features(hand).pointerPoint(.thumbTip), hand[.thumbTip])
     }
 
+    func testPalmCenterIsStableWristKnuckleMidpoint() {
+        let hand = SyntheticHand.openRelaxed()
+        let f = features(hand)
+        let expected = hand[.wrist]!.midpoint(with: hand[.middleMCP]!)
+        XCTAssertEqual(f.pointerPoint(.palmCenter)!.distance(to: expected), 0, accuracy: 1e-9,
+                       "palm pointer anchors on wrist↔middleMCP so its composition never varies")
+    }
+
     func testPalmCenterFallsBackToThumbWhenPalmOccluded() {
-        // Only thumb + index chain visible (palm joints missing).
+        // Middle knuckle missing → the palm anchor is unavailable; scale comes
+        // from the knuckle span and the pointer falls back to the thumb.
         let full = SyntheticHand.openRelaxed()
         var joints: [HandJoint: Vec2] = [:]
-        for joint in [HandJoint.wrist, .middleMCP, .thumbTip, .indexTip] {
+        for joint in [HandJoint.wrist, .indexMCP, .littleMCP, .thumbTip, .indexTip] {
             if let p = full[joint] { joints[joint] = p }
         }
-        // Two palm joints only (wrist + middleMCP) — below the 3-joint minimum.
         let f = HandFeatures(hand: Hand(joints: joints))!
         XCTAssertEqual(f.pointerPoint(.palmCenter), full[.thumbTip],
                        "palm pointer must fall back to the thumb tip")

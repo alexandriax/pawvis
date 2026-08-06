@@ -100,6 +100,17 @@ final class GestureEngineTests: XCTestCase {
 
     // MARK: - Clicks
 
+    func testCasualPinchWithHalfCurledFingersClicks() {
+        // The natural human pinch: middle/ring/little casually half-bent.
+        // Regression test — an openness-based guard used to veto this.
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        let down = feedFrames([SyntheticHand.pinchIndexCasual(gap: 0.1)], from: 0.1, count: 2)
+        XCTAssertEqual(downs(down, .left).count, 1,
+                       "a pinch with relaxed-curled fingers must click")
+        let up = feedFrames([SyntheticHand.openRelaxed()], from: 0.2, count: 2)
+        XCTAssertEqual(ups(up, .left).count, 1)
+    }
+
     func testQuickPinchIsSingleClick() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
         let pinchEvents = feedFrames([SyntheticHand.pinchIndex(gap: 0.1)], from: 0.1, count: 2)

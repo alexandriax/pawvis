@@ -188,10 +188,14 @@ public struct HandFeatures {
         case .palmCenter:
             // Palm if we can see it, otherwise thumb, otherwise index — "track
             // the palm if possible, else the thumb".
-            let palmJoints = [HandJoint.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
-                .compactMap { point($0) }
-            if palmJoints.count >= 3 {
-                return centroid(of: palmJoints)
+            //
+            // Anchor on the wrist→middle-knuckle midpoint rather than a
+            // centroid of whichever palm joints happen to clear the confidence
+            // floor this frame: a variable-membership centroid shifts by
+            // several percent of the screen whenever a joint drops out, which
+            // reads as the cursor jumping around.
+            if let wrist = point(.wrist), let middleMCP = point(.middleMCP) {
+                return wrist.midpoint(with: middleMCP)
             }
             return point(.thumbTip) ?? point(.indexTip)
         }

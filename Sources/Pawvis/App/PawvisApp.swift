@@ -52,16 +52,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Pawvis launched")
 
-        // Single-instance guard: repeatedly launching the binary (or open -n)
-        // used to stack instances — two overlays, doubled synthetic events,
-        // general chaos. If another Pawvis is already running, bow out.
+        // Single-instance guard with takeover semantics: the NEWEST launch
+        // wins and terminates older instances. (Deferring to the old instance
+        // would keep a stale — possibly buggier — build alive; two instances
+        // at once post competing cursor moves and the pointer visibly jumps
+        // between two positions.)
         if let bundleID = Bundle.main.bundleIdentifier {
             let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
                 .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-            if !others.isEmpty {
-                Log.app.warning("Another Pawvis instance is running (pid \(others[0].processIdentifier)) — exiting this one")
-                NSApp.terminate(nil)
-                return
+            for other in others {
+                Log.app.warning("Terminating older Pawvis instance (pid \(other.processIdentifier))")
+                if !other.terminate() {
+                    other.forceTerminate()
+                }
             }
         }
 

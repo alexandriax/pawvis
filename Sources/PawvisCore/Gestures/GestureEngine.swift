@@ -460,10 +460,15 @@ public final class GestureEngine {
         let rightRatio = features.pinchRatio(to: config.rightClickFinger)
 
         // A closing fist sweeps the index tip past the thumb, which looks
-        // exactly like a pinch for a few frames. A real pinch keeps the other
-        // fingers up, so a mostly-closed hand may not *start* a press
-        // (releases are always honored).
-        let opennessOK = (features.openness() ?? 1.0) > 0.30
+        // exactly like a pinch for a few frames. In a real fist all three
+        // remaining fingers are curled tight; a deliberate pinch keeps at
+        // least one of them uncurled. (An earlier openness-based guard was
+        // too strict: pinching with casually half-curled fingers is the
+        // natural hand shape and must still click.) Releases always honored.
+        let fistLike = features.isCurled(.middle) == true
+            && features.isCurled(.ring) == true
+            && features.isCurled(.little) == true
+        let opennessOK = !fistLike
 
         // Hysteresis (0.45 engage / 0.68 release by default). Missing joints
         // hold the previous state; the tracking-loss grace handles real dropouts.
