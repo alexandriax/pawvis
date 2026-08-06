@@ -1,0 +1,124 @@
+import AVFoundation
+import CoreVideo
+import Foundation
+
+/// Owns the AVCaptureSession and delivers frames to the hand tracker on a
+/// dedicated queue. 720p to match the tracking quality sporecaster targets;
+/// Vision is comfortable at this size on Apple Silicon.
+final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private let session = AVCaptureSession()
+    private let output = AVCaptureVideoDataOutput()
+    let frameQueue = DispatchQueue(label: "com.pawvis.camera.frames", qos: .userInteractive)
+
+    /// Called on `frameQueue` for every captured frame.
+    var onFrame: ((CMSampleBuffer) -> Void)?
+    /// Called on the main queue when the running state changes.
+    var onRunningChanged: ((Bool) -> Void)?
+
+    private(set) var isRunning = false
+    private var currentDeviceID: String?
+
+    static func availableCameras() -> [(id: String, name: String)] {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
+            mediaType: .video,
+            position: .unspecified)
+        return discovery.devices.map { ($0.uniqueID, $0.localizedName) }
+    }
+
+    private static func device(withID id: String?) -> AVCaptureDevice? {
+        let discovery = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
+            mediaType: .video,
+            position: .unspecified)
+        if let id, let match = discovery.devices.first(where: { $0.uniqueID == id }) {
+            return match
+        }
+        // Prefer the built-in camera (it faces the user), then anything.
+        return discovery.devices.first(where: { $0.deviceType == .builtInWideAngleCamera })
+            ?? discovery.devices.first
+    }
+
+    func start(deviceID: String?) {
+        frameQueue.async { [self] in
+            configureIfNeeded(deviceID: deviceID)
+            guard !session.isRunning else { return }
+            session.startRunning()
+            isRunning = session.isRunning
+            let running = isRunning
+            DispatchQueue.main.async { self.onRunningChanged?(running) }
+            Log.camera.info("Camera started: \(running)")
+        }
+    }
+
+    func stop() {
+        frameQueue.async { [self] in
+            guard session.isRunning else { return }
+            session.stopRunning()
+            isRunning = false
+            DispatchQueue.main.async { self.onRunningChanged?(false) }
+            Log.camera.info("Camera stopped")
+        }
+    }
+
+    /// Switch camera without tearing down the pipeline (no-op if unchanged).
+    func setDevice(deviceID: String?) {
+        frameQueue.async { [self] in
+            guard deviceID != currentDeviceID, session.isRunning else {
+                currentDeviceID = deviceID
+                return
+            }
+            configureIfNeeded(deviceID: deviceID, force: true)
+        }
+    }
+
+    private func configureIfNeeded(deviceID: String?, force: Bool = false) {
+        if !force, !session.inputs.isEmpty, deviceID == currentDeviceID { return }
+        currentDeviceID = deviceID
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+
+        for input in session.inputs { session.removeInput(input) }
+
+        guard let device = Self.device(withID: deviceID) else {
+            Log.camera.error("No camera device available")
+            return
+        }
+        do {
+            let input = try AVCaptureDeviceInput(device: device)
+            guard session.canAddInput(input) else {
+                Log.camera.error("Cannot add camera input")
+                return
+            }
+            session.addInput(input)
+        } catch {
+            Log.camera.error("Camera input error: \(error.localizedDescription)")
+            return
+        }
+
+        if session.canSetSessionPreset(.hd1280x720) {
+            session.sessionPreset = .hd1280x720
+        }
+
+        if !session.outputs.contains(output) {
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            ]
+            output.alwaysDiscardsLateVideoFrames = true
+            output.setSampleBufferDelegate(self, queue: frameQueue)
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            }
+        }
+        Log.camera.info("Camera configured: \(device.localizedName, privacy: .public)")
+    }
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        onFrame?(sampleBuffer)
+    }
+}
