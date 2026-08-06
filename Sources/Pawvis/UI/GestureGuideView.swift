@@ -39,7 +39,7 @@ struct GestureGuideView: View {
         [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move the cursor",
-                detail: "Hold your hand open and move it. The purple-centered reticle (dot inside a ring) is your cursor — it follows your palm, so it stays steady while your fingers pinch. The ring tightens as thumb and index close, fills when you click, and pulses to confirm each click."),
+                detail: "Point with your index finger — the claw marker is your cursor. When you pinch, the click lands where you were pointing just before your fingers moved, so aiming feels natural. The ring around the claw tightens as thumb and index close, fills while you hold a click, and pulses to confirm each one."),
             Row(symbol: "hand.pinch.fill",
                 title: "Left click",
                 detail: "Quickly pinch your thumb and index fingertip together, then release. Pinch twice quickly for a double-click, three times for a triple-click."),

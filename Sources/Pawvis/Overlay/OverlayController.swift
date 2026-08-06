@@ -114,11 +114,15 @@ final class OverlayController {
                     : overlay.rightEngaged ? PawvisTheme.blue
                     : (rightStrength > leftStrength ? PawvisTheme.blue : PawvisTheme.purple)
 
-                model.dots.append(.init(center: local, radius: 4.5, color: tint, alpha: 1))
+                // The claw IS the cursor (white at rest, colored while a
+                // button is held); a dot fallback lives in the view.
+                model.clawCursor = .init(
+                    center: local,
+                    tint: overlay.leftEngaged ? .left : (overlay.rightEngaged ? .right : .neutral))
 
                 let ringRadius: CGFloat
                 if engaged {
-                    ringRadius = overlay.isDragging ? 20 : 12
+                    ringRadius = overlay.isDragging ? 24 : 18
                 } else if config.showPinchRing {
                     ringRadius = 26 - 15 * strength
                 } else {
@@ -246,10 +250,28 @@ struct OverlayRenderModel {
         var background: NSColor
     }
 
+    enum ClawTint: String {
+        case neutral, left, right
+
+        var color: NSColor {
+            switch self {
+            case .neutral: return .white
+            case .left: return PawvisTheme.purple
+            case .right: return PawvisTheme.blue
+            }
+        }
+    }
+
+    struct ClawCursor {
+        var center: CGPoint
+        var tint: ClawTint
+    }
+
     var dots: [Dot] = []
     var rings: [Ring] = []
     var arcs: [Arc] = []
     var glyphs: [Glyph] = []
+    var clawCursor: ClawCursor?
     var pill: Pill?
 }
 
@@ -297,6 +319,39 @@ final class OverlayContentView: NSView {
     private var glyphLayers: [CATextLayer] = []
     private let pillBackground = CALayer()
     private let pillText = CATextLayer()
+
+    // The claw cursor: a tinted glyph over a dark offset copy for contrast on
+    // any background. Sized like a real macOS cursor (~24 pt).
+    private let clawShadowLayer = CALayer()
+    private let clawFillLayer = CALayer()
+    private let clawFallbackDot = CAShapeLayer()
+    private var clawTintCache: [String: CGImage] = [:]
+
+    private static let clawSize = CGSize(width: 24, height: 24)
+
+    private static let clawGlyph: CGImage? = {
+        guard let url = Bundle.main.url(forResource: "menubar-claw", withExtension: "png"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return image
+    }()
+
+    private func tintedClaw(_ key: String, color: NSColor) -> CGImage? {
+        if let cached = clawTintCache[key] { return cached }
+        guard let glyph = Self.clawGlyph,
+              let ctx = CGContext(
+                data: nil, width: glyph.width, height: glyph.height,
+                bitsPerComponent: 8, bytesPerRow: glyph.width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: glyph.width, height: glyph.height)
+        ctx.clip(to: rect, mask: glyph)
+        ctx.setFillColor(color.usingColorSpace(.sRGB)?.cgColor ?? color.cgColor)
+        ctx.fill(rect)
+        let image = ctx.makeImage()
+        clawTintCache[key] = image
+        return image
+    }
 
     init() {
         super.init(frame: .zero)
@@ -360,7 +415,48 @@ final class OverlayContentView: NSView {
         renderRings(model.rings)
         renderArcs(model.arcs)
         renderGlyphs(model.glyphs)
+        renderClawCursor(model.clawCursor)
         renderPill(model.pill)
+    }
+
+    private func renderClawCursor(_ claw: OverlayRenderModel.ClawCursor?) {
+        if clawFillLayer.superlayer == nil, let layer {
+            clawShadowLayer.bounds = CGRect(origin: .zero, size: Self.clawSize)
+            clawFillLayer.bounds = CGRect(origin: .zero, size: Self.clawSize)
+            clawShadowLayer.contentsGravity = .resizeAspect
+            clawFillLayer.contentsGravity = .resizeAspect
+            clawShadowLayer.opacity = 0.55
+            layer.addSublayer(clawShadowLayer)
+            layer.addSublayer(clawFillLayer)
+            layer.addSublayer(clawFallbackDot)
+        }
+
+        guard let claw else {
+            clawShadowLayer.isHidden = true
+            clawFillLayer.isHidden = true
+            clawFallbackDot.isHidden = true
+            return
+        }
+
+        if Self.clawGlyph != nil {
+            clawShadowLayer.isHidden = false
+            clawFillLayer.isHidden = false
+            clawFallbackDot.isHidden = true
+            clawShadowLayer.contents = tintedClaw("shadow", color: .black)
+            clawFillLayer.contents = tintedClaw(claw.tint.rawValue, color: claw.tint.color)
+            clawShadowLayer.position = CGPoint(x: claw.center.x + 1, y: claw.center.y + 1.5)
+            clawShadowLayer.transform = CATransform3DMakeScale(1.08, 1.08, 1)
+            clawFillLayer.position = claw.center
+        } else {
+            // No glyph asset (bare binary): a filled dot marks the cursor.
+            clawShadowLayer.isHidden = true
+            clawFillLayer.isHidden = true
+            clawFallbackDot.isHidden = false
+            clawFallbackDot.path = CGPath(
+                ellipseIn: CGRect(x: claw.center.x - 4.5, y: claw.center.y - 4.5, width: 9, height: 9),
+                transform: nil)
+            clawFallbackDot.fillColor = claw.tint.color.cgColor
+        }
     }
 
     private func pooled<L: CALayer>(_ pool: inout [L], count: Int, make: () -> L) {
