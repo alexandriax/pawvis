@@ -50,6 +50,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
+# Prefer a real signing identity: ad-hoc signatures change every build, which
+# silently invalidates the Accessibility grant (while System Settings still
+# shows it enabled) — the classic "cursor moves but nothing clicks" trap.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
+if [[ -n "$IDENTITY" ]]; then
+    codesign --force --sign "$IDENTITY" "$APP"
+    echo "Signed with '$IDENTITY' — stable identity, permissions survive rebuilds"
+else
+    codesign --force --sign - "$APP"
+    cat >&2 <<'WARN'
+WARNING: ad-hoc signed (no "Apple Development" identity found in the keychain).
+After EVERY rebuild you must remove and re-add Pawvis in
+System Settings → Privacy & Security → Accessibility, or clicks silently fail.
+(Sign into Xcode with an Apple ID to get a free stable identity.)
+WARN
+fi
 
 echo "Built $APP"

@@ -127,10 +127,12 @@ private struct GestureSettingsTab: View {
 
             Divider()
 
-            Toggle("Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
-            Toggle("Pinch ring", isOn: $store.settings.overlay.showPinchRing)
-            Toggle("Cursor halo", isOn: $store.settings.overlay.showCursorHalo)
-            Toggle("Dictation status pill", isOn: $store.settings.overlay.showStatusPill)
+            Toggle("Fingertip dots (thumb + index)", isOn: $store.settings.overlay.showFingertipDots)
+            Toggle("All five fingertips", isOn: $store.settings.overlay.showAllFingertips)
+                .disabled(!store.settings.overlay.showFingertipDots)
+            Toggle("Pinch ring on the cursor", isOn: $store.settings.overlay.showPinchRing)
+            Toggle("Cursor reticle", isOn: $store.settings.overlay.showCursorHalo)
+            Toggle("Status pill", isOn: $store.settings.overlay.showStatusPill)
         }
         .padding(20)
     }

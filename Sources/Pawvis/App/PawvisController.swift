@@ -99,7 +99,20 @@ final class PawvisController: ObservableObject {
         overlay.show()
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         trackingActive = true
+        startPermissionPolling()
         Log.app.info("Tracking started")
+    }
+
+    /// While tracking, re-check Accessibility every couple of seconds so the
+    /// overlay warning appears/disappears without reopening the menu (the
+    /// grant can silently stop applying after a rebuild).
+    private var permissionPollTimer: Timer?
+
+    private func startPermissionPolling() {
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshPermissions() }
+        }
     }
 
     func stopTracking() {
@@ -111,6 +124,8 @@ final class PawvisController: ObservableObject {
         trackingActive = false
         handsDetected = 0
         mode = .none
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
         Log.app.info("Tracking stopped")
     }
 
@@ -141,7 +156,11 @@ final class PawvisController: ObservableObject {
             }
         }
         mouse.apply(events)
-        overlay.render(overlay: overlayState, dictation: dictation.hud, projector: projector)
+        overlay.render(
+            overlay: overlayState,
+            dictation: dictation.hud,
+            projector: projector,
+            accessibilityBlocked: !accessibilityGranted)
 
         let count = overlayState.hands.count
         if count != handsDetected { handsDetected = count }

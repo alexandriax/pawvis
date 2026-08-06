@@ -54,8 +54,25 @@ final class OverlayController {
         if wasVisible { show() }
     }
 
-    func render(overlay: OverlayState, dictation: DictationHUD, projector: ScreenProjector) {
+    private var prevLeftEngaged = false
+    private var prevRightEngaged = false
+
+    func render(
+        overlay: OverlayState,
+        dictation: DictationHUD,
+        projector: ScreenProjector,
+        accessibilityBlocked: Bool = false
+    ) {
         guard visible else { return }
+        let leftRose = overlay.leftEngaged && !prevLeftEngaged
+        let rightRose = overlay.rightEngaged && !prevRightEngaged
+        prevLeftEngaged = overlay.leftEngaged
+        prevRightEngaged = overlay.rightEngaged
+
+        let primary = overlay.hands.first(where: { $0.isPrimary })
+        let leftStrength = primary?.leftPinchStrength ?? 0
+        let rightStrength = primary?.rightPinchStrength ?? 0
+
         for window in windows {
             var model = OverlayRenderModel()
             let bounds = window.displayBoundsCG
@@ -67,10 +84,15 @@ final class OverlayController {
                 return CGPoint(x: global.x - bounds.minX, y: global.y - bounds.minY)
             }
 
+            // Fingertip dots: just the pinch pair (thumb + index) by default —
+            // five dots per hand made it unclear which mark was the cursor.
             if config.showFingertipDots {
                 for hand in overlay.hands {
-                    let handAlpha: CGFloat = hand.isPrimary ? 1.0 : 0.55
+                    let handAlpha: CGFloat = hand.isPrimary ? 0.85 : 0.4
                     for (joint, point) in hand.fingertips {
+                        if !config.showAllFingertips, joint != .thumbTip, joint != .indexTip {
+                            continue
+                        }
                         guard let local = localize(point) else { continue }
                         let (radius, color) = Self.dotStyle(for: joint)
                         model.dots.append(.init(
@@ -82,34 +104,35 @@ final class OverlayController {
                 }
             }
 
-            if config.showPinchRing, let primary = overlay.hands.first(where: { $0.isPrimary }) {
-                // The sporecaster "pinch iris": visible from strength 0.15, ring
-                // contracts and saturates as the pinch approaches the threshold.
-                if primary.leftPinchStrength > 0.15, let p = primary.leftPinchPoint, let local = localize(p) {
-                    model.rings.append(Self.iris(
-                        at: local, strength: primary.leftPinchStrength,
-                        engaged: overlay.leftEngaged, dragging: overlay.isDragging,
-                        tint: PawvisTheme.purple))
-                }
-                if primary.rightPinchStrength > 0.15, let p = primary.rightPinchPoint, let local = localize(p) {
-                    model.rings.append(Self.iris(
-                        at: local, strength: primary.rightPinchStrength,
-                        engaged: overlay.rightEngaged, dragging: overlay.isDragging,
-                        tint: PawvisTheme.blue))
-                }
-            }
-
+            // THE cursor: a filled dot inside a ring. The ring doubles as the
+            // pinch iris — it contracts and saturates as your pinch closes, and
+            // fills solid while a button is held. One reticle, no ambiguity.
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
+                let engaged = overlay.leftEngaged || overlay.rightEngaged
+                let strength = max(leftStrength, rightStrength)
                 let tint: NSColor = overlay.leftEngaged ? PawvisTheme.purple
-                    : overlay.rightEngaged ? PawvisTheme.blue : .white
+                    : overlay.rightEngaged ? PawvisTheme.blue
+                    : (rightStrength > leftStrength ? PawvisTheme.blue : PawvisTheme.purple)
+
+                model.dots.append(.init(center: local, radius: 4.5, color: tint, alpha: 1))
+
+                let ringRadius: CGFloat
+                if engaged {
+                    ringRadius = overlay.isDragging ? 20 : 12
+                } else if config.showPinchRing {
+                    ringRadius = 26 - 15 * strength
+                } else {
+                    ringRadius = 15
+                }
+                let ringColor = engaged ? tint
+                    : (NSColor.white.blended(withFraction: strength, of: tint) ?? tint)
                 model.rings.append(.init(
                     center: local,
-                    radius: overlay.isDragging ? 18 : 13,
-                    lineWidth: overlay.isDragging ? 4 : 2.5,
-                    strokeColor: tint,
-                    fillColor: (overlay.leftEngaged || overlay.rightEngaged)
-                        ? tint.withAlphaComponent(0.35) : nil,
-                    alpha: 0.9))
+                    radius: ringRadius,
+                    lineWidth: engaged ? 3.5 : 2.5,
+                    strokeColor: ringColor,
+                    fillColor: engaged ? tint.withAlphaComponent(0.4) : nil,
+                    alpha: engaged ? 1 : 0.55 + 0.45 * strength))
 
                 switch overlay.mode {
                 case .scrolling:
@@ -121,12 +144,19 @@ final class OverlayController {
                 }
 
                 if let progress = overlay.dictationHoldProgress {
-                    model.arcs.append(.init(center: local, radius: 26, progress: progress))
+                    model.arcs.append(.init(center: local, radius: 30, progress: progress))
+                }
+
+                if leftRose {
+                    window.contentOverlayView.flash(at: local, color: PawvisTheme.purple)
+                }
+                if rightRose {
+                    window.contentOverlayView.flash(at: local, color: PawvisTheme.blue)
                 }
             }
 
             if config.showStatusPill, window.isOnMainScreen {
-                model.pill = Self.pill(for: dictation)
+                model.pill = Self.pill(for: dictation, accessibilityBlocked: accessibilityBlocked)
             }
 
             window.contentOverlayView.render(model)
@@ -137,28 +167,25 @@ final class OverlayController {
 
     private static func dotStyle(for joint: HandJoint) -> (CGFloat, NSColor) {
         switch joint {
-        case .indexTip: return (7, PawvisTheme.purpleLight)
-        case .thumbTip: return (7, PawvisTheme.blueLight)
-        default: return (4.5, NSColor.white.withAlphaComponent(0.6))
+        case .indexTip: return (5.5, PawvisTheme.purpleLight)
+        case .thumbTip: return (5.5, PawvisTheme.blueLight)
+        default: return (3.5, NSColor.white.withAlphaComponent(0.55))
         }
     }
 
-    private static func iris(
-        at point: CGPoint, strength: Double, engaged: Bool, dragging: Bool, tint: NSColor
-    ) -> OverlayRenderModel.Ring {
-        if engaged {
-            return .init(
-                center: point, radius: dragging ? 16 : 12, lineWidth: 3,
-                strokeColor: tint, fillColor: tint.withAlphaComponent(0.5), alpha: 1)
+    private static func pill(
+        for dictation: DictationHUD, accessibilityBlocked: Bool
+    ) -> OverlayRenderModel.Pill? {
+        // An Accessibility problem beats everything except a dictation error:
+        // without it, clicks silently do nothing, which looks like total
+        // breakage. Make it impossible to miss.
+        if accessibilityBlocked {
+            if case .error = dictation {} else {
+                return .init(
+                    text: "⚠️ Clicks blocked — grant Accessibility (after rebuilds: remove & re-add Pawvis)",
+                    background: NSColor.systemRed.withAlphaComponent(0.92))
+            }
         }
-        let radius = 30 - 18 * strength // contracts as the pinch closes
-        let color = NSColor.white.blended(withFraction: strength, of: tint) ?? tint
-        return .init(
-            center: point, radius: radius, lineWidth: 3,
-            strokeColor: color, fillColor: nil, alpha: 0.35 + 0.6 * strength)
-    }
-
-    private static func pill(for dictation: DictationHUD) -> OverlayRenderModel.Pill? {
         switch dictation {
         case .hidden:
             return nil
@@ -291,6 +318,37 @@ final class OverlayContentView: NSView {
 
     func clear() {
         render(OverlayRenderModel())
+    }
+
+    /// One-shot expanding-ring pulse confirming a click was registered — makes
+    /// "Pawvis saw the pinch" visibly distinct from "the click reached the app".
+    func flash(at point: CGPoint, color: NSColor) {
+        let ring = CAShapeLayer()
+        let r: CGFloat = 13
+        ring.bounds = CGRect(x: 0, y: 0, width: r * 2, height: r * 2)
+        ring.position = point
+        ring.path = CGPath(ellipseIn: ring.bounds, transform: nil)
+        ring.strokeColor = color.cgColor
+        ring.fillColor = NSColor.clear.cgColor
+        ring.lineWidth = 3
+        layer?.addSublayer(ring)
+
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 1.0
+        scale.toValue = 2.3
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.9
+        fade.toValue = 0.0
+        let group = CAAnimationGroup()
+        group.animations = [scale, fade]
+        group.duration = 0.35
+        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        group.isRemovedOnCompletion = false
+        group.fillMode = .forwards
+        ring.add(group, forKey: "clickFlash")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            ring.removeFromSuperlayer()
+        }
     }
 
     func render(_ model: OverlayRenderModel) {
