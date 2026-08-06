@@ -61,7 +61,7 @@ struct GestureGuideView: View {
         }
         if store.settings.gestures.clutchEnabled {
             rows.append(Row(
-                symbol: "hand.raised.fist.fill" ,
+                symbol: "pause.circle.fill",
                 title: "Clutch (park the cursor)",
                 detail: "Make a fist to freeze the cursor — like lifting a mouse. Move your hand somewhere comfortable, reopen it, and keep pointing from there."))
         }

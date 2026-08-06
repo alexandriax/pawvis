@@ -289,13 +289,6 @@ final class OverlayContentView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("unused") }
 
-    override func layout() {
-        super.layout()
-        if pillBackground.superlayer == nil {
-            layer?.addSublayer(pillBackground)
-        }
-    }
-
     func clear() {
         render(OverlayRenderModel())
     }
@@ -394,6 +387,9 @@ final class OverlayContentView: NSView {
     private var lastPill: OverlayRenderModel.Pill?
 
     private func renderPill(_ pill: OverlayRenderModel.Pill?) {
+        if pillBackground.superlayer == nil {
+            layer?.addSublayer(pillBackground)
+        }
         guard pill != lastPill else { return }
         lastPill = pill
         guard let pill else {

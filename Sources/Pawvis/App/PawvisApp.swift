@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import PawvisCore
 import SwiftUI
 
@@ -34,6 +35,7 @@ struct PawvisApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let controller: PawvisController
+    private var dictationObservation: AnyCancellable?
 
     override init() {
         // AppDelegate is constructed on the main thread before the run loop starts.
@@ -41,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             PawvisController(settingsStore: SettingsStore())
         }
         super.init()
+        // Forward nested state changes so the MenuBarExtra label (which only
+        // observes the delegate) updates when dictation starts/stops.
+        dictationObservation = controller.dictation.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

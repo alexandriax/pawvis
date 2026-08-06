@@ -135,7 +135,10 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             Button("Settings…") { openSettings() }
-            Button("Gesture Guide") { openWindow(id: "gesture-guide") }
+            Button("Gesture Guide") {
+                openWindow(id: "gesture-guide")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
