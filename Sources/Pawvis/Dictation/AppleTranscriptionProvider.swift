@@ -4,13 +4,19 @@ import PawvisCore
 import Speech
 
 /// On-device transcription via Apple's Speech framework — no network, no API
-/// key. This baseline implementation uses SFSpeechRecognizer with on-device
-/// recognition and silence-based utterance segmentation: SFSpeech reports one
-/// continuously-growing transcript, so when it stops growing for a quiet
-/// interval we finalize the utterance and restart the recognition task (which
-/// also sidesteps the framework's ~1-minute task limit).
+/// key. On macOS 26+ this uses the modern SpeechAnalyzer/SpeechTranscriber
+/// stack (proper volatile/finalized segmentation, no speech-recognition
+/// authorization needed). Earlier systems fall back to SFSpeechRecognizer with
+/// on-device recognition and silence-based utterance segmentation: SFSpeech
+/// reports one continuously-growing transcript, so when it stops growing for a
+/// quiet interval we finalize the utterance and restart the recognition task
+/// (which also sidesteps the framework's ~1-minute task limit).
 final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
     var onEvent: ((TranscriptionEvent) -> Void)?
+
+    /// The macOS 26+ backend, when running there (typed Any to keep this class
+    /// usable on the macOS 14 deployment target).
+    private var modernBackend: Any?
 
     private let engine = AVAudioEngine()
     private var recognizer: SFSpeechRecognizer?
@@ -36,6 +42,17 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
 
     func start() {
         stopped = false
+
+        if #available(macOS 26.0, *) {
+            let backend = ModernAppleSpeechBackend(language: config.language)
+            modernBackend = backend
+            backend.onEvent = { [weak self] event in
+                self?.onEvent?(event)
+            }
+            backend.start()
+            return
+        }
+
         let locale = config.language.isEmpty
             ? Locale.current
             : Locale(identifier: config.language)
@@ -54,6 +71,11 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
 
     func stop() {
         stopped = true
+        if #available(macOS 26.0, *), let backend = modernBackend as? ModernAppleSpeechBackend {
+            backend.stop()
+            modernBackend = nil
+            return
+        }
         silenceTimer?.invalidate()
         silenceTimer = nil
         task?.cancel()
