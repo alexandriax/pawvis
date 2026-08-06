@@ -39,7 +39,7 @@ struct GestureGuideView: View {
         [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move the cursor",
-                detail: "Hold your hand open and move it. The cursor follows the point between your thumb and index fingertip."),
+                detail: "Hold your hand open and move it. The cursor follows your palm, so it stays steady while your fingers pinch."),
             Row(symbol: "hand.pinch.fill",
                 title: "Left click",
                 detail: "Quickly pinch your thumb and index fingertip together, then release. Pinch twice quickly for a double-click, three times for a triple-click."),
