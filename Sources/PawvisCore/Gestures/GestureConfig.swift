@@ -44,7 +44,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public var dragActivationDistance: Double = 0.008
 
     // MARK: Pointer
-    public var pointerSource: PointerSource = .pinchMidpoint
+    public var pointerSource: PointerSource = .palmCenter
     public var smoothing: OneEuroFilter.Params = .cursor
 
     // MARK: Poses

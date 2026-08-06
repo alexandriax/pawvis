@@ -140,6 +140,24 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertGreaterThan(palm.y, hand[.middleTip]!.y)
     }
 
+    func testThumbTipPointerSource() {
+        let hand = SyntheticHand.openRelaxed()
+        XCTAssertEqual(features(hand).pointerPoint(.thumbTip), hand[.thumbTip])
+    }
+
+    func testPalmCenterFallsBackToThumbWhenPalmOccluded() {
+        // Only thumb + index chain visible (palm joints missing).
+        let full = SyntheticHand.openRelaxed()
+        var joints: [HandJoint: Vec2] = [:]
+        for joint in [HandJoint.wrist, .middleMCP, .thumbTip, .indexTip] {
+            if let p = full[joint] { joints[joint] = p }
+        }
+        // Two palm joints only (wrist + middleMCP) — below the 3-joint minimum.
+        let f = HandFeatures(hand: Hand(joints: joints))!
+        XCTAssertEqual(f.pointerPoint(.palmCenter), full[.thumbTip],
+                       "palm pointer must fall back to the thumb tip")
+    }
+
     func testPinchMidpointFallsBackToIndexTipWithoutThumb() {
         var joints: [HandJoint: Vec2] = [:]
         let full = SyntheticHand.openRelaxed()

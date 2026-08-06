@@ -28,6 +28,21 @@ final class SettingsStore: ObservableObject {
         }
         apiKeyInKeychain = keychain.read() != nil
         apiKeyAvailable = APIKeyResolver.resolve() != nil
+        migrate()
+    }
+
+    /// One-time migrations for settings persisted by older builds.
+    private func migrate() {
+        let defaults = UserDefaults.standard
+        // v2: the default pointer source changed pinchMidpoint → palmCenter
+        // (palm holds still during pinches). Only remap users still on the old
+        // default; a deliberate choice of another source is preserved.
+        if !defaults.bool(forKey: "PawvisMigration.palmPointer") {
+            if settings.gestures.pointerSource == .pinchMidpoint {
+                settings.gestures.pointerSource = .palmCenter
+            }
+            defaults.set(true, forKey: "PawvisMigration.palmPointer")
+        }
     }
 
     private func persist() {

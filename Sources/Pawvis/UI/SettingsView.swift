@@ -64,9 +64,10 @@ private struct GeneralSettingsTab: View {
                 range: 0.2...0.45)
 
             Picker("Cursor follows", selection: $store.settings.gestures.pointerSource) {
-                Text("Pinch midpoint (recommended)").tag(PointerSource.pinchMidpoint)
+                Text("Palm (recommended — steadiest)").tag(PointerSource.palmCenter)
+                Text("Thumb tip").tag(PointerSource.thumbTip)
                 Text("Index fingertip").tag(PointerSource.indexTip)
-                Text("Palm center").tag(PointerSource.palmCenter)
+                Text("Thumb–index midpoint").tag(PointerSource.pinchMidpoint)
             }
 
             Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
@@ -151,9 +152,12 @@ private struct DictationSettingsTab: View {
 
             LabeledContent("OpenAI API key") {
                 VStack(alignment: .trailing, spacing: 6) {
-                    SecureField("sk-…", text: $apiKeyDraft)
+                    SecureField("sk-proj-…", text: $apiKeyDraft)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 240)
+                    Text("Paste the whole key, including its “sk-” prefix.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     HStack {
                         if keySaved {
                             Text("Saved ✓").font(.caption).foregroundStyle(.green)

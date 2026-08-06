@@ -2,13 +2,16 @@ import Foundation
 
 /// Which landmark drives the on-screen cursor.
 public enum PointerSource: String, Codable, CaseIterable, Sendable {
+    /// Centroid of the wrist + knuckles, falling back to the thumb tip when the
+    /// palm is occluded. The most stable choice — pinching moves the fingers
+    /// but not the palm, so the cursor holds still through clicks. Default.
+    case palmCenter
+    /// The thumb tip — steadier than the index during pinches.
+    case thumbTip
     /// The index fingertip. Most direct, but the cursor shifts when you pinch.
     case indexTip
-    /// Midpoint of thumb tip and index tip. Stays put while pinching, so clicks
-    /// land where you aimed. Default.
+    /// Midpoint of thumb tip and index tip.
     case pinchMidpoint
-    /// Centroid of the four knuckles — most stable, least precise.
-    case palmCenter
 }
 
 /// Tunable thresholds for pose classification.
@@ -175,15 +178,22 @@ public struct HandFeatures {
         switch source {
         case .indexTip:
             return point(.indexTip)
+        case .thumbTip:
+            return point(.thumbTip) ?? point(.indexTip)
         case .pinchMidpoint:
             if let thumb = point(.thumbTip), let index = point(.indexTip) {
                 return thumb.midpoint(with: index)
             }
             return point(.indexTip)
         case .palmCenter:
-            let mcps = [HandJoint.indexMCP, .middleMCP, .ringMCP, .littleMCP].compactMap { point($0) }
-            guard !mcps.isEmpty else { return nil }
-            return centroid(of: mcps)
+            // Palm if we can see it, otherwise thumb, otherwise index — "track
+            // the palm if possible, else the thumb".
+            let palmJoints = [HandJoint.wrist, .indexMCP, .middleMCP, .ringMCP, .littleMCP]
+                .compactMap { point($0) }
+            if palmJoints.count >= 3 {
+                return centroid(of: palmJoints)
+            }
+            return point(.thumbTip) ?? point(.indexTip)
         }
     }
 }
