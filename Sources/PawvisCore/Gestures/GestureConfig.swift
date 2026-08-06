@@ -44,8 +44,16 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public var dragActivationDistance: Double = 0.008
 
     // MARK: Pointer
-    public var pointerSource: PointerSource = .palmCenter
+    public var pointerSource: PointerSource = .indexTip
     public var smoothing: OneEuroFilter.Params = .cursor
+    /// When a pinch enters the hysteresis band (fingers converging toward a
+    /// click), the cursor rolls back this many frames — to where it was before
+    /// the pinch motion began — and holds there so clicks land where you were
+    /// pointing, not where the converging fingertip dragged the cursor.
+    public var approachRollbackFrames: Int = 5
+    /// How long the pre-click hold lasts before giving up (hovering in the
+    /// band without pinching resumes normal tracking).
+    public var approachHoldMaxSeconds: TimeInterval = 0.5
 
     // MARK: Poses
     public var poseThresholds: PoseThresholds = PoseThresholds()
@@ -91,6 +99,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         case pinchEngageRatio, pinchReleaseRatio, rightClickFinger
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case pointerSource, smoothing, poseThresholds, poseHoldFrames
+        case approachRollbackFrames, approachHoldMaxSeconds
         case scrollEnabled, scrollGainPixels, naturalScroll, clutchEnabled
         case dictationToggle, dictationHoldSeconds
         case minHandConfidence, minJointConfidence, trackingLossGrace
@@ -110,6 +119,8 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) { dragActivationDistance = v }
         if let v = try? c.decodeIfPresent(PointerSource.self, forKey: .pointerSource) { pointerSource = v }
         if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) { smoothing = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .approachRollbackFrames) { approachRollbackFrames = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .approachHoldMaxSeconds) { approachHoldMaxSeconds = v }
         if let v = try? c.decodeIfPresent(PoseThresholds.self, forKey: .poseThresholds) { poseThresholds = v }
         if let v = try? c.decodeIfPresent(Int.self, forKey: .poseHoldFrames) { poseHoldFrames = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }

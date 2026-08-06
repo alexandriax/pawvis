@@ -53,6 +53,11 @@ public final class GestureEngine {
         var downAt: Vec2
         var downTime: TimeInterval
         var clickCount: Int
+        /// Where the raw pointer was at engage. The click lands at the
+        /// rolled-back `downAt`, but the pinched fingertip sits elsewhere —
+        /// drags are therefore computed relative to this anchor, so a
+        /// stationary pinch reads as zero movement.
+        var pointerAnchor: Vec2
         var dragging = false
     }
 
@@ -99,6 +104,14 @@ public final class GestureEngine {
     private var dictationHoldStart: TimeInterval?
     private var dictationLatched = false
 
+    // Pre-click stabilization: entering the pinch hysteresis band rolls the
+    // cursor back to its pre-convergence position and holds it there until the
+    // pinch engages or is abandoned.
+    private var approachHold: (position: Vec2, since: TimeInterval)?
+    private var approachExpired = false
+    /// The raw (unheld) pointer position this frame — the press anchor.
+    private var lastPointerClamped: Vec2?
+
     // MARK: - Public API
 
     /// Release any held button (used on shutdown / tracking disable so buttons
@@ -120,6 +133,8 @@ public final class GestureEngine {
         dictationLatched = false
         frozenCursor = nil
         clutchJustEnded = false
+        approachHold = nil
+        approachExpired = false
         // A forced release must not chain into a double-click.
         lastUpTime = -.infinity
         return events
@@ -190,13 +205,18 @@ public final class GestureEngine {
         // 4. Mode poses on the primary hand (debounced; never while pressing).
         updateModePoses(features: features)
 
-        // 5. Pointer / cursor / press-drag / scroll.
+        // 5. Pointer / cursor / press-drag / scroll. Pinch ratios are computed
+        // up front: the pointer path needs them for pre-click stabilization.
+        let leftRatio = features?.pinchRatio(to: .index)
+        let rightRatio = features?.pinchRatio(to: config.rightClickFinger)
         let pointer = features?.pointerPoint(config.pointerSource)
-        processPointer(pointer, at: frame.time, events: &events)
+        processPointer(pointer, leftRatio: leftRatio, rightRatio: rightRatio,
+                       at: frame.time, events: &events)
 
         // 6. Pinch → button transitions (not in scroll/clutch modes).
         if let features, !scrolling, !clutching {
-            processPinches(features: features, at: frame.time, events: &events)
+            processPinches(features: features, leftRatio: leftRatio, rightRatio: rightRatio,
+                           at: frame.time, events: &events)
         }
 
         // 7. Build overlay state.
@@ -384,7 +404,13 @@ public final class GestureEngine {
 
     // MARK: - Pointer / drag / scroll
 
-    private func processPointer(_ rawPointer: Vec2?, at time: TimeInterval, events: inout [GestureEvent]) {
+    private func processPointer(
+        _ rawPointer: Vec2?,
+        leftRatio: Double?,
+        rightRatio: Double?,
+        at time: TimeInterval,
+        events: inout [GestureEvent]
+    ) {
         guard var pointer = rawPointer else { return }
 
         if clutching {
@@ -429,18 +455,58 @@ public final class GestureEngine {
             return // cursor stays put while scrolling
         }
 
+        lastPointerClamped = clamped
+
         if var p = press {
+            // Release-transition freeze: once the held pinch opens past the
+            // engage threshold (into the hysteresis band), hold position — the
+            // separating fingers must not drag the cursor before the up lands.
+            let activeRatio = p.button == .left ? leftRatio : rightRatio
+            if let r = activeRatio, r > config.pinchEngageRatio {
+                return
+            }
+            // Drag position is relative to the pointer's position at engage:
+            // the down landed at the rolled-back spot, and only movement since
+            // the pinch closed should drag from there.
+            let target = (p.downAt + (clamped - p.pointerAnchor)).clampedToUnit()
             // Suppress micro-movement while pressed so quick clicks don't smear
             // into drags; past the threshold it's a real drag.
-            if !p.dragging, clamped.distance(to: p.downAt) < config.dragActivationDistance {
+            if !p.dragging, target.distance(to: p.downAt) < config.dragActivationDistance {
                 return
             }
             p.dragging = true
             press = p
-            cursor = clamped
-            events.append(.drag(p.button, to: clamped))
+            cursor = target
+            events.append(.drag(p.button, to: target))
             return
         }
+
+        // Pre-click stabilization: a ratio inside the hysteresis band means a
+        // pinch is being formed. The converging fingertip IS the pointer, so
+        // roll the cursor back to where it was before the motion started and
+        // hold it there — the click lands where you were pointing.
+        let minRatio = [leftRatio, rightRatio].compactMap { $0 }.min() ?? .infinity
+        let inBand = minRatio < config.pinchReleaseRatio
+        if inBand, !approachExpired {
+            if approachHold == nil {
+                let held = rollbackThroughPinchDip(fallback: clamped)
+                approachHold = (held, time)
+                if cursor != held {
+                    cursor = held
+                    events.append(.move(to: held))
+                }
+                return
+            }
+            if time - approachHold!.since <= config.approachHoldMaxSeconds {
+                return // held, waiting for engage or abandon
+            }
+            // Hovering in the band without pinching — give up until it clears.
+            approachExpired = true
+        }
+        if !inBand {
+            approachExpired = false
+        }
+        approachHold = nil
 
         if cursor != clamped {
             cursor = clamped
@@ -450,15 +516,39 @@ public final class GestureEngine {
 
     // MARK: - Pinches
 
+    /// Rewind the cursor through the pinch-convergence dip — but not through
+    /// deliberate travel. Small inter-frame steps are the fingertip folding
+    /// toward the thumb; a large step is the hand actually going somewhere,
+    /// and the rollback must not cross it (click-after-flick lands at the
+    /// flick's destination, not its origin).
+    private static let rollbackStepLimit = 0.05 // normalized units per frame
+
+    private func rollbackThroughPinchDip(fallback: Vec2) -> Vec2 {
+        guard !cursorHistory.isEmpty else { return fallback }
+        var idx = cursorHistory.count - 1
+        var steps = 0
+        while steps < config.approachRollbackFrames, idx > 0 {
+            if cursorHistory[idx].distance(to: cursorHistory[idx - 1]) > Self.rollbackStepLimit {
+                break
+            }
+            idx -= 1
+            steps += 1
+        }
+        return cursorHistory[idx]
+    }
+
     /// sporecaster's continuous pinch ramp: 1.0 at ratio ≤ 0.4, 0 at ratio ≥ 0.9.
     static func pinchStrength(ratio: Double) -> Double {
         min(max((0.9 - ratio) / 0.5, 0), 1)
     }
 
-    private func processPinches(features: HandFeatures, at time: TimeInterval, events: inout [GestureEvent]) {
-        let leftRatio = features.pinchRatio(to: .index)
-        let rightRatio = features.pinchRatio(to: config.rightClickFinger)
-
+    private func processPinches(
+        features: HandFeatures,
+        leftRatio: Double?,
+        rightRatio: Double?,
+        at time: TimeInterval,
+        events: inout [GestureEvent]
+    ) {
         // A closing fist sweeps the index tip past the thumb, which looks
         // exactly like a pinch for a few frames. In a real fist all three
         // remaining fingers are curled tight; a deliberate pinch keeps at
@@ -498,6 +588,7 @@ public final class GestureEngine {
     }
 
     private func beginPress(button: MouseButton, at time: TimeInterval, events: inout [GestureEvent]) {
+        approachHold = nil // the hold's job is done; the press owns position now
         guard press == nil, let pos = cursor else {
             // No cursor yet (first frames) — engage without a press.
             return
@@ -509,7 +600,9 @@ public final class GestureEngine {
            lastUpClickCount < 3 { // after a triple, the chain restarts at 1
             clickCount = lastUpClickCount + 1
         }
-        press = PressState(button: button, downAt: pos, downTime: time, clickCount: clickCount)
+        press = PressState(
+            button: button, downAt: pos, downTime: time, clickCount: clickCount,
+            pointerAnchor: lastPointerClamped ?? pos)
         events.append(.buttonDown(button, at: pos, clickCount: clickCount))
     }
 

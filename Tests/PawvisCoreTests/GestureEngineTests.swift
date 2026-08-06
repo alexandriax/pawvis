@@ -69,6 +69,68 @@ final class GestureEngineTests: XCTestCase {
         }
     }
 
+    // MARK: - Pre-click stabilization
+
+    func testDefaultPointerSourceIsIndexTip() {
+        XCTAssertEqual(GestureConfig.default.pointerSource, .indexTip)
+    }
+
+    func testPinchApproachRollsBackAndClickLandsPrePinch() {
+        // Establish a cursor while pointing.
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0, count: 8)
+        let (_, before) = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], at: 0.3)
+        let prePinchCursor = before.cursor!
+
+        // Fingers converging (ratio in the band): the index tip has moved, but
+        // the cursor must roll back to / hold the pre-convergence position.
+        let (_, held) = feed([SyntheticHand.pinchIndex(gap: 0.55, wrist: Vec2(0.5, 0.7))], at: 0.333)
+        XCTAssertEqual(held.cursor!.distance(to: prePinchCursor), 0, accuracy: 0.03,
+                       "converging fingers must not drag the cursor")
+
+        // Engage: the click lands at the pre-pinch position.
+        let events = feed([SyntheticHand.pinchIndex(gap: 0.1, wrist: Vec2(0.5, 0.7))], at: 0.366).events
+        let d = downs(events, .left)
+        XCTAssertEqual(d.count, 1)
+        XCTAssertEqual(d[0].0.distance(to: prePinchCursor), 0, accuracy: 0.03,
+                       "click lands where you were pointing before the pinch motion")
+    }
+
+    func testAbandonedApproachResumesTracking() {
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0, count: 6)
+        // Enter the band briefly, then open back up without engaging.
+        feedFrames([SyntheticHand.pinchIndex(gap: 0.55, wrist: Vec2(0.5, 0.7))], from: 0.25, count: 3)
+        let resumed = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.62, 0.7))], at: 0.4).events
+        XCTAssertFalse(moves(resumed).isEmpty, "abandoning the pinch resumes cursor tracking")
+    }
+
+    func testHoveringInBandTimesOutAndResumes() {
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0, count: 6)
+        // Sit in the band well past the hold limit (0.5 s), while moving.
+        var lateMoves: [Vec2] = []
+        for i in 0..<25 { // 0.83 s
+            let t = 0.25 + Double(i) / 30
+            let wrist = Vec2(0.5 + Double(i) * 0.004, 0.7)
+            let e = feed([SyntheticHand.pinchIndex(gap: 0.55, wrist: wrist)], at: t).events
+            if t > 0.85 { lateMoves += moves(e) }
+        }
+        XCTAssertFalse(lateMoves.isEmpty,
+                       "hovering in the band must eventually resume tracking")
+    }
+
+    func testReleaseDoesNotDragCursor() {
+        // Down, then a release frame where the fingers have separated wide:
+        // the up must land exactly at the down position (no smear into a drag).
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0, count: 6)
+        let down = feedFrames([SyntheticHand.pinchIndex(gap: 0.1, wrist: Vec2(0.5, 0.7))], from: 0.25, count: 2)
+        let downPos = downs(down, .left)[0].0
+        let release = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0.35, count: 2)
+        XCTAssertTrue(drags(release, .left).isEmpty,
+                      "separating fingers must not emit drags before the up")
+        let u = ups(release, .left)
+        XCTAssertEqual(u.count, 1)
+        XCTAssertEqual(u[0].0.distance(to: downPos), 0, accuracy: 1e-9)
+    }
+
     // MARK: - Cursor movement
 
     func testCursorFollowsHand() {

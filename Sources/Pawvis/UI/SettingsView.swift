@@ -65,11 +65,12 @@ private struct GeneralSettingsTab: View {
                 range: 0.2...0.45)
 
             Picker("Cursor follows", selection: $store.settings.gestures.pointerSource) {
-                Text("Palm (recommended — steadiest)").tag(PointerSource.palmCenter)
+                Text("Index fingertip (recommended)").tag(PointerSource.indexTip)
                 Text("Thumb tip").tag(PointerSource.thumbTip)
-                Text("Index fingertip").tag(PointerSource.indexTip)
                 Text("Thumb–index midpoint").tag(PointerSource.pinchMidpoint)
             }
+            Text("Point with your index finger; clicks land where you were pointing before the pinch motion.")
+                .font(.caption).foregroundStyle(.secondary)
 
             Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
             Text("Leave on for a normal user-facing webcam.")

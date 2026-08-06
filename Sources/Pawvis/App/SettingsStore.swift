@@ -51,6 +51,14 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "PawvisMigration.gpt4oTranscribe")
         }
+        // v4: palm tracking retired — the cursor follows the index fingertip,
+        // with pre-click stabilization handling pinch jostle.
+        if !defaults.bool(forKey: "PawvisMigration.indexPointer") {
+            if settings.gestures.pointerSource == .palmCenter {
+                settings.gestures.pointerSource = .indexTip
+            }
+            defaults.set(true, forKey: "PawvisMigration.indexPointer")
+        }
     }
 
     private func persist() {
