@@ -11,8 +11,10 @@ all without touching a mouse or keyboard.
 
 - **All hand tracking runs on-device** (Apple's Vision framework — no cloud,
   no model downloads).
-- **Voice dictation is optional** and uses the OpenAI Realtime API; audio
-  leaves your Mac only while dictation is armed.
+- **Voice dictation is optional and on-device by default** (Apple's speech
+  engine — SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
+  Switch to the OpenAI Realtime engine in Settings if you prefer; only then
+  does audio leave your Mac, and only while dictation is armed.
 - **Fingertip overlays** show exactly what Pawvis sees: dots on your
   fingertips and a ring that tightens as your pinch approaches a click, so
   grabbing a window and dragging it feels precise.
@@ -21,7 +23,7 @@ all without touching a mouse or keyboard.
 
 | Gesture | Action |
 |---|---|
-| Open hand, move | Move the cursor (follows your thumb–index midpoint) |
+| Open hand, move | Move the cursor (follows your palm, so it stays steady while fingers pinch) |
 | Thumb + index pinch, release quickly | **Left click** (twice = double-click, thrice = triple) |
 | Thumb + index pinch, hold + move | **Drag** — the button stays down as long as you hold the pinch |
 | Thumb + middle pinch | **Right click** (finger configurable; hold to right-drag) |
@@ -46,10 +48,12 @@ smoothing, camera reach) is tunable in **Settings**, and the in-app
 4. Say **"stop typing"** (or any configured stop phrase) to stop typing while
    staying armed; use the gesture again to disarm completely.
 
-Transcription uses `gpt-live-transcribe` by default (switchable to
-`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, or `whisper-1`). An optional
-low-latency mode types words as you say them and reconciles revisions with
-backspaces.
+The default engine is **Apple's on-device recognition** — private, free, no
+setup. The **OpenAI engine** (Settings → Dictation) uses `gpt-4o-transcribe`
+by default (`gpt-live-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1`
+also available) and needs your API key — paste the whole key including its
+`sk-` prefix. An optional low-latency mode types words as you say them and
+reconciles revisions with backspaces.
 
 ## Install & run
 
@@ -82,12 +86,13 @@ Pawvis needs, and will prompt for:
 > Note: the bundle is ad-hoc signed, so after rebuilding you may need to
 > re-grant Accessibility (remove and re-add Pawvis in System Settings).
 
-### OpenAI API key
+### OpenAI API key (only for the OpenAI engine)
 
-Dictation needs your own OpenAI API key. Add it in **Settings → Dictation** —
-it's stored in your login keychain, never in the app bundle or settings files.
-For development, Pawvis also picks up `OPENAI_API_KEY` from the environment or
-a `.env` file in the repo root (git-ignored).
+The default Apple engine needs no key. If you switch to the OpenAI engine,
+add your key in **Settings → Dictation** (the whole key, `sk-` prefix
+included) — it's stored in your login keychain, never in the app bundle or
+settings files. For development, Pawvis also picks up `OPENAI_API_KEY` from
+the environment or a `.env` file in the repo root (git-ignored).
 
 ## Architecture
 
@@ -128,8 +133,10 @@ Design notes:
 
 - Camera frames are processed in-memory by Vision and discarded; the overlay
   windows are excluded from screenshots and screen recordings.
-- Audio streams to OpenAI **only** between arming and disarming dictation;
-  the pill and menu bar icon always show when that's the case.
+- With the default Apple engine, dictation audio never leaves your Mac.
+  With the OpenAI engine, audio streams to OpenAI **only** between arming and
+  disarming dictation; the pill and menu bar icon always show when that's the
+  case.
 - The API key lives in the keychain. `.env` is git-ignored.
 
 ## Development
