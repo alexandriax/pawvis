@@ -239,9 +239,9 @@ public final class GestureEngine {
         // a closed hand that got primary first (resting on the desk, say) must
         // not block the deliberately opened one from taking the cursor.
         if config.controlTrigger == .openHand, !armed,
-           !(triggerFeatures(of: primary)?.isOpenHand() ?? false),
+           !(armFeatures(of: primary.hand)?.isOpenHand() ?? false),
            let open = tracked.first(where: { $0.slotID != primary.slotID
-               && (triggerFeatures(of: $0)?.isOpenHand() ?? false) }) {
+               && (armFeatures(of: $0.hand)?.isOpenHand() ?? false) }) {
             primary = open
             primarySlotID = open.slotID
         }
@@ -252,7 +252,7 @@ public final class GestureEngine {
             minJointConfidence: config.minJointConfidence)
 
         // 3. The control trigger decides whether this hand gets the cursor.
-        updateTrigger(features)
+        updateTrigger(features, hand: primary.hand)
 
         // 4. The scroll pose's own arm/park state machine. Before the cursor
         // step because an active scroll parks the cursor.
@@ -343,23 +343,31 @@ public final class GestureEngine {
 
     // MARK: - Control trigger
 
-    /// Pose features for trigger checks on any tracked hand (the ones the
-    /// main pipeline computes only for the primary).
-    private func triggerFeatures(of hand: TrackedHand) -> HandFeatures? {
-        HandFeatures(hand: hand.hand,
+    /// Pose features for the *arm* side of the trigger, on any tracked hand.
+    /// Arming demands the same joint confidence that click engagement does:
+    /// Vision reports low confidence exactly when it is guessing at
+    /// overlapping or foreshortened joints, and a guessed-open hand must not
+    /// take the cursor any more than a guessed pinch may click. (The disarm
+    /// side keeps the permissive floor — low confidence holds state, never
+    /// flaps it.)
+    private func armFeatures(of hand: Hand) -> HandFeatures? {
+        HandFeatures(hand: hand,
                      thresholds: config.poseThresholds,
-                     minJointConfidence: config.minJointConfidence)
+                     minJointConfidence: max(config.minJointConfidence, Self.engageConfidenceFloor))
     }
 
     /// The arm/disarm state machine for `.openHand`: an open hand held
     /// `triggerArmFrames` arms cursor control; a closed hand (3+ fingers
-    /// curled) held `triggerDisarmFrames` parks it again. Never disarms while
+    /// curled) held `triggerDisarmFrames` parks it again. Arming reads the
+    /// hand through `armFeatures` — engage-grade joint confidence plus the
+    /// openness floor — because that side is where phantoms grab the cursor;
+    /// disarming stays on the permissive `features`. Never disarms while
     /// a button is engaged or held — every click gesture closes part of the
     /// hand, and dropping control mid-press would strand the button down.
     /// Missing joints hold the current state, exactly as the button ratios do.
     /// (Clicks themselves are deliberately NOT gated on openness — see
     /// AGENTS.md; only the *arming* of cursor control is.)
-    private func updateTrigger(_ features: HandFeatures?) {
+    private func updateTrigger(_ features: HandFeatures?, hand: Hand) {
         guard config.controlTrigger == .openHand else {
             armed = true
             armFrames = 0
@@ -387,7 +395,7 @@ public final class GestureEngine {
             rightButton = ButtonState()
         } else {
             disarmFrames = 0
-            guard features.isOpenHand() else {
+            guard armFeatures(of: hand)?.isOpenHand() == true else {
                 armFrames = 0
                 return
             }

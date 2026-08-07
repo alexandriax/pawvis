@@ -92,11 +92,15 @@ Hard-won constraints, each of which broke something real:
   fingers half-curled; an openness guard silently blocked nearly every real
   click.
 - **The open-hand control trigger gates *arming*, never clicks.** In
-  `.openHand` mode an open hand (all four fingers extended — pose bands, not
-  `openness()`) arms cursor control; a fist (3+ fingers curled) parks it.
-  Disarming is blocked while any button is engaged or held, because a click
-  closes part of the hand. The scroll pose folds only two fingers, so it
-  never trips the three-finger disarm line.
+  `.openHand` mode an open hand arms cursor control; a fist (3+ fingers
+  curled) parks it. *Arming* requires all four pose bands extended **and**
+  `openness()` above `poseThresholds.openHandMinOpenness` (the strictness
+  slider) **and** engage-grade joint confidence — the angle bands alone are
+  fooled by fingers curled toward the camera (their 2D projection stays
+  straight), which let closed hands seize the cursor. *Disarming* still uses
+  the permissive pose bands only, and is blocked while any button is engaged
+  or held, because a click closes part of the hand. The scroll pose folds
+  only two fingers, so it never trips the three-finger disarm line.
 - **Low-confidence frames hold state, never flap it.** A missing fingertip
   must not release a held button; only the tracking-loss grace window does.
 - **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted

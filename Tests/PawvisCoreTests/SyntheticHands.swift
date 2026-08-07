@@ -207,6 +207,24 @@ enum SyntheticHand {
               wrist: wrist, scale: scale)
     }
 
+    /// Fingers curled *toward* the camera: each finger chain projects
+    /// perfectly straight in 2D (the PIP angle reads ~π, "extended") while the
+    /// tips land barely past the knuckles — the foreshortening failure that
+    /// used to arm open-hand control from a hand that isn't open at all.
+    static func curledTowardCamera(wrist: Vec2 = Vec2(0.5, 0.7),
+                                   scale: Double = 0.15) -> Hand {
+        var hand = build(pose: Pose(fingerDirs: relaxedDirs, thumbTipOffset: thumbTuckedOffset),
+                         wrist: wrist, scale: scale)
+        for finger in Finger.allCases {
+            let mcp = hand[finger.mcp]!
+            let dir = relaxedDirs[finger]!
+            hand.setPoint(mcp + dir * (0.18 * scale), for: finger.pip)
+            hand.setPoint(mcp + dir * (0.28 * scale), for: finger.dip)
+            hand.setPoint(mcp + dir * (0.38 * scale), for: finger.tip)
+        }
+        return hand
+    }
+
     /// All four fingers half-bent — openness lands between a fist and an open
     /// hand (the grab hysteresis band).
     static func halfClosed(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {

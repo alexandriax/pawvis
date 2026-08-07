@@ -1063,6 +1063,14 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertEqual(known.controlTrigger, .anyHand)
     }
 
+    func testPoseThresholdsSavedBeforeTheStrictnessSliderKeepDefaults() throws {
+        let old = try JSONDecoder().decode(
+            PoseThresholds.self, from: Data(#"{"extendedAngle":2.0}"#.utf8))
+        XCTAssertEqual(old.extendedAngle, 2.0)
+        XCTAssertEqual(old.openHandMinOpenness, PoseThresholds().openHandMinOpenness,
+                       "settings from before the slider existed must not zero the floor")
+    }
+
     func testDisarmedHandNeverMovesClicksOrScrolls() {
         useOpenHandTrigger()
         var events: [GestureEvent] = []
@@ -1116,6 +1124,57 @@ final class GestureEngineTests: XCTestCase {
         }
         XCTAssertTrue(moves(events).isEmpty,
                       "the arm debounce needs consecutive open frames, not a total")
+    }
+
+    func testForeshortenedCurlNeverArms() {
+        useOpenHandTrigger()
+        // Fingers curled toward the camera read "extended" to the angle bands
+        // (each 2D chain projects straight) — the pose that used to arm and
+        // let a closed hand drag the cursor around.
+        var events: [GestureEvent] = []
+        for i in 0..<15 {
+            events += feed([SyntheticHand.curledTowardCamera(wrist: Vec2(0.3 + Double(i) * 0.02, 0.7))],
+                           at: Double(i) / 30).events
+        }
+        XCTAssertTrue(moves(events).isEmpty,
+                      "a hand curled toward the camera must not take the cursor")
+
+        // A genuinely open hand still arms on the usual debounce.
+        let armed = feedFrames([SyntheticHand.openRelaxed()], from: 0.6, count: 3)
+        XCTAssertEqual(moves(armed).count, 1)
+    }
+
+    func testFaintlyTrackedOpenHandNeverArms() {
+        useOpenHandTrigger()
+        var joints: [HandJoint: Vec2] = [:]
+        let open = SyntheticHand.openRelaxed()
+        for joint in HandJoint.allCases {
+            if let p = open[joint] { joints[joint] = p }
+        }
+        // 0.30 clears minJointConfidence (0.25), so the pose is fully visible
+        // to the permissive features — only the engage-grade arm gate (0.40)
+        // can hold control back.
+        let faint = Hand(joints: joints, jointConfidence: 0.30)
+        let events = feedFrames([faint], from: 0, count: 15)
+        XCTAssertTrue(moves(events).isEmpty,
+                      "guessed-at joints must not arm control, exactly as they must not click")
+
+        let armed = feedFrames([SyntheticHand.openRelaxed()], from: 0.6, count: 3)
+        XCTAssertEqual(moves(armed).count, 1, "tracked confidently, the same pose arms")
+    }
+
+    func testOpenHandStrictnessGatesArming() {
+        var config = Self.testConfig()
+        config.controlTrigger = .openHand
+        config.poseThresholds.openHandMinOpenness = 0.58
+        engine = GestureEngine(config: config)
+
+        let relaxed = feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 15)
+        XCTAssertTrue(moves(relaxed).isEmpty,
+                      "at high strictness a relaxed open hand does not arm")
+        let splayed = feedFrames([SyntheticHand.openSplayed()], from: 0.6, count: 3)
+        XCTAssertEqual(moves(splayed).count, 1,
+                       "a fully splayed hand clears the raised openness floor")
     }
 
     func testArmedIndexTapClicksAndStaysArmed() {
