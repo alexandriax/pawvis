@@ -426,7 +426,7 @@ private struct VoiceControlSettingsTab: View {
             Divider()
 
             SettingRow(
-                title: "Free-form commands (“\(wake) \(String(repeating: "_", count: 6))”) are handled by",
+                title: "Commands after “\(wake)” are handled by",
                 caption: agentPickerCaption
             ) {
                 Picker("", selection: $store.settings.voiceControl.agentExecutor) {
@@ -487,9 +487,9 @@ private struct VoiceControlSettingsTab: View {
 
     private var agentPickerCaption: String {
         if store.settings.voiceControl.agentExecutor.isEmpty {
-            return "On-device: Apple Intelligence maps the spoken words to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
+            return "On-device: the instant grammar runs first, then Apple Intelligence maps what it missed to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
         }
-        return "⚠️ The agent CLI runs in the background with ALL permission checks bypassed and can execute anything on this Mac that you could — a spoken command becomes an autonomous agent run. It's slower than on-device, far more capable, and reports back in the top-of-screen capsule."
+        return "⚠️ EVERYTHING after the wake word goes to the agent, asked to perform it via computer use — with ALL permission checks bypassed, it can do anything on this Mac that you could. Only “\(wake), stop listening” stays local. Slower than on-device, far more capable; results flash in the top-of-screen capsule."
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {

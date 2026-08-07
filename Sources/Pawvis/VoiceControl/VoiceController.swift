@@ -122,9 +122,14 @@ final class VoiceController: ObservableObject {
         engine.start()
         // Warm the on-device model now so the first mapped command doesn't
         // pay the ~5 s cold-start cost.
-        if config.visualContextEnabled, config.agentExecutor.isEmpty, #available(macOS 26.0, *) {
-            IntentMapper.prewarm()
-            VisualIntentResolver.prewarm()
+        if #available(macOS 26.0, *) {
+            if !config.agentExecutor.isEmpty {
+                // Agent mode uses the model only to rescue garbled wake words.
+                WakeRescuer.prewarm()
+            } else if config.visualContextEnabled {
+                IntentMapper.prewarm()
+                VisualIntentResolver.prewarm()
+            }
         }
     }
 
@@ -149,6 +154,10 @@ final class VoiceController: ObservableObject {
         case .completed(_, let transcript):
             liveItemId = nil
             liveText = ""
+            if let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor) {
+                handleAgentUtterance(transcript, tool: tool)
+                return
+            }
             guard parser.hasWakePrefix(transcript) else {
                 // A partial hypothesis may have matched and shown the
                 // capsule; the final says it wasn't for us.
@@ -205,15 +214,12 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// A command the deterministic grammar didn't recognize. The transcript
-    /// is already stripped of the wake word — clean for whichever brain
-    /// handles it: the opt-in agent CLI, or the on-device intent mapper
-    /// (with screen grounding for commands that refer to what's visible).
+    /// A command the deterministic grammar didn't recognize, on-device mode
+    /// only — agent mode never reaches the grammar (see
+    /// `handleAgentUtterance`). The transcript is already stripped of the
+    /// wake word — clean for the intent mapper (with screen grounding for
+    /// commands that refer to what's visible).
     private func handleFreeForm(_ transcript: String) {
-        if let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor) {
-            runAgent(transcript, tool: tool)
-            return
-        }
         guard config.visualContextEnabled else {
             flashNotice("Didn't recognize a command: “\(transcript)”")
             return
@@ -309,6 +315,50 @@ final class VoiceController: ObservableObject {
                 flashNotice("Didn't understand: “\(transcript)”")
             }
         }
+    }
+
+    /// Agent mode is a pipe: everything spoken after the wake word goes to
+    /// the chosen agent CLI verbatim — the local grammar doesn't intercept.
+    /// Two exceptions: "stop listening" (and friends) still works instantly,
+    /// because turning voice control off must never wait on an agent round
+    /// trip; and a bare wake word does nothing. When the strict wake gate
+    /// rejects the utterance but the opening chunks *nearly* match the wake
+    /// word, the on-device model gets one chance to confirm the mishearing
+    /// and recover the command — unconfirmed utterances are dropped unseen.
+    private func handleAgentUtterance(_ transcript: String, tool: AgentCLIExecutor.Tool) {
+        if parser.wakeRemainder(transcript) != nil {
+            transcriptOverlay.complete(transcript)
+            if case .stopVoiceControl? = parser.parse(transcript).command {
+                stop()
+                return
+            }
+            dispatchToAgent(parser.wakeRemainder(transcript), tool: tool)
+            return
+        }
+        guard #available(macOS 26.0, *), WakeRescuer.isSupported,
+              let nearRemainder = parser.nearWakeRemainder(transcript)?
+                  .trimmingCharacters(in: .whitespacesAndNewlines),
+              !nearRemainder.isEmpty else {
+            transcriptOverlay.hide()
+            return
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let confirmed = (try? await WakeRescuer.confirmsInstruction(nearRemainder)) ?? false
+            guard confirmed else {
+                self.transcriptOverlay.hide()
+                return
+            }
+            self.transcriptOverlay.complete(transcript)
+            self.dispatchToAgent(nearRemainder, tool: tool)
+        }
+    }
+
+    private func dispatchToAgent(_ command: String?, tool: AgentCLIExecutor.Tool) {
+        let cleaned = command?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Bare wake word — attention with nothing to do.
+        guard !cleaned.isEmpty else { return }
+        runAgent(cleaned, tool: tool)
     }
 
     /// Background agent run: voice control stays fully responsive (the run
