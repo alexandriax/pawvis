@@ -76,6 +76,13 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         if !force, !session.inputs.isEmpty, deviceID == currentDeviceID { return }
         currentDeviceID = deviceID
 
+        // Center Stage pans/zooms the field of view as people move and can
+        // override frame-duration locks — both poison gesture mapping. Opt out.
+        if AVCaptureDevice.centerStageControlMode != .app {
+            AVCaptureDevice.centerStageControlMode = .app
+            AVCaptureDevice.isCenterStageEnabled = false
+        }
+
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
@@ -101,9 +108,17 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             session.sessionPreset = .hd1280x720
         }
 
+        lockFrameRate(device)
+
         if !session.outputs.contains(output) {
+            // Prefer the sensor's native biplanar YUV: requesting BGRA forces
+            // AVFoundation to color-convert every frame before Vision sees it,
+            // and nothing else in the app consumes these buffers.
+            let native = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            let format = output.availableVideoPixelFormatTypes.contains(native)
+                ? native : kCVPixelFormatType_32BGRA
             output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferPixelFormatTypeKey as String: format,
             ]
             output.alwaysDiscardsLateVideoFrames = true
             output.setSampleBufferDelegate(self, queue: frameQueue)
@@ -112,6 +127,25 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             }
         }
         Log.camera.info("Camera configured: \(device.localizedName, privacy: .public)")
+    }
+
+    /// Pin capture to a steady 30 fps. Left free-running, auto-exposure
+    /// silently lengthens frame durations in dim light — motion blur on a
+    /// moving hand, plus an irregular cadence that feeds phantom velocity
+    /// into the One Euro filters downstream.
+    private func lockFrameRate(_ device: AVCaptureDevice) {
+        let target = CMTime(value: 1, timescale: 30)
+        guard device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
+            $0.minFrameDuration <= target && target <= $0.maxFrameDuration
+        }) else { return }
+        do {
+            try device.lockForConfiguration()
+            device.activeVideoMinFrameDuration = target
+            device.activeVideoMaxFrameDuration = target
+            device.unlockForConfiguration()
+        } catch {
+            Log.camera.error("Frame-rate lock failed: \(error.localizedDescription)")
+        }
     }
 
     func captureOutput(

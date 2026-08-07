@@ -25,14 +25,16 @@ Deliberately minimal — three motions, learned in seconds:
 
 | Gesture | Action |
 |---|---|
-| Open hand, move | **Move** — the claw cursor follows your hand |
-| Close your hand (grab) | **Left click** — twice quickly = double-click, thrice = triple |
-| Keep it closed and move | **Drag** — open your hand to let go |
+| Move your hand | **Move** — the claw cursor sits between your thumb and index fingertip |
+| Pinch thumb + index together | **Left click** — twice quickly = double-click, thrice = triple |
+| Hold the pinch and move | **Drag** — separate your fingers to let go |
 
 The claw shows state at a glance: open paw while pointing, retracted purple
-paw while your hand is closed, a ring that tightens as you close, and a pulse
-on every registered click. Grab sensitivity, smoothing, and camera reach are
-tunable in **Settings**.
+paw while pinched, a ring that tightens as your fingertips approach, and a
+pulse on every registered click. Pinch sensitivity, smoothing, and camera
+reach are tunable in **Settings** (with a one-click reset to defaults), and
+**Settings → General → Show tracking diagnostics** displays live fps, pinch
+ratio, and fingertip confidence when you want to see what the tracker sees.
 
 ## Voice dictation
 
@@ -121,14 +123,19 @@ Design notes:
 - The gesture engine is **deterministic and clock-free** — timing comes from
   frame timestamps, so click chaining, hold-to-drag, hysteresis, debounce,
   and tracking-loss releases are all covered by unit tests.
-- Clicking is a **hand close**, detected on sporecaster's openness scalar
-  (mean fingertip-to-palm distance normalized by hand scale) with a
-  hysteresis band and a two-frame debounce. The cursor anchors on the palm,
-  which barely moves while the fingers curl — so clicks are inherently
-  position-stable with no correction machinery.
-- Landmark smoothing is One Euro per joint with sporecaster's slot tracking
-  and 300 ms stale reset; mouse events post through a paced serial queue
-  (≥6 ms apart — unpaced pairs get dropped by macOS and wedge apps).
+- Clicking is a **thumb–index pinch** with sporecaster's exact hysteresis
+  (engage at 0.45, release at 0.68 of the scale-normalized tip distance)
+  plus a two-frame debounce in both directions. The cursor is the pinch
+  **midpoint** — the tips converge onto it as you pinch, so clicks are
+  inherently position-stable. A fingertip dropping below the confidence
+  floor *holds* the pinch state rather than flapping it.
+- Vision's hand pose is stateless (no temporal tracking — verified against
+  the SDK), so the camera pipeline is tuned to feed it a steady signal:
+  frame rate locked at 30 fps (auto-exposure otherwise lengthens frames and
+  smears a moving hand), Center Stage disabled, native YUV buffers, and
+  One Euro smoothing per joint at sporecaster's landmark tuning with slot
+  tracking and a 300 ms stale reset. Mouse events post through a paced
+  serial queue (≥6 ms apart — unpaced pairs get dropped by macOS).
 - If tracking drops mid-drag, held buttons release automatically after a
   grace window — nothing gets stuck down. Quitting the app does the same.
 

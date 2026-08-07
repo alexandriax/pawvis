@@ -19,6 +19,13 @@ final class HandTrackingService {
         (.littleMCP, .littleMCP), (.littlePIP, .littlePIP), (.littleDIP, .littleDIP), (.littleTip, .littleTip),
     ]
 
+    /// One handler reused across frames: VNImageRequestHandler is a
+    /// single-image object that re-pays its setup cost every frame, while the
+    /// sequence handler may cache intermediate state between frames. (The hand
+    /// pose request itself is stateless either way — this is latency, not
+    /// accuracy.)
+    private let sequenceHandler = VNSequenceRequestHandler()
+
     init() {
         request = VNDetectHumanHandPoseRequest()
         request.maximumHandCount = 2
@@ -27,9 +34,8 @@ final class HandTrackingService {
     /// Synchronous detection (call on the camera queue — its serial nature plus
     /// `alwaysDiscardsLateVideoFrames` provides natural backpressure).
     func detectHands(in sampleBuffer: CMSampleBuffer) -> [Hand] {
-        let handler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .up)
         do {
-            try handler.perform([request])
+            try sequenceHandler.perform([request], on: sampleBuffer, orientation: .up)
         } catch {
             Log.tracking.error("Vision error: \(error.localizedDescription)")
             return []
