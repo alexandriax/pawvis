@@ -235,6 +235,16 @@ The merge path needs the PR to come from a branch in this repo: `GITHUB_TOKEN`
 is read-only on fork pull requests and cannot publish. Release a fork's work by
 pushing the tag once it has landed on main.
 
+**Merging only ships if the PR targets `main`.** `release.yml` listens for PRs
+closed against main — a PR merged into any other base branch produces no
+release and its code never reaches main. This is how PR #2 was lost: it was
+stacked on PR #3's head branch, #3 merged first, and merging #2 afterwards
+just updated an orphaned branch. If you stack a PR, **retarget it to main once
+the parent merges** — GitHub does this automatically when the parent's head
+branch is deleted at merge time, so delete head branches when you merge (or
+turn on "Automatically delete head branches" in the repo settings). The
+`pr.yml` gate fails any PR whose base isn't main as the reminder.
+
 **Keep the asset name fixed, not versioned.** It makes
 `https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip` a
 permanent download link (the README's button, which therefore never needs

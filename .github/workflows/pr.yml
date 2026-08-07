@@ -26,6 +26,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Merging only ships when the PR targets main: release.yml listens for
+      # PRs closed against main, so a PR merged into any other branch vanishes
+      # without a release — which is exactly how PR #2 was lost. A stacked PR
+      # is fine while its parent is open; this check stays red as the reminder
+      # to retarget it to main once the parent merges. (GitHub retargets
+      # automatically if the parent's head branch is deleted on merge.)
+      - name: Must target main to ship
+        if: github.event.pull_request.base.ref != github.event.repository.default_branch
+        run: |
+          echo "::error::This PR targets '${{ github.event.pull_request.base.ref }}', not \
+          '${{ github.event.repository.default_branch }}'. Merging it will NOT run the release \
+          workflow — the change would land on a side branch and never ship. If this is a stacked \
+          PR, retarget it to '${{ github.event.repository.default_branch }}' after the parent \
+          merges (automatic when the parent's head branch is deleted)."
+          exit 1
+
       - name: Exactly one of major / minor / patch
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
