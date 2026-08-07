@@ -31,15 +31,15 @@ struct GestureGuideView: View {
 
     private var pointingRows: [Row] {
         [
-            Row(symbol: "hand.raised.fill",
+            Row(symbol: "hand.point.up.left.fill",
                 title: "Move",
-                detail: "Hold your hand open and move it — the claw cursor follows your hand. The ring around it tightens as your hand starts to close."),
-            Row(symbol: "hand.raised.fingers.spread.fill",
+                detail: "Move your hand — the claw cursor sits between your thumb and index fingertip. The ring around it tightens as they come together."),
+            Row(symbol: "hand.pinch.fill",
                 title: "Click",
-                detail: "Close your hand briefly, like grabbing. The claw retracts and turns purple while your hand is closed. Close twice quickly for a double-click, three times for a triple."),
+                detail: "Touch your thumb and index fingertip together briefly. The claw retracts and turns purple while pinched. Pinch twice quickly for a double-click, three times for a triple."),
             Row(symbol: "hand.draw.fill",
                 title: "Drag / hold",
-                detail: "Close your hand and keep it closed while you move — grab a window title bar, select text, drag files. Open your hand to let go."),
+                detail: "Pinch and hold while you move — grab a window title bar, select text, drag files. The button stays down as long as you hold the pinch; separate your fingers to let go."),
         ]
     }
 

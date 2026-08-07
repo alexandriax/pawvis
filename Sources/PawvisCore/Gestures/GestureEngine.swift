@@ -5,13 +5,14 @@ import Foundation
 /// timestamps, so every behavior is unit-testable.
 ///
 /// The gesture model is intentionally minimal:
-///   open hand → the cursor follows the hand (palm anchor)
-///   close hand → left button down (click; twice quickly = double-click)
-///   move while closed → drag
-///   open hand → button up
+///   hand tracked        → the cursor follows the thumb–index midpoint
+///   thumb meets index   → left button down (click; twice quickly = double-click)
+///   move while pinched  → drag
+///   open the pinch      → button up
 ///
-/// The palm barely moves while the fingers curl into a fist, so clicking is
-/// inherently position-stable — no rollback or anchor correction needed.
+/// The two tips converge toward their midpoint as the pinch closes, so the
+/// cursor holds still through a click on its own — no rollback, anchor, or
+/// freeze logic needed.
 ///
 /// Input hands are in **camera space**: normalized [0,1], x right, y down,
 /// unmirrored. The engine mirrors, maps through the interaction box, and
@@ -66,15 +67,20 @@ public final class GestureEngine {
 
     private static let slotMatchMax = 0.25 // normalized palm travel to keep identity
 
+    /// sporecaster's pinch-strength ramp for the overlay ring: 0 at a ratio of
+    /// `strengthCeiling`, 1 once the tips are `strengthSpan` closer.
+    private static let strengthCeiling = 0.9
+    private static let strengthSpan = 0.5
+
     private var slots: [HandSlot]
     private var primarySlotID: Int?
     private var lastHandTime: TimeInterval = -.infinity
 
     private var cursor: Vec2?
     private var press: PressState?
-    private var grabbed = false
-    private var grabDebounce = 0
-    private var lastOpenness: Double = 1.0
+    private var pinched = false
+    private var engageFrames = 0
+    private var releaseFrames = 0
 
     // Double-click chaining.
     private var lastUpTime: TimeInterval = -.infinity
@@ -83,7 +89,7 @@ public final class GestureEngine {
 
     // MARK: - Public API
 
-    /// Release a held grab (used on shutdown / tracking disable so the button
+    /// Release a held pinch (used on shutdown / tracking disable so the button
     /// is never left stuck down).
     public func forceRelease(at time: TimeInterval) -> [GestureEvent] {
         var events: [GestureEvent] = []
@@ -91,8 +97,9 @@ public final class GestureEngine {
             events.append(.buttonUp(.left, at: cursor ?? p.downAt, clickCount: p.clickCount))
         }
         press = nil
-        grabbed = false
-        grabDebounce = 0
+        pinched = false
+        engageFrames = 0
+        releaseFrames = 0
         // A forced release must not chain into a double-click.
         lastUpTime = -.infinity
         _ = time
@@ -105,7 +112,6 @@ public final class GestureEngine {
         primarySlotID = nil
         cursor = nil
         lastHandTime = -.infinity
-        lastOpenness = 1.0
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -136,8 +142,9 @@ public final class GestureEngine {
             thresholds: config.poseThresholds,
             minJointConfidence: config.minJointConfidence)
 
-        // 3. Cursor follows the palm (stable through hand closes).
-        if let pointer = features?.pointerPoint(.palmCenter) {
+        // 3. Cursor follows the pinch midpoint (the tips converge onto it, so a
+        // click barely moves it).
+        if let pointer = features?.pointerPoint(.pinchMidpoint) {
             let clamped = pointer.clampedToUnit()
             if var p = press {
                 // Micro-movement suppression: quick clicks shouldn't smear
@@ -154,13 +161,17 @@ public final class GestureEngine {
             }
         }
 
-        // 4. Grab state: openness with hysteresis + debounce.
-        if let openness = features?.openness() {
-            lastOpenness = openness
-            updateGrab(openness: openness, at: frame.time, events: &events)
+        // 4. Pinch state: thumb–index ratio with hysteresis + debounce.
+        let ratio = features?.pinchRatio(to: .index)
+        if let ratio {
+            updatePinch(ratio: ratio, at: frame.time, events: &events)
+        } else {
+            // A tip below the confidence floor must never flap the state: hold
+            // it and restart both counters. Real dropouts go through the
+            // tracking-loss grace instead.
+            engageFrames = 0
+            releaseFrames = 0
         }
-        // Missing openness (occluded joints): hold current state; the
-        // tracking-loss grace handles real dropouts.
 
         // 5. Overlay state.
         overlay.hands = tracked.map { th in
@@ -170,40 +181,46 @@ public final class GestureEngine {
             return oh
         }
         overlay.cursor = cursor
-        overlay.grabbed = grabbed
+        overlay.grabbed = pinched
         overlay.isDragging = press?.dragging ?? false
-        overlay.closingProgress = closingProgress(for: lastOpenness)
+        overlay.closingProgress = closingProgress(for: ratio)
 
         return (events, overlay)
     }
 
-    // MARK: - Grab detection
+    // MARK: - Pinch detection
 
-    private func updateGrab(openness: Double, at time: TimeInterval, events: inout [GestureEvent]) {
-        if !grabbed {
-            if openness < config.grabCloseThreshold {
-                grabDebounce += 1
-                if grabDebounce >= config.grabDebounceFrames {
-                    grabbed = true
-                    grabDebounce = 0
-                    beginPress(at: time, events: &events)
-                }
-            } else {
-                grabDebounce = 0
+    private func updatePinch(ratio: Double, at time: TimeInterval, events: inout [GestureEvent]) {
+        if !pinched {
+            releaseFrames = 0
+            guard ratio < config.pinchEngageRatio else {
+                engageFrames = 0 // includes the hysteresis band: no transition there
+                return
             }
-        } else if openness > config.grabOpenThreshold {
-            grabbed = false
-            grabDebounce = 0
+            engageFrames += 1
+            guard engageFrames >= config.pinchDebounceFrames else { return }
+            engageFrames = 0
+            pinched = true
+            beginPress(at: time, events: &events)
+        } else {
+            engageFrames = 0
+            guard ratio > config.pinchReleaseRatio else {
+                releaseFrames = 0
+                return
+            }
+            releaseFrames += 1
+            guard releaseFrames >= config.pinchDebounceFrames else { return }
+            releaseFrames = 0
+            pinched = false
             endPress(at: time, events: &events)
         }
     }
 
-    /// 0 when comfortably open, 1 at the click threshold.
-    private func closingProgress(for openness: Double) -> Double {
-        let span = config.grabOpenThreshold - config.grabCloseThreshold
-        guard span > 1e-6 else { return grabbed ? 1 : 0 }
-        if grabbed { return 1 }
-        return min(max((config.grabOpenThreshold - openness) / span, 0), 1)
+    /// 0 when the tips sit comfortably apart, 1 while pinched.
+    private func closingProgress(for ratio: Double?) -> Double {
+        if pinched { return 1 }
+        guard let ratio else { return 0 }
+        return min(max((Self.strengthCeiling - ratio) / Self.strengthSpan, 0), 1)
     }
 
     private func beginPress(at time: TimeInterval, events: inout [GestureEvent]) {
@@ -241,9 +258,9 @@ public final class GestureEngine {
             events.append(contentsOf: forceRelease(at: time))
             primarySlotID = nil
         } else {
-            overlay.grabbed = grabbed
+            overlay.grabbed = pinched
             overlay.isDragging = press?.dragging ?? false
-            overlay.closingProgress = grabbed ? 1 : 0
+            overlay.closingProgress = pinched ? 1 : 0
         }
         return (events, overlay)
     }

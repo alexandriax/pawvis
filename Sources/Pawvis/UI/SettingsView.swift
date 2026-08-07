@@ -79,17 +79,18 @@ private struct GestureSettingsTab: View {
 
     var body: some View {
         Form {
-            Text("Open hand moves the cursor · close your hand to click · hold it closed and move to drag.")
+            Text("Move your hand to point · pinch thumb and index finger to click · hold the pinch and move to drag.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
             LabeledSlider(
-                label: "Grab sensitivity",
-                caption: "How tightly you must close your hand to click. Right = a loose close counts; left = squeeze harder.",
-                value: $store.settings.gestures.grabCloseThreshold,
-                range: 0.10...0.30)
+                label: "Pinch sensitivity",
+                caption: "Right = a lighter pinch clicks. Left = your fingertips must nearly touch.",
+                value: $store.settings.gestures.pinchEngageRatio,
+                range: 0.30...0.60)
 
             Divider()
 
@@ -97,6 +98,18 @@ private struct GestureSettingsTab: View {
             Toggle("Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
             Toggle("Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
             Toggle("Status pill", isOn: $store.settings.overlay.showStatusPill)
+
+            Divider()
+
+            HStack {
+                Button("Reset gestures to defaults") {
+                    store.settings.gestures = .default
+                }
+                Text("Restores sensitivity, smoothing, reach, and timing to the tuned defaults.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(20)
     }
@@ -261,7 +274,11 @@ private struct LabeledSlider: View {
         VStack(alignment: .leading, spacing: 2) {
             Slider(value: $value, in: range) { Text(label) }
             if let caption {
-                Text(caption).font(.caption).foregroundStyle(.secondary)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true) // wrap, don't truncate
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

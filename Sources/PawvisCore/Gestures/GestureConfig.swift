@@ -1,19 +1,20 @@
 import Foundation
 
-/// Tunables for the (deliberately minimal) gesture engine: open hand moves,
-/// closed hand clicks/drags. Smoothing and slot-tracking defaults come from
-/// sporecaster's tuned values.
+/// Tunables for the (deliberately minimal) gesture engine: the thumb–index
+/// midpoint moves the cursor, pinching clicks/drags. Pinch thresholds,
+/// smoothing, and slot-tracking defaults come from sporecaster's tuned values.
 public struct GestureConfig: Codable, Equatable, Sendable {
-    // MARK: Grab (hand-close) detection
-    /// Hand counts as closed when openness (0 = fist, ~1 = open palm) falls
-    /// below this. Lower = must squeeze tighter to click.
-    public var grabCloseThreshold: Double = 0.18
-    /// Hand counts as open again above this (hysteresis band between the two
-    /// prevents flutter at the boundary).
-    public var grabOpenThreshold: Double = 0.38
-    /// Consecutive frames below the close threshold before the click fires
-    /// (absorbs single-frame tracking blips).
-    public var grabDebounceFrames: Int = 2
+    // MARK: Pinch detection
+    /// Pinch engages when distance(thumbTip, indexTip) / handScale drops below
+    /// this. Lower = the tips must come closer before a click fires.
+    public var pinchEngageRatio: Double = 0.45
+    /// Pinch releases above this ratio. The gap between the two is the
+    /// hysteresis band, and it is the primary anti-flutter mechanism.
+    public var pinchReleaseRatio: Double = 0.68
+    /// Consecutive frames past a threshold before the transition fires, in
+    /// *both* directions. sporecaster needed none on MediaPipe; Vision's
+    /// landmarks spike often enough that single-frame noise must not click.
+    public var pinchDebounceFrames: Int = 2
 
     // MARK: Click timing
     /// Two clicks within this interval (and within `doubleClickSlop`) become a
@@ -22,12 +23,14 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// Max cursor travel (screen-normalized) between clicks that still chains
     /// into a double-click.
     public var doubleClickSlop: Double = 0.025
-    /// Cursor travel (screen-normalized) beyond which a grab starts dragging.
+    /// Cursor travel (screen-normalized) beyond which a pinch starts dragging.
     /// Below this the cursor holds still, so quick clicks don't micro-drag.
     public var dragActivationDistance: Double = 0.010
 
     // MARK: Pointer
-    public var smoothing: OneEuroFilter.Params = .cursor
+    /// sporecaster's landmark tuning, applied to every joint. Vision is noisier
+    /// than MediaPipe, so this is the floor for smoothing, not the ceiling.
+    public var smoothing: OneEuroFilter.Params = .landmark
 
     // MARK: Pose classification thresholds (used by hand features)
     public var poseThresholds: PoseThresholds = PoseThresholds()
@@ -35,7 +38,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     // MARK: Tracking robustness
     public var minHandConfidence: Double = 0.30
     public var minJointConfidence: Double = 0.25
-    /// If tracking drops out mid-grab, keep state alive this long before
+    /// If tracking drops out mid-pinch, keep state alive this long before
     /// releasing the button (sporecaster resets slots at 300 ms).
     public var trackingLossGrace: TimeInterval = 0.30
 
@@ -52,7 +55,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case grabCloseThreshold, grabOpenThreshold, grabDebounceFrames
+        case pinchEngageRatio, pinchReleaseRatio, pinchDebounceFrames
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case smoothing, poseThresholds
         case minHandConfidence, minJointConfidence, trackingLossGrace
@@ -64,9 +67,9 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .grabCloseThreshold) { grabCloseThreshold = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .grabOpenThreshold) { grabOpenThreshold = v }
-        if let v = try? c.decodeIfPresent(Int.self, forKey: .grabDebounceFrames) { grabDebounceFrames = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) { pinchEngageRatio = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseRatio) { pinchReleaseRatio = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .pinchDebounceFrames) { pinchDebounceFrames = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) { doubleClickSlop = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) { dragActivationDistance = v }

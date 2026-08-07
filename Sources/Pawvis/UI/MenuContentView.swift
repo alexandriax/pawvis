@@ -134,7 +134,7 @@ struct MenuContentView: View {
 
     private var footer: some View {
         HStack {
-            Button("Settings…") { openSettings() }
+            Button("Settings…") { openSettingsInFront() }
             Button("Gesture Guide") {
                 openWindow(id: "gesture-guide")
                 NSApp.activate(ignoringOtherApps: true)
@@ -145,6 +145,20 @@ struct MenuContentView: View {
             }
         }
         .controlSize(.small)
+    }
+
+    /// LSUIElement apps don't activate when a window opens, so the Settings
+    /// window appeared behind whatever the user was working in. Activate on
+    /// both sides of the open and front the window explicitly.
+    private func openSettingsInFront() {
+        NSApp.activate(ignoringOtherApps: true)
+        openSettings()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows
+                .first { $0.title.hasSuffix("Settings") && $0.isVisible }?
+                .makeKeyAndOrderFront(nil)
+        }
     }
 
     // MARK: - Status text
@@ -159,7 +173,7 @@ struct MenuContentView: View {
     }
 
     private var modeText: String {
-        controller.grabbing ? "Clicking (hand closed)" : "Pointing"
+        controller.grabbing ? "Clicking (pinched)" : "Pointing"
     }
 
     private var dictationStatusText: String {

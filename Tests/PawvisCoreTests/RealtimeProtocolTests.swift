@@ -171,7 +171,7 @@ final class RealtimeProtocolTests: XCTestCase {
 final class SettingsTests: XCTestCase {
     func testRoundTrip() throws {
         var settings = PawvisSettings()
-        settings.gestures.grabCloseThreshold = 0.22
+        settings.gestures.pinchEngageRatio = 0.22
         settings.gestures.doubleClickSlop = 0.03
         settings.dictation.wakeWords = ["computer"]
         settings.overlay.showPinchRing = false
@@ -188,10 +188,10 @@ final class SettingsTests: XCTestCase {
     }
 
     func testPartialSectionKeepsOtherDefaults() throws {
-        let jsonData = Data(#"{"gestures":{"grabCloseThreshold":0.25}}"#.utf8)
+        let jsonData = Data(#"{"gestures":{"pinchEngageRatio":0.25}}"#.utf8)
         let decoded = try JSONDecoder().decode(PawvisSettings.self, from: jsonData)
-        XCTAssertEqual(decoded.gestures.grabCloseThreshold, 0.25)
-        XCTAssertEqual(decoded.gestures.grabOpenThreshold, 0.38, "unspecified fields keep defaults")
+        XCTAssertEqual(decoded.gestures.pinchEngageRatio, 0.25)
+        XCTAssertEqual(decoded.gestures.pinchReleaseRatio, 0.68, "unspecified fields keep defaults")
         XCTAssertEqual(decoded.dictation, DictationConfig())
     }
 
@@ -203,15 +203,15 @@ final class SettingsTests: XCTestCase {
     }
 
     func testRetiredGestureKeysAreIgnored() throws {
-        // Settings written by earlier gesture models (pinch/scroll/dictation
+        // Settings written by earlier gesture models (fist-grab/scroll/dictation
         // gestures) must decode cleanly, with unknown keys simply dropped.
         let jsonData = Data(#"""
-        {"gestures":{"pinchEngageRatio":0.5,"rightClickFinger":"ring",
+        {"gestures":{"grabCloseThreshold":0.18,"grabOpenThreshold":0.38,"rightClickFinger":"ring",
          "dictationToggle":"shakaHold","scrollGainPixels":900,
-         "pointerSource":"palmCenter","grabCloseThreshold":0.2}}
+         "pointerSource":"palmCenter","pinchEngageRatio":0.2}}
         """#.utf8)
         let decoded = try JSONDecoder().decode(PawvisSettings.self, from: jsonData)
-        XCTAssertEqual(decoded.gestures.grabCloseThreshold, 0.2)
-        XCTAssertEqual(decoded.gestures.grabOpenThreshold, 0.38)
+        XCTAssertEqual(decoded.gestures.pinchEngageRatio, 0.2)
+        XCTAssertEqual(decoded.gestures.pinchReleaseRatio, 0.68)
     }
 }

@@ -14,6 +14,14 @@ final class GestureEngineTests: XCTestCase {
         return config
     }
 
+    /// Well inside the engage zone (0.45) and tight enough that the index tip
+    /// alone stays within `dragActivationDistance` of the midpoint.
+    static let tightGap = 0.10
+    /// Between the two thresholds — the hysteresis band.
+    static let bandGap = 0.55
+    /// Above the release threshold (0.68).
+    static let openGap = 0.90
+
     override func setUp() {
         super.setUp()
         engine = GestureEngine(config: Self.testConfig())
@@ -62,11 +70,20 @@ final class GestureEngineTests: XCTestCase {
         }
     }
 
-    /// One click: enough closed frames to clear the debounce, then reopen.
+    /// One click: enough pinched frames to clear the debounce, then release.
     @discardableResult
     private func click(at wrist: Vec2, from: TimeInterval) -> [GestureEvent] {
-        feedFrames([SyntheticHand.fist(wrist: wrist)], from: from, count: 3)
-            + feedFrames([SyntheticHand.openRelaxed(wrist: wrist)], from: from + 0.1, count: 2)
+        feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: wrist)], from: from, count: 3)
+            + feedFrames([SyntheticHand.openRelaxed(wrist: wrist)], from: from + 0.1, count: 3)
+    }
+
+    // MARK: - Config defaults
+
+    func testDefaultConfigMatchesSporecasterPinch() {
+        let c = GestureConfig.default
+        XCTAssertEqual(c.smoothing, .landmark, "sporecaster smoothed every landmark at 1.4/0.014/1.0")
+        XCTAssertEqual(c.pinchEngageRatio, 0.45)
+        XCTAssertEqual(c.pinchReleaseRatio, 0.68)
     }
 
     // MARK: - Cursor movement
@@ -87,47 +104,91 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertTrue(moves(e).isEmpty, "identical frame must not emit a move")
     }
 
+    // MARK: - Overlay
+
     func testOverlayStateForOpenHand() {
         let (_, overlay) = feed([SyntheticHand.openRelaxed()], at: 0)
         XCTAssertEqual(overlay.hands.count, 1)
-        XCTAssertEqual(overlay.hands[0].fingertips.count, 5)
+        XCTAssertEqual(overlay.hands[0].fingertips.count, 5, "all five tips still get dots")
         XCTAssertTrue(overlay.hands[0].isPrimary)
         XCTAssertNotNil(overlay.cursor)
         XCTAssertFalse(overlay.grabbed)
-        XCTAssertEqual(overlay.closingProgress, 0, accuracy: 0.15,
-                       "an open hand sits near zero closing progress")
+        XCTAssertEqual(overlay.closingProgress, 0, accuracy: 1e-9,
+                       "an open hand sits at zero pinch strength")
     }
 
-    // MARK: - Click (close hand)
+    func testClosingProgressRisesAsPinchCloses() {
+        let (_, wide) = feed([SyntheticHand.pinchIndex(gap: Self.openGap)], at: 0)
+        let (_, near) = feed([SyntheticHand.pinchIndex(gap: 0.6)], at: 1 / 30.0)
+        XCTAssertGreaterThan(near.closingProgress, wide.closingProgress,
+                             "strength ramps up as the tips close")
+        XCTAssertFalse(near.grabbed, "still short of the engage threshold")
 
-    func testCloseHandClicksAndReopenReleases() {
+        let pinching = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.1, count: 3)
+        XCTAssertEqual(downs(pinching).count, 1)
+        // Held inside the hysteresis band, where the raw ramp would read ~0.7:
+        // the ring must stay filled for as long as the button is down.
+        let (_, held) = feed([SyntheticHand.pinchIndex(gap: Self.bandGap)], at: 0.25)
+        XCTAssertTrue(held.grabbed)
+        XCTAssertEqual(held.closingProgress, 1, "strength pins at 1 while pinched")
+    }
+
+    // MARK: - Click (pinch)
+
+    func testPinchClicksAndReleaseFires() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4)
 
-        // Two closed frames clear the debounce → down.
-        let closing = feedFrames([SyntheticHand.fist()], from: 0.15, count: 3)
+        // Two pinched frames clear the debounce → down.
+        let closing = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.15, count: 3)
         let d = downs(closing)
         XCTAssertEqual(d.count, 1)
         XCTAssertEqual(d[0].1, 1)
-        XCTAssertTrue(drags(closing).isEmpty, "a stationary click must not drag")
+        XCTAssertTrue(drags(closing).isEmpty, "a stationary pinch must not drag")
 
-        let (_, overlay) = feed([SyntheticHand.fist()], at: 0.3)
-        XCTAssertTrue(overlay.grabbed)
-        XCTAssertEqual(overlay.closingProgress, 1)
-
-        let opening = feedFrames([SyntheticHand.openRelaxed()], from: 0.35, count: 2)
+        let opening = feedFrames([SyntheticHand.openRelaxed()], from: 0.35, count: 3)
         let u = ups(opening)
         XCTAssertEqual(u.count, 1)
         XCTAssertEqual(u[0].1, 1)
-        XCTAssertEqual(u[0].0.distance(to: d[0].0), 0, accuracy: 1e-9,
-                       "the palm holds still through open↔close, so up lands on down")
+        XCTAssertEqual(u[0].0.distance(to: d[0].0), 0, accuracy: 1e-2,
+                       "the tips converge on the midpoint, so up lands on down")
     }
 
     func testSingleFrameBlipDoesNotClick() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4)
-        // One closed frame (debounce needs 2), then open again.
-        var events = feed([SyntheticHand.fist()], at: 0.15).events
+        // One pinched frame (debounce needs 2), then open again.
+        var events = feed([SyntheticHand.pinchIndex(gap: Self.tightGap)], at: 0.15).events
         events += feedFrames([SyntheticHand.openRelaxed()], from: 0.1833, count: 3)
         XCTAssertTrue(downs(events).isEmpty, "a one-frame blip must not click")
+    }
+
+    func testSingleFrameReleaseSpikeDoesNotRelease() {
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)],
+                                        from: 0.1, count: 3)).count, 1)
+
+        // One frame of Vision noise spiking past the release threshold.
+        var events = feed([SyntheticHand.pinchIndex(gap: Self.openGap)], at: 0.25).events
+        events += feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.2833, count: 3)
+        XCTAssertTrue(ups(events).isEmpty, "debounce guards the release direction too")
+    }
+
+    func testMissingTipHoldsPinchState() {
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)],
+                                        from: 0.1, count: 3)).count, 1)
+
+        // Thumb tip drops below minJointConfidence → no ratio at all.
+        var faint = SyntheticHand.pinchIndex(gap: Self.tightGap)
+        faint.setPoint(faint[.thumbTip]!, for: .thumbTip, confidence: 0.1)
+        let e = feedFrames([faint], from: 0.25, count: 5)
+        XCTAssertTrue(ups(e).isEmpty, "a low-confidence tip must never release the button")
+        let (_, overlay) = feed([faint], at: 0.45)
+        XCTAssertTrue(overlay.grabbed, "state is held, not flapped")
+
+        // Confidence returns: still pinched, and a real open still releases.
+        let (_, restored) = feed([SyntheticHand.pinchIndex(gap: Self.tightGap)], at: 0.5)
+        XCTAssertTrue(restored.grabbed)
+        XCTAssertEqual(ups(feedFrames([SyntheticHand.openRelaxed()], from: 0.55, count: 3)).count, 1)
     }
 
     func testDoubleTripleThenWrapChaining() {
@@ -165,78 +226,87 @@ final class GestureEngineTests: XCTestCase {
 
     // MARK: - Drag / hold
 
-    func testDragWhileClosed() {
+    func testDragWhilePinched() {
         feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.4, 0.7))], from: 0, count: 3)
-        let down = feedFrames([SyntheticHand.fist(wrist: Vec2(0.4, 0.7))], from: 0.1, count: 3)
+        let down = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: Vec2(0.4, 0.7))],
+                              from: 0.1, count: 3)
         XCTAssertEqual(downs(down).count, 1)
 
         var dragged: [Vec2] = []
         for i in 1...6 {
-            let e = feed([SyntheticHand.fist(wrist: Vec2(0.4 + Double(i) * 0.03, 0.7))],
+            let e = feed([SyntheticHand.pinchIndex(gap: Self.tightGap,
+                                                   wrist: Vec2(0.4 + Double(i) * 0.03, 0.7))],
                          at: 0.2 + Double(i) / 30).events
             dragged += drags(e)
-            XCTAssertTrue(moves(e).isEmpty, "no plain moves while grabbed")
-            XCTAssertTrue(ups(e).isEmpty, "grab holds while the hand stays closed")
+            XCTAssertTrue(moves(e).isEmpty, "no plain moves while pinched")
+            XCTAssertTrue(ups(e).isEmpty, "the pinch holds while the tips stay together")
         }
-        XCTAssertGreaterThanOrEqual(dragged.count, 5)
-        XCTAssertGreaterThan(dragged.last!.x, dragged.first!.x)
+        XCTAssertEqual(dragged.count, 6)
+        XCTAssertEqual(dragged, dragged.sorted { $0.x < $1.x }, "drag positions advance monotonically")
 
-        let opening = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.58, 0.7))], from: 0.5, count: 2)
+        let opening = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.58, 0.7))], from: 0.5, count: 3)
         let u = ups(opening)
         XCTAssertEqual(u.count, 1)
-        XCTAssertEqual(u[0].0.x, dragged.last!.x, accuracy: 0.01, "up lands at the drag end")
+        XCTAssertEqual(u[0].0.x, dragged.last!.x, accuracy: 1e-2, "up lands at the drag end")
     }
 
-    func testMicroMovementWhileClosedDoesNotDrag() {
+    func testMicroMovementWhilePinchedDoesNotDrag() {
         feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))], from: 0, count: 3)
-        feedFrames([SyntheticHand.fist(wrist: Vec2(0.5, 0.7))], from: 0.1, count: 3)
-        let e = feedFrames([SyntheticHand.fist(wrist: Vec2(0.504, 0.7))], from: 0.25, count: 3)
+        feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: Vec2(0.5, 0.7))],
+                   from: 0.1, count: 3)
+        let e = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: Vec2(0.504, 0.7))],
+                           from: 0.25, count: 3)
         XCTAssertTrue(drags(e).isEmpty, "sub-threshold wobble must not start a drag")
-        let up = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.504, 0.7))], from: 0.4, count: 2)
+        let up = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.504, 0.7))], from: 0.4, count: 3)
         XCTAssertEqual(ups(up).count, 1)
     }
 
     func testHoldNeverTimesOut() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
-        var events = feedFrames([SyntheticHand.fist()], from: 0.1, count: 90) // 3 s hold
+        var events = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.1, count: 90) // 3 s
         XCTAssertEqual(downs(events).count, 1)
         XCTAssertTrue(ups(events).isEmpty, "hold must persist indefinitely")
-        events = feedFrames([SyntheticHand.openRelaxed()], from: 3.2, count: 2)
+        events = feedFrames([SyntheticHand.openRelaxed()], from: 3.2, count: 3)
         XCTAssertEqual(ups(events).count, 1)
     }
 
     // MARK: - Hysteresis
 
-    func testHalfClosedHandHoldsStateBothWays() {
-        var config = Self.testConfig()
-        config.grabCloseThreshold = 0.12
-        config.grabOpenThreshold = 0.45
-        engine = GestureEngine(config: config)
-
-        // From open: a half-closed hand (in the band) must not click…
+    func testHysteresisBandHoldsStateBothWays() {
+        // From open: a ratio inside the band must not click…
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4)
-        let e1 = feedFrames([SyntheticHand.halfClosed()], from: 0.15, count: 8)
+        let e1 = feedFrames([SyntheticHand.pinchIndex(gap: Self.bandGap)], from: 0.15, count: 8)
         XCTAssertTrue(downs(e1).isEmpty, "the hysteresis band must not click")
 
-        // …then a real fist clicks…
-        let e2 = feedFrames([SyntheticHand.fist()], from: 0.45, count: 3)
+        // …then a real pinch clicks…
+        let e2 = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.45, count: 3)
         XCTAssertEqual(downs(e2).count, 1)
 
-        // …and half-opening must not release.
-        let e3 = feedFrames([SyntheticHand.halfClosed()], from: 0.56, count: 8)
-        XCTAssertTrue(ups(e3).isEmpty, "the band must not release a grab either")
+        // …and easing back into the band must not release.
+        let e3 = feedFrames([SyntheticHand.pinchIndex(gap: Self.bandGap)], from: 0.56, count: 8)
+        XCTAssertTrue(ups(e3).isEmpty, "the band must not release a pinch either")
 
-        let e4 = feedFrames([SyntheticHand.openRelaxed()], from: 0.85, count: 2)
+        let e4 = feedFrames([SyntheticHand.openRelaxed()], from: 0.85, count: 3)
         XCTAssertEqual(ups(e4).count, 1)
+    }
+
+    // MARK: - Pose tolerance
+
+    func testCasualPinchClicks() {
+        // The other three fingers half-curled — how people actually pinch.
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.pinchIndexCasual(gap: Self.tightGap)], from: 0.1, count: 3)
+        XCTAssertEqual(downs(e).map(\.1), [1], "only thumb + index may gate the click")
+        XCTAssertEqual(ups(feedFrames([SyntheticHand.openRelaxed()], from: 0.25, count: 3)).count, 1)
     }
 
     // MARK: - Tracking loss and robustness
 
-    func testTrackingLossReleasesGrabAfterGrace() {
+    func testTrackingLossReleasesPinchAfterGrace() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
-        feedFrames([SyntheticHand.fist()], from: 0.1, count: 3)
+        feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.1, count: 3)
 
-        XCTAssertTrue(ups(feed([], at: 0.30).events).isEmpty, "grace holds the grab")
+        XCTAssertTrue(ups(feed([], at: 0.30).events).isEmpty, "grace holds the pinch")
         let e = feed([], at: 0.55).events
         XCTAssertEqual(ups(e).count, 1, "held button must release after tracking loss")
         XCTAssertTrue(ups(feed([], at: 0.7).events).isEmpty, "no repeated releases")
@@ -244,9 +314,10 @@ final class GestureEngineTests: XCTestCase {
 
     func testBriefDropoutKeepsDrag() {
         feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.4, 0.7))], from: 0, count: 3)
-        feedFrames([SyntheticHand.fist(wrist: Vec2(0.4, 0.7))], from: 0.1, count: 3)
+        feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: Vec2(0.4, 0.7))],
+                   from: 0.1, count: 3)
         XCTAssertTrue(ups(feed([], at: 0.22).events).isEmpty)
-        let e = feed([SyntheticHand.fist(wrist: Vec2(0.5, 0.7))], at: 0.25).events
+        let e = feed([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: Vec2(0.5, 0.7))], at: 0.25).events
         XCTAssertTrue(ups(e).isEmpty)
         XCTAssertFalse(drags(e).isEmpty, "drag continues after a one-frame dropout")
     }
@@ -259,7 +330,7 @@ final class GestureEngineTests: XCTestCase {
 
     func testForceReleaseEmitsUpAndBlocksChaining() {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
-        feedFrames([SyntheticHand.fist()], from: 0.1, count: 3)
+        feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.1, count: 3)
         let released = engine.forceRelease(at: 0.25)
         XCTAssertEqual(ups(released).count, 1)
 
@@ -287,13 +358,5 @@ final class GestureEngineTests: XCTestCase {
             at: 0.3)
         XCTAssertTrue(moves(events).isEmpty)
         XCTAssertEqual(o2.cursor!, before)
-    }
-
-    func testClosingProgressRisesAsHandCloses() {
-        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
-        let (_, mid) = feed([SyntheticHand.halfClosed()], at: 0.15)
-        XCTAssertGreaterThan(mid.closingProgress, 0.2,
-                             "a half-closed hand shows partial closing progress")
-        XCTAssertFalse(mid.grabbed)
     }
 }
