@@ -44,7 +44,9 @@ final class SpeechEngine: NSObject {
         stopped = false
 
         if #available(macOS 26.0, *) {
-            let backend = ModernAppleSpeechBackend(language: config.language)
+            let backend = ModernAppleSpeechBackend(
+                language: config.language,
+                contextualStrings: [config.wakeWord] + config.wakeWordAliases)
             modernBackend = backend
             backend.onEvent = { [weak self] event in
                 self?.onEvent?(event)

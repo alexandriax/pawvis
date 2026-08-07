@@ -70,9 +70,13 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
     private var emittedForSegment = ""
 
     private let preferredLanguage: String
+    /// Vocabulary to bias recognition toward (the wake word isn't a
+    /// dictionary word; without this it's misheard more often).
+    private let contextualStrings: [String]
 
-    init(language: String) {
+    init(language: String, contextualStrings: [String] = []) {
         self.preferredLanguage = language
+        self.contextualStrings = contextualStrings
     }
 
     func start() {
@@ -137,6 +141,11 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+        if !contextualStrings.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings = [.general: contextualStrings]
+            try? await analyzer.setContext(context)
+        }
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         self.analyzerFormat = format
 
