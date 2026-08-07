@@ -79,10 +79,9 @@ On first run Pawvis asks for:
   Security → Accessibility).
 - **Microphone** — only when you first start dictation.
 
-> Release builds are ad-hoc signed rather than notarized, so macOS may warn on
-> first launch (right-click → Open). After an update, if clicks stop working,
-> remove and re-add Pawvis in Accessibility — macOS ties that grant to the
-> code signature.
+Releases are signed with a Developer ID and notarized by Apple, so they open
+normally — no right-click → Open, and the Accessibility permission you grant
+carries across updates.
 
 ## Build from source
 

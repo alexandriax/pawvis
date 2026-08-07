@@ -22,13 +22,25 @@ Extras:
 - `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
   (CI does this from the release tag; local builds show `0.0.0-dev`).
 
-**Signing matters more than it looks.** `scripts/make_app.sh` prefers an
-`Apple Development` identity from the keychain and falls back to ad-hoc. With
-ad-hoc signing the code signature changes every build, and macOS then silently
-ignores the existing Accessibility grant *while still showing Pawvis as
-enabled* — the symptom is "the cursor moves but nothing clicks, anywhere."
-Fix: remove and re-add Pawvis in System Settings → Privacy & Security →
-Accessibility. With a real identity the grant survives rebuilds.
+**Signing matters more than it looks.** macOS ties the Accessibility grant to
+the app's *designated requirement*. Signed with a real identity, that
+requirement is identity-based and stable:
+
+    identifier "com.pawvis.Pawvis" and anchor apple generic and ... leaf[subject.OU] = KMZ785G889
+
+Ad-hoc signed, it is a per-binary `cdhash` instead — so every build looks like
+a different app, macOS silently ignores the existing grant *while still
+showing Pawvis as enabled*, and the symptom is "the cursor moves but nothing
+clicks, anywhere." Fix in that state: remove and re-add Pawvis in System
+Settings → Privacy & Security → Accessibility.
+
+`scripts/make_app.sh` therefore prefers `Developer ID Application` (adding
+Hardened Runtime + `Resources/Pawvis.entitlements`, which notarization
+requires and which give the camera/mic back under it), then
+`Apple Development`, then ad-hoc with a warning. Local builds and CI releases
+share one Developer ID, so a single Accessibility grant covers both and
+survives every update — verified by comparing the two designated
+requirements.
 
 ## Settings UI: never let text truncate
 
@@ -118,9 +130,31 @@ Xcode 26+.
 
 ## Releases
 
-Tag-driven and fully automated (`.github/workflows/release.yml`): push a
-`v*` tag and CI builds, bundles, signs ad-hoc, zips, and publishes a GitHub
-Release with `Pawvis.zip` attached. The in-app updater reads
-`releases/latest` from the GitHub API, so the zip asset must stay attached and
-named `Pawvis-<version>.zip` (any `.zip` asset works, but keep it consistent).
-Version comparison lives in `PawvisCore/Update` and is unit-tested.
+Tag-driven and fully automated (`.github/workflows/release.yml`): push a `v*`
+tag (or run the workflow with a version) and CI tests, stamps the version into
+`Info.plist`, bundles, signs with Developer ID, notarizes, staples, zips, and
+publishes a GitHub Release with `Pawvis-<version>.zip` plus its `.sha256`.
+
+The in-app updater reads `releases/latest` from the GitHub API, so the zip
+asset must stay attached and keep that name; it verifies the download's
+SHA-256 against the published checksum, checks the bundle identifier, and runs
+`codesign --verify` before staging. Version comparison and the check-scheduling
+rules live in `PawvisCore/Update` and are unit-tested.
+
+Signing and notarization come from repository secrets, set by running
+`scripts/setup_signing.sh` interactively (it never belongs in an automated
+session — it handles a private key and passwords):
+
+- `MACOS_CERT_P12`, `MACOS_CERT_PASSWORD` — the Developer ID certificate.
+  **These are the ones that matter**: without them releases fall back to
+  ad-hoc signing, and every update silently breaks Accessibility.
+- Notarization, either `NOTARY_APPLE_ID` + `NOTARY_PASSWORD` (an
+  app-specific password from account.apple.com — instant, no approval) +
+  `NOTARY_TEAM_ID`, or `NOTARY_KEY_P8` + `NOTARY_KEY_ID` + `NOTARY_ISSUER_ID`
+  (App Store Connect key; needs an access request Apple reviews). Without
+  either, the build is signed but a fresh download needs right-click → Open.
+
+With no secrets at all the workflow still succeeds (ad-hoc), so forks aren't
+blocked. The notarize step asserts with `spctl` that a fresh download will
+launch clean, so a broken signing setup fails the release rather than shipping
+quietly.
