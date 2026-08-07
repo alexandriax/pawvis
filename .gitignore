@@ -6,6 +6,7 @@
 .build/
 .swiftpm/
 build/
+dist/
 *.xcodeproj
 DerivedData/
 
