@@ -113,8 +113,8 @@ struct SettingsView: View {
                 .tabItem { Label("Tracking", systemImage: "cursorarrow.motionlines") }
             GestureSettingsTab(store: store)
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
-            DictationSettingsTab(store: store)
-                .tabItem { Label("Dictation", systemImage: "mic") }
+            VoiceControlSettingsTab(store: store)
+                .tabItem { Label("Voice", systemImage: "mic") }
             AboutTab(updater: updater)
                 .tabItem { Label("About", systemImage: "pawprint") }
         }
@@ -338,127 +338,94 @@ private struct GestureSettingsTab: View {
     }
 }
 
-// MARK: - Dictation
+// MARK: - Voice Control
 
-private struct DictationSettingsTab: View {
+private struct VoiceControlSettingsTab: View {
     @ObservedObject var store: SettingsStore
-    @State private var apiKeyDraft = ""
-    @State private var keySaved = false
+    @State private var screenRecording = Permissions.screenRecording()
 
-    private var usesOpenAI: Bool { store.settings.dictation.engine == "openai" }
+    private var wake: String { store.settings.voiceControl.wakeWord }
 
     var body: some View {
         SettingsPage {
-            SettingToggle(title: "Enable voice dictation", isOn: $store.settings.dictation.enabled)
-
-            SettingRow(
-                title: "Engine",
-                caption: usesOpenAI
-                    ? "Audio streams to OpenAI only while dictation is armed."
-                    : "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model."
-            ) {
-                Picker("", selection: $store.settings.dictation.engine) {
-                    Text("Apple (on-device, private)").tag("apple")
-                    Text("OpenAI (cloud)").tag("openai")
-                }
-            }
+            SettingToggle(
+                title: "Enable voice control",
+                caption: "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.",
+                isOn: $store.settings.voiceControl.enabled)
 
             Divider()
 
-            if usesOpenAI {
-                openAISection
-                Divider()
-            }
-
-            SettingRow(title: "Language (ISO code, blank = auto)") {
-                TextField("", text: $store.settings.dictation.language)
+            SettingRow(
+                title: "Wake word",
+                caption: "Address Pawvis by saying this first: “\(wake) go to github.com”, “\(wake) type hello”, “\(wake) press enter”, “\(wake) open Safari”, “\(wake) click”, “\(wake) scroll down”."
+            ) {
+                TextField("", text: $store.settings.voiceControl.wakeWord)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
             }
 
             SettingRow(
-                title: "Wake words (comma-separated)",
-                caption: "Start an utterance with one of these to begin typing."
+                title: "Also answers to (comma-separated)",
+                caption: "Common mishearings of the wake word. Close matches are accepted automatically."
             ) {
-                TextField("", text: listBinding($store.settings.dictation.wakeWords))
+                TextField("", text: listBinding($store.settings.voiceControl.wakeWordAliases))
                     .textFieldStyle(.roundedBorder)
             }
 
+            Divider()
+
+            LabeledSlider(
+                label: "Typing pause",
+                caption: "While typing (“\(wake) type …”), this much silence ends typing mode: \(String(format: "%.1f", store.settings.voiceControl.typingPauseSeconds)) s.",
+                value: $store.settings.voiceControl.typingPauseSeconds,
+                range: 1.0...6.0)
+
             SettingRow(
                 title: "Stop phrases (comma-separated)",
-                caption: "Say one of these to stop typing while staying armed."
+                caption: "Saying one of these while typing also ends typing mode."
             ) {
-                TextField("", text: listBinding($store.settings.dictation.stopPhrases))
+                TextField("", text: listBinding($store.settings.voiceControl.stopPhrases))
                     .textFieldStyle(.roundedBorder)
             }
 
             SettingToggle(
-                title: "Spoken commands (“new line”, “new paragraph”, “press enter”, “press tab”)",
-                isOn: $store.settings.dictation.commandsEnabled)
+                title: "Spoken commands while typing (“new line”, “new paragraph”, “press enter”)",
+                isOn: $store.settings.voiceControl.inlineCommandsEnabled)
 
             SettingToggle(
                 title: "Low-latency typing (experimental)",
                 caption: "Types words as you say them and corrects revisions with backspaces.",
-                isOn: $store.settings.dictation.typeDeltasImmediately)
-        }
-    }
+                isOn: $store.settings.voiceControl.typeDeltasImmediately)
 
-    @ViewBuilder
-    private var openAISection: some View {
-        SettingRow(
-            title: "OpenAI API key",
-            caption: "Stored in your login keychain — never in the app or its settings files. Paste the whole key, including its “sk-” prefix."
-        ) {
-            VStack(alignment: .leading, spacing: 6) {
-                SecureField("sk-proj-…", text: $apiKeyDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 300)
-                HStack(spacing: 10) {
-                    Button("Save") {
-                        store.saveAPIKey(apiKeyDraft)
-                        apiKeyDraft = ""
-                        keySaved = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            keySaved = false
-                        }
-                    }
-                    .disabled(apiKeyDraft.isEmpty)
-                    Button("Clear") { store.clearAPIKey() }
-                        .disabled(!store.apiKeyInKeychain)
-                    if keySaved {
-                        Text("Saved ✓").font(.caption).foregroundStyle(.green)
-                    } else {
-                        Text(keyStatusText).font(.caption).foregroundStyle(.secondary)
+            Divider()
+
+            SettingToggle(
+                title: "Visual commands (Apple Intelligence)",
+                caption: "Commands the grammar doesn't know (“\(wake) click sign in”) are resolved against the screen near your pointer with the on-device model — widening to the whole screen only when needed. Nothing leaves your Mac.",
+                isOn: $store.settings.voiceControl.visualContextEnabled)
+
+            if store.settings.voiceControl.visualContextEnabled,
+               screenRecording != .granted {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                    CaptionText("Screen Recording lets visual commands read text that isn't exposed by accessibility (canvases, images). Optional but recommended.")
+                    Button("Grant…") {
+                        Permissions.requestScreenRecording()
+                        Permissions.openScreenRecordingSettings()
                     }
                 }
             }
-            .onAppear { store.ensureKeyStatusLoaded() }
-        }
 
-        SettingRow(title: "Model") {
-            Picker("", selection: $store.settings.dictation.model) {
-                Text("gpt-4o-transcribe (recommended)").tag("gpt-4o-transcribe")
-                Text("gpt-live-transcribe (lowest latency)").tag("gpt-live-transcribe")
-                Text("gpt-4o-mini-transcribe").tag("gpt-4o-mini-transcribe")
-                Text("whisper-1").tag("whisper-1")
+            Divider()
+
+            SettingRow(title: "Language (ISO code, blank = auto)") {
+                TextField("", text: $store.settings.voiceControl.language)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
             }
         }
-
-        SettingRow(title: "Microphone profile") {
-            Picker("", selection: $store.settings.dictation.noiseReduction) {
-                Text("Built-in / far-field").tag("far_field")
-                Text("Headset / near-field").tag("near_field")
-                Text("No noise reduction").tag("")
-            }
-        }
-    }
-
-    private var keyStatusText: String {
-        guard store.keyStatusLoaded else { return "" }
-        if store.apiKeyInKeychain { return "Key in keychain" }
-        if store.apiKeyAvailable { return "Using development key (.env)" }
-        return "No key set"
+        .onAppear { screenRecording = Permissions.screenRecording() }
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {
@@ -505,7 +472,7 @@ private struct AboutTab: View {
 
             Divider()
 
-            CaptionText("Hand tracking runs entirely on-device via Apple Vision. Voice dictation uses Apple's on-device speech engine by default; the optional OpenAI engine streams audio only while dictation is armed.")
+            CaptionText("Hand tracking and voice control run entirely on-device — speech, and the screen context used for visual commands, never leave your Mac.")
         }
     }
 

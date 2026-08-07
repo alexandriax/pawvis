@@ -26,7 +26,7 @@ struct PawvisButtonStyle: ButtonStyle {
 /// warnings, and navigation to settings / gesture guide.
 struct MenuContentView: View {
     @ObservedObject var controller: PawvisController
-    @ObservedObject var dictation: DictationController
+    @ObservedObject var voice: VoiceController
     @ObservedObject var updater: UpdateChecker
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
@@ -76,19 +76,19 @@ struct MenuContentView: View {
                 text: trackingStatusText)
 
             HStack(spacing: 8) {
-                Image(systemName: dictationIcon)
-                    .foregroundStyle(dictationTint)
+                Image(systemName: voiceIcon)
+                    .foregroundStyle(voiceTint)
                     .frame(width: 18)
-                Text(dictationStatusText)
+                Text(voiceStatusText)
                     .font(.callout)
                     .lineLimit(2)
                 Spacer()
-                Button(dictation.state.isActive ? "Stop" : "Start") {
-                    dictation.toggle()
+                Button(voice.state.isActive ? "Stop" : "Start") {
+                    voice.toggle()
                 }
                 .buttonStyle(PawvisButtonStyle())
-                .disabled(!controller.settingsStore.settings.dictation.enabled
-                          && !dictation.state.isActive)
+                .disabled(!controller.settingsStore.settings.voiceControl.enabled
+                          && !voice.state.isActive)
             }
 
         }
@@ -127,22 +127,19 @@ struct MenuContentView: View {
                     Permissions.openAccessibilitySettings()
                 }))
         }
-        // Only meaningful once the (lazy, prompt-causing) keychain status has
-        // been loaded — opening the menu must never trigger a keychain prompt.
         if updater.updateAvailable, case .available(let release) = updater.state {
             result.append(Warning(
                 text: "Pawvis \(release.version.description) is available.",
                 action: "Update…",
                 handler: { openSettingsInFront() }))
         }
-        if controller.settingsStore.keyStatusLoaded,
-           !controller.settingsStore.apiKeyAvailable,
-           controller.settingsStore.settings.dictation.enabled,
-           controller.settingsStore.settings.dictation.engine == "openai" {
+        if voice.state.isActive,
+           controller.settingsStore.settings.voiceControl.visualContextEnabled,
+           Permissions.screenRecording() != .granted {
             result.append(Warning(
-                text: "Add an OpenAI API key to enable cloud dictation.",
-                action: "Settings…",
-                handler: { openSettings() }))
+                text: "Grant Screen Recording so visual commands (“Pawvis click sign in”) can see the screen. Everything else works without it.",
+                action: "Open…",
+                handler: { Permissions.openScreenRecordingSettings() }))
         }
         return result
     }
@@ -210,30 +207,34 @@ struct MenuContentView: View {
         return controller.controlArmed ? "Pointing" : "Show an open hand to control"
     }
 
-    private var dictationStatusText: String {
-        switch dictation.state {
-        case .off: return "Dictation off"
-        case .connecting: return "Dictation connecting…"
-        case .listening: return "Listening for wake word"
-        case .dictating: return "Dictating — typing your words"
+    private var voiceStatusText: String {
+        let wakeWord = controller.settingsStore.settings.voiceControl.wakeWord
+        switch voice.state {
+        case .off: return "Voice control off"
+        case .connecting: return "Voice control starting…"
+        case .listening: return "Listening for “\(wakeWord) …”"
+        case .typing: return "Typing your words"
+        case .resolving: return "Looking at your screen…"
         case .error(let message): return message
         }
     }
 
-    private var dictationIcon: String {
-        switch dictation.state {
-        case .dictating: return "keyboard.fill"
+    private var voiceIcon: String {
+        switch voice.state {
+        case .typing: return "keyboard.fill"
+        case .resolving: return "sparkles"
         case .error: return "mic.slash.fill"
         default: return "mic.fill"
         }
     }
 
-    private var dictationTint: Color {
-        switch dictation.state {
+    private var voiceTint: Color {
+        switch voice.state {
         case .off: return .secondary
         case .connecting: return .orange
         case .listening: return .orange
-        case .dictating: return .red
+        case .typing: return .red
+        case .resolving: return .purple
         case .error: return .red
         }
     }

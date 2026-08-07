@@ -54,9 +54,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSCameraUsageDescription</key>
     <string>Pawvis uses your camera to track hand gestures. Frames are processed entirely on this Mac and never leave it.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Pawvis uses your microphone for voice dictation. With the Apple engine, audio never leaves this Mac; with the OpenAI engine, audio is streamed to OpenAI only while dictation is armed.</string>
+    <string>Pawvis uses your microphone for voice control. Speech recognition runs entirely on this Mac — audio never leaves it.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Pawvis uses on-device speech recognition to turn your voice into typed text.</string>
+    <string>Pawvis uses on-device speech recognition to understand your voice commands and dictation.</string>
 </dict>
 </plist>
 PLIST

@@ -14,7 +14,7 @@ struct GestureGuideView: View {
                     .foregroundStyle(.secondary)
 
                 section("Pointing & Clicking", rows: pointingRows)
-                section("Voice Dictation", rows: dictationRows)
+                section("Voice Control", rows: voiceRows)
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -89,16 +89,18 @@ struct GestureGuideView: View {
         return rows
     }
 
-    private var dictationRows: [Row] {
-        let wakeWords = store.settings.dictation.wakeWords
-            .prefix(3).map { "“\($0)”" }.joined(separator: ", ")
+    private var voiceRows: [Row] {
+        let wake = store.settings.voiceControl.wakeWord
         return [
             Row(symbol: "mic.fill",
-                title: "Arm dictation from the menu bar",
-                detail: "Click the claw in the menu bar and press Start next to Dictation. While armed, start a sentence with \(wakeWords)… — everything after the wake word is typed into the focused app."),
-            Row(symbol: "mic.slash.fill",
-                title: "Stop typing",
-                detail: "Say “\(store.settings.dictation.stopPhrases.first ?? "stop typing")”. You can also say “new line”, “new paragraph”, “press enter”, or “press tab” while dictating."),
+                title: "Start voice control from the menu bar",
+                detail: "Click the claw in the menu bar and press Start next to Voice control. Address it by name: “\(wake) go to github.com”, “\(wake) open Safari”, “\(wake) switch to Notes”, “\(wake) press command T”, “\(wake) scroll down”."),
+            Row(symbol: "keyboard.fill",
+                title: "Type by voice",
+                detail: "Say “\(wake) type …” and keep talking — everything is typed into the focused app. A pause (or “\(store.settings.voiceControl.stopPhrases.first ?? "stop typing")”) ends typing. While typing you can say “new line” or “press enter”."),
+            Row(symbol: "sparkles",
+                title: "Visual commands",
+                detail: "Anything else — “\(wake) click sign in” — is resolved against the screen near your pointer with on-device Apple Intelligence."),
         ]
     }
 

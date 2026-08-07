@@ -10,10 +10,10 @@ struct PawvisApp: App {
         MenuBarExtra {
             MenuContentView(
                 controller: appDelegate.controller,
-                dictation: appDelegate.controller.dictation,
+                voice: appDelegate.controller.voice,
                 updater: appDelegate.updater)
         } label: {
-            MenuBarIcon(dictationActive: appDelegate.controller.dictation.state.isActive)
+            MenuBarIcon(voiceActive: appDelegate.controller.voice.state.isActive)
         }
         .menuBarExtraStyle(.window)
 
@@ -32,10 +32,10 @@ struct PawvisApp: App {
 }
 
 /// The status item: the sloth-claw template glyph (adapts to menu bar
-/// light/dark), with a small dot while dictation is live. Falls back to an
-/// SF Symbol if the glyph asset is missing (e.g. running the bare binary).
+/// light/dark), with a small dot while voice control is live. Falls back to
+/// an SF Symbol if the glyph asset is missing (e.g. running the bare binary).
 private struct MenuBarIcon: View {
-    let dictationActive: Bool
+    let voiceActive: Bool
 
     private static let clawImage: NSImage? = {
         guard let url = Bundle.main.url(forResource: "menubar-claw", withExtension: "png"),
@@ -49,7 +49,7 @@ private struct MenuBarIcon: View {
         if let claw = Self.clawImage {
             ZStack(alignment: .topTrailing) {
                 Image(nsImage: claw)
-                if dictationActive {
+                if voiceActive {
                     Circle()
                         .fill(PawvisTheme.purpleUI)
                         .frame(width: 5, height: 5)
@@ -57,7 +57,7 @@ private struct MenuBarIcon: View {
                 }
             }
         } else {
-            Image(systemName: dictationActive ? "pawprint.circle.fill" : "pawprint.fill")
+            Image(systemName: voiceActive ? "pawprint.circle.fill" : "pawprint.fill")
         }
     }
 }
@@ -65,7 +65,7 @@ private struct MenuBarIcon: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let controller: PawvisController
     let updater: UpdateChecker
-    private var dictationObservation: AnyCancellable?
+    private var voiceObservation: AnyCancellable?
     private var updaterObservation: AnyCancellable?
 
     override init() {
@@ -76,8 +76,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         updater = MainActor.assumeIsolated { UpdateChecker() }
         super.init()
         // Forward nested state changes so the MenuBarExtra label (which only
-        // observes the delegate) updates when dictation starts/stops.
-        dictationObservation = controller.dictation.objectWillChange
+        // observes the delegate) updates when voice control starts/stops.
+        voiceObservation = controller.voice.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
         updaterObservation = updater.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }

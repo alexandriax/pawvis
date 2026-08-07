@@ -2,15 +2,26 @@ import CoreGraphics
 import Foundation
 import PawvisCore
 
-/// Types dictated text into the focused app via synthetic keyboard events.
+/// Types text and presses key chords in the focused app via synthetic
+/// keyboard events.
 final class TextTyper {
     private let source = CGEventSource(stateID: .hidSystemState)
 
-    private enum KeyCode {
-        static let `return`: CGKeyCode = 36
-        static let tab: CGKeyCode = 48
-        static let delete: CGKeyCode = 51
-    }
+    /// ANSI virtual key codes (kVK_*) for every canonical KeyChord name.
+    private static let keyCodes: [String: CGKeyCode] = [
+        "return": 36, "tab": 48, "space": 49, "delete": 51, "escape": 53,
+        "forwarddelete": 117, "home": 115, "end": 119,
+        "pageup": 116, "pagedown": 121,
+        "left": 123, "right": 124, "down": 125, "up": 126,
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7,
+        "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15,
+        "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37,
+        "j": 38, "k": 40, "n": 45, "m": 46,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
+        "9": 25, "7": 26, "8": 28, "0": 29,
+        "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
+        "f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+    ]
 
     func perform(_ actions: [TypingAction]) {
         for action in actions {
@@ -18,19 +29,41 @@ final class TextTyper {
             case .type(let text):
                 type(text)
             case .backspace(let count):
-                pressKey(KeyCode.delete, times: count)
-            case .key(.return):
-                pressKey(KeyCode.return)
-            case .key(.tab):
-                pressKey(KeyCode.tab)
+                pressKeyCode(51, times: count) // delete
+            case .key(let chord):
+                press(chord)
             }
         }
+    }
+
+    /// Whether a chord's key name is one the typist can actually press.
+    static func canPress(_ chord: KeyChord) -> Bool {
+        keyCodes[chord.key] != nil
+    }
+
+    func press(_ chord: KeyChord) {
+        guard let keyCode = Self.keyCodes[chord.key] else { return }
+        pressKeyCode(keyCode, flags: Self.flags(for: chord.modifiers))
+    }
+
+    private static func flags(for modifiers: Set<KeyChord.Modifier>) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        for modifier in modifiers {
+            switch modifier {
+            case .command: flags.insert(.maskCommand)
+            case .shift: flags.insert(.maskShift)
+            case .option: flags.insert(.maskAlternate)
+            case .control: flags.insert(.maskControl)
+            case .function: flags.insert(.maskSecondaryFn)
+            }
+        }
+        return flags
     }
 
     /// Unicode injection: no keyboard-layout mapping needed, works for any
     /// text. Chunked because keyboardSetUnicodeString tops out around 20
     /// UTF-16 units per event.
-    private func type(_ text: String) {
+    func type(_ text: String) {
         let units = Array(text.utf16)
         var index = 0
         while index < units.count {
@@ -49,12 +82,16 @@ final class TextTyper {
         }
     }
 
-    private func pressKey(_ keyCode: CGKeyCode, times: Int = 1) {
+    private func pressKeyCode(_ keyCode: CGKeyCode, flags: CGEventFlags = [], times: Int = 1) {
         guard times > 0 else { return }
         for _ in 0..<times {
             guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
                   let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
                 continue
+            }
+            if !flags.isEmpty {
+                down.flags = flags
+                up.flags = flags
             }
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)

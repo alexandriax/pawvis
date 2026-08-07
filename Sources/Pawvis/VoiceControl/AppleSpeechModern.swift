@@ -54,7 +54,7 @@ final class SpeechBufferConverter {
 @available(macOS 26.0, *)
 final class ModernAppleSpeechBackend: @unchecked Sendable {
     /// Delivered on the main queue.
-    var onEvent: ((TranscriptionEvent) -> Void)?
+    var onEvent: ((SpeechEvent) -> Void)?
 
     private let engine = AVAudioEngine()
     private let converter = SpeechBufferConverter()
@@ -126,7 +126,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         }
         do {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                Log.dictation.info("Downloading on-device speech model for \(locale.identifier, privacy: .public)…")
+                Log.voice.info("Downloading on-device speech model for \(locale.identifier, privacy: .public)…")
                 try await request.downloadAndInstall()
             }
         } catch {
@@ -173,7 +173,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         guard !stopped else { return }
 
         emit(.ready)
-        Log.dictation.info("Apple SpeechAnalyzer dictation started (locale \(locale.identifier, privacy: .public))")
+        Log.voice.info("Apple SpeechAnalyzer voice engine started (locale \(locale.identifier, privacy: .public))")
     }
 
     private func startMicTap() throws {
@@ -228,7 +228,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         }
     }
 
-    private func emit(_ event: TranscriptionEvent) {
+    private func emit(_ event: SpeechEvent) {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.stopped else { return }
             self.onEvent?(event)

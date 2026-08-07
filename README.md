@@ -8,13 +8,16 @@
 
 ---
 
-Pawvis turns your webcam into a pointing device and your voice into a
-keyboard. Move your hand to move the cursor, dip a finger to click, and speak
-to type — without touching a mouse or keyboard.
+Pawvis turns your webcam into a pointing device and your voice into full
+control of the machine. Move your hand to move the cursor, dip a finger to
+click, and talk to your Mac by name — *"Pawvis, go to github.com"*, *"Pawvis,
+type hello"*, *"Pawvis, open Safari"* — without touching a mouse or keyboard.
+The aim is an accessibility-grade voice control that's more intuitive and
+capable than the built-in one.
 
-Hand tracking runs entirely on-device with Apple's Vision framework, and voice
-dictation defaults to Apple's on-device speech engine, so by default nothing
-you do leaves your Mac.
+Hand tracking runs entirely on-device with Apple's Vision framework; speech
+recognition is Apple's on-device engine; and free-form visual commands are
+resolved by on-device Apple Intelligence. Nothing you do leaves your Mac.
 
 <p align="center">
   <a href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip"><strong>⬇&nbsp; Download Pawvis for macOS</strong></a>
@@ -53,20 +56,28 @@ while the left button is held, blue for the right button, with a ring that
 tightens as your click gesture forms and a pulse confirming every click. Small
 dots mark each detected fingertip.
 
-## Voice dictation
+## Voice control
 
-1. Open the menu bar icon and press **Start** next to Dictation.
-2. Say a **wake word** — `type`, `text`, `enter`, `write`, or `dictate`
-   (editable) — and everything after it is typed into the focused app:
-   *"type hello world"*.
-3. Say **"stop typing"** to stop. While dictating, *"new line"*,
-   *"new paragraph"*, *"press enter"* and *"press tab"* do what they say.
+Open the menu bar icon and press **Start** next to Voice control, then
+address Pawvis by its **wake word** (default `Pawvis`, configurable;
+mishearings are tolerated):
 
-The default engine is **Apple's on-device recognition** — private, free, no
-setup (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that). An
-optional **OpenAI** engine is available in Settings if you prefer it; it needs
-your own API key (stored in your login keychain) and streams audio only while
-dictation is armed.
+| Say | Pawvis does |
+|---|---|
+| "Pawvis, **go to** heresalexandria dot com" | Navigates the frontmost browser there (via the address bar); opens your default browser if you're not in one. Non-URL targets become a web search. |
+| "Pawvis, **type** good morning" | Types into the focused app and keeps typing what you say. A **pause** (default 2.5 s) or *"stop typing"* ends it; *"new line"* and *"press enter"* work mid-typing. |
+| "Pawvis, **press** command shift T" | Presses any key or shortcut — enter, tab, escape, arrows, page up/down, F-keys, letters and digits with modifiers. |
+| "Pawvis, **open** Notes" | Launches (or brings forward) an app — fuzzy name matching. |
+| "Pawvis, **switch to** Chrome" | Brings a running app forward. |
+| "Pawvis, **click** / right click / double click" | Clicks at the pointer. |
+| "Pawvis, **scroll** down / up a page" | Scrolls at the pointer. |
+| "Pawvis, **click sign in**" (anything free-form) | On-device Apple Intelligence reads the screen **around your pointer** (accessibility elements + OCR) and works out the action — widening to the whole screen only if the target isn't nearby. |
+| "Pawvis, **stop listening**" | Turns voice control off. |
+
+Speech recognition is **Apple's on-device engine** — private, free, no API
+key, no cloud (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
+Visual commands need macOS 26 with Apple Intelligence enabled; everything
+else works without it.
 
 ## Install
 
@@ -85,7 +96,10 @@ On first run Pawvis asks for:
 - **Accessibility** — moving the cursor and clicking. Tracking runs without
   it, but clicks won't land until it's granted (System Settings → Privacy &
   Security → Accessibility).
-- **Microphone** — only when you first start dictation.
+- **Microphone** — only when you first start voice control.
+- **Screen Recording** *(optional)* — lets visual voice commands OCR what
+  accessibility can't describe (canvases, images). Everything else works
+  without it.
 
 Releases are signed with a Developer ID and notarized by Apple, so they open
 normally — no right-click → Open, and the Accessibility permission you grant
@@ -117,14 +131,15 @@ Sources/
     Geometry/          Vec2 · One Euro filter · interaction-box mapper
     Hands/             21-landmark model · pinch/dip/curl metrics
     Gestures/          GestureEngine: frames → clicks, drags, cursor moves
-    Dictation/         wake-word parser · OpenAI Realtime protocol
+    VoiceControl/      wake-word + command parser · spoken URLs & key chords
     Update/            semantic versions · update-check policy
     Config/            settings tree (field-tolerant decoding)
   Pawvis/              the menu bar app
     Camera/            AVCaptureSession · Vision hand pose
     Control/           CGEvent mouse + keyboard synthesis
     Overlay/           click-through claw cursor and indicators
-    Dictation/         mic capture · Apple + OpenAI engines
+    VoiceControl/      on-device speech engine · command executor ·
+                       screen context (AX + OCR) · Apple Intelligence resolver
     Update/            update checking and self-update
     App/ UI/           menu bar, settings, gesture guide
 ```
@@ -138,10 +153,12 @@ tracking-loss recovery are covered by unit tests rather than by hand.
 - Camera frames never leave your Mac, and the overlay is excluded from
   screenshots and screen recordings by default (there's a toggle if you want
   to record a demo).
-- Dictation audio stays on-device with the Apple engine. With the optional
-  OpenAI engine, audio is sent only between arming and disarming dictation,
-  and the menu bar icon and on-screen pill always show when that's the case.
-- Your OpenAI key, if you use one, lives in the login keychain.
+- Voice audio never leaves your Mac — recognition is Apple's on-device
+  engine, and the menu bar icon and on-screen pill always show when the mic
+  is live.
+- Visual commands are resolved by the on-device Apple Intelligence model; the
+  screenshots and accessibility snapshots it reads stay in memory and are
+  never written to disk or uploaded.
 
 ## License
 

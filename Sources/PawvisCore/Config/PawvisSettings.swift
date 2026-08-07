@@ -66,7 +66,7 @@ public struct GeneralConfig: Codable, Equatable, Sendable {
 /// whole settings file.
 public struct PawvisSettings: Codable, Equatable, Sendable {
     public var gestures: GestureConfig = .default
-    public var dictation: DictationConfig = DictationConfig()
+    public var voiceControl: VoiceControlConfig = VoiceControlConfig()
     public var overlay: OverlayConfig = OverlayConfig()
     public var general: GeneralConfig = GeneralConfig()
 
@@ -75,14 +75,43 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
     public static let `default` = PawvisSettings()
 
     enum CodingKeys: String, CodingKey {
-        case gestures, dictation, overlay, general
+        case gestures, voiceControl, overlay, general
+        case dictation // legacy (pre-voice-control builds)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(gestures, forKey: .gestures)
+        try c.encode(voiceControl, forKey: .voiceControl)
+        try c.encode(overlay, forKey: .overlay)
+        try c.encode(general, forKey: .general)
+        // The legacy `dictation` key is read-only (decode migration) and is
+        // deliberately not re-encoded.
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         gestures = (try? c.decodeIfPresent(GestureConfig.self, forKey: .gestures)) ?? .default
-        dictation = (try? c.decodeIfPresent(DictationConfig.self, forKey: .dictation)) ?? DictationConfig()
         overlay = (try? c.decodeIfPresent(OverlayConfig.self, forKey: .overlay)) ?? OverlayConfig()
         general = (try? c.decodeIfPresent(GeneralConfig.self, forKey: .general)) ?? GeneralConfig()
+        if let v = try? c.decodeIfPresent(VoiceControlConfig.self, forKey: .voiceControl) {
+            voiceControl = v
+        } else if let legacy = try? c.decodeIfPresent(LegacyDictationConfig.self, forKey: .dictation) {
+            // Settings written by dictation-era builds: carry over what still
+            // applies; wake words and engine choice are superseded.
+            voiceControl.enabled = legacy.enabled ?? voiceControl.enabled
+            voiceControl.language = legacy.language ?? voiceControl.language
+            voiceControl.typeDeltasImmediately =
+                legacy.typeDeltasImmediately ?? voiceControl.typeDeltasImmediately
+            voiceControl.vadSilenceMs = legacy.vadSilenceMs ?? voiceControl.vadSilenceMs
+        }
     }
+}
+
+/// Just the fields of the old DictationConfig that map onto voice control.
+private struct LegacyDictationConfig: Codable {
+    var enabled: Bool?
+    var language: String?
+    var typeDeltasImmediately: Bool?
+    var vadSilenceMs: Int?
 }
