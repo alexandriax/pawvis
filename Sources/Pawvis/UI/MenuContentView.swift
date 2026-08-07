@@ -29,6 +29,7 @@ struct MenuContentView: View {
     @ObservedObject var dictation: DictationController
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -157,6 +158,7 @@ struct MenuContentView: View {
         HStack {
             Button("Settings…") { openSettingsInFront() }
             Button("Gesture Guide") {
+                dismiss() // close the menu bar popover — it floats above windows
                 openWindow(id: "gesture-guide")
                 NSApp.activate(ignoringOtherApps: true)
             }
@@ -170,8 +172,11 @@ struct MenuContentView: View {
 
     /// LSUIElement apps don't activate when a window opens, so the Settings
     /// window appeared behind whatever the user was working in. Activate on
-    /// both sides of the open and front the window explicitly.
+    /// both sides of the open and front the window explicitly. Also dismiss
+    /// the menu bar popover first — it floats above regular windows and would
+    /// otherwise hover over Settings.
     private func openSettingsInFront() {
+        dismiss()
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {

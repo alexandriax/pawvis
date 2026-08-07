@@ -3,28 +3,34 @@ import Foundation
 /// Which hand shape presses the left button. All three are ratio gestures
 /// driven by the same sensitivity slider (see `ClickGesture.engageFactor`), so
 /// switching modes keeps the user's tuning.
+/// Declaration order is the picker order — best-performing modes first (per
+/// real-world testing: whole-hand averaging is the most occlusion-resistant).
 public enum ClickGesture: String, Codable, CaseIterable, Sendable {
-    case pinch            // thumb + index tip (current behavior)
-    case wholeHandPinch   // all fingertips gathered onto the thumb
+    case wholeHandPinch   // all fingertips gathered onto the thumb (default)
     case thumbCurl        // open "high-five" hand; tucking the thumb clicks
+    case indexTap         // open hand; dip the index finger like a mouse button
+    case pinch            // thumb + index tip
 
     public var displayName: String {
         switch self {
-        case .pinch: return "Pinch (thumb + index)"
         case .wholeHandPinch: return "Whole-hand pinch"
         case .thumbCurl: return "High-five, thumb to click"
+        case .indexTap: return "Mouse tap (index finger)"
+        case .pinch: return "Pinch (thumb + index)"
         }
     }
 
     /// Scales the sensitivity slider into each mode's reachable range: the ring
     /// and little fingers physically can't close on the thumb as tightly as the
-    /// index can, and a tucked thumb sits ~0.3–0.35 of hand scale from the index
-    /// knuckle (0.45 × 0.8 = 0.36 at the default slider position).
+    /// index can; a tucked thumb sits ~0.3–0.35 of hand scale from the index
+    /// knuckle; and the index-tap differential idles near 1.0, dropping to
+    /// ~0.5 on a tap (0.45 × 1.5 = 0.675 at the default slider position).
     var engageFactor: Double {
         switch self {
-        case .pinch: return 1.0
         case .wholeHandPinch: return 1.25
         case .thumbCurl: return 0.8
+        case .indexTap: return 1.5
+        case .pinch: return 1.0
         }
     }
 }
@@ -35,8 +41,8 @@ public enum ClickGesture: String, Codable, CaseIterable, Sendable {
 public struct GestureConfig: Codable, Equatable, Sendable {
     // MARK: Pinch detection
     /// Which hand shape clicks. The rest of the pinch tuning applies to all
-    /// three modes.
-    public var clickGesture: ClickGesture = .pinch
+    /// modes.
+    public var clickGesture: ClickGesture = .wholeHandPinch
     /// Pinch engages when distance(thumbTip, indexTip) / handScale drops below
     /// this. Lower = the tips must come closer before a click fires.
     public var pinchEngageRatio: Double = 0.45

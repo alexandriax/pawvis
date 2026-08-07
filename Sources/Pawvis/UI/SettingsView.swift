@@ -148,6 +148,8 @@ private struct GestureSettingsTab: View {
             return "Gather all your fingertips onto your thumb to click — deliberate, and averaging four fingers makes phantom clicks much rarer. The cursor rides your palm."
         case .thumbCurl:
             return "Hold your hand open like a high-five and tuck your thumb across your palm to click. Your fingers stay visible to the camera, so tracking stays solid. The cursor rides your palm."
+        case .indexTap:
+            return "Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your palm."
         }
     }
 }

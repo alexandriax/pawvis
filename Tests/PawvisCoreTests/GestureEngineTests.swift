@@ -113,7 +113,10 @@ final class GestureEngineTests: XCTestCase {
 
     func testTapWindowDefaults() {
         let c = GestureConfig.default
-        XCTAssertEqual(c.clickGesture, .pinch)
+        XCTAssertEqual(c.clickGesture, .wholeHandPinch,
+                       "whole-hand averaging proved the most reliable mode in real use")
+        XCTAssertEqual(ClickGesture.allCases.first, .wholeHandPinch,
+                       "picker order = declaration order = best modes first")
         XCTAssertEqual(c.dragStartDelay, 0.30, accuracy: 1e-9)
         XCTAssertEqual(c.dragIntentDistance, 0.030, accuracy: 1e-9)
         XCTAssertEqual(c.jitterDeadband, 0.004, accuracy: 1e-9)
@@ -121,6 +124,7 @@ final class GestureEngineTests: XCTestCase {
 
     func testModeThresholdsScaleTheSameSlider() {
         var c = GestureConfig.default
+        c.clickGesture = .pinch
         XCTAssertEqual(c.engageRatio, 0.45, accuracy: 1e-9)
         XCTAssertEqual(c.releaseRatio, c.pinchReleaseRatio, accuracy: 1e-9, "pinch mode is unchanged")
 
@@ -133,12 +137,18 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertEqual(c.engageRatio, 0.36, accuracy: 1e-9,
                        "a tucked thumb sits ~0.30–0.35 of hand scale from the index knuckle")
         XCTAssertEqual(c.releaseRatio, 0.44, accuracy: 1e-9)
+
+        c.clickGesture = .indexTap
+        XCTAssertEqual(c.engageRatio, 0.675, accuracy: 1e-9,
+                       "the index-tap differential idles near 1.0 and dips on a tap")
+        XCTAssertEqual(c.releaseRatio, 0.755, accuracy: 1e-9)
     }
 
     func testUnreadableClickGestureKeepsTheDefault() throws {
         let bogus = try JSONDecoder().decode(
             GestureConfig.self, from: Data(#"{"clickGesture":"telekinesis"}"#.utf8))
-        XCTAssertEqual(bogus.clickGesture, .pinch, "an unknown mode must not fail the settings tree")
+        XCTAssertEqual(bogus.clickGesture, .wholeHandPinch,
+                       "an unknown mode must not fail the settings tree")
         let known = try JSONDecoder().decode(
             GestureConfig.self, from: Data(#"{"clickGesture":"thumbCurl"}"#.utf8))
         XCTAssertEqual(known.clickGesture, .thumbCurl)
@@ -567,6 +577,66 @@ final class GestureEngineTests: XCTestCase {
         feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
         let e = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.1, count: 10)
         XCTAssertTrue(downs(e).isEmpty, "three idle fingers keep the mean above the threshold")
+    }
+
+    // MARK: - Index-tap (mouse) mode
+
+    func testIndexTapClicksAndReleasesOnThePalm() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+
+        let tapping = feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.15, count: 3)
+        let d = downs(tapping)
+        XCTAssertEqual(d.count, 1, "dipping the index finger clicks")
+
+        // Lifting the finger releases; the palm-anchored cursor never moved,
+        // so the up lands exactly on the down.
+        let lifting = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.28, count: 3)
+        XCTAssertTrue(drags(lifting).isEmpty)
+        let u = ups(lifting)
+        XCTAssertEqual(u.count, 1)
+        XCTAssertEqual(u[0].0.distance(to: d[0].0), 0, accuracy: 1e-9)
+    }
+
+    func testIndexTapHoldDragsWithThePalm() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.4, 0.7))], from: 0, count: 4)
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.4, 0.7))], from: 0.15, count: 3)
+
+        // Hold the finger down past the tap window, then move the hand.
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.4, 0.7))], from: 0.28, count: 8)
+        var dragged: [Vec2] = []
+        for i in 1...5 {
+            let e = feed([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.4 + Double(i) * 0.03, 0.7))],
+                         at: 0.56 + Double(i) / 30).events
+            dragged += drags(e)
+        }
+        XCTAssertGreaterThanOrEqual(dragged.count, 4, "held finger + hand movement drags")
+    }
+
+    func testWholeHandTiltDoesNotIndexTap() {
+        // Curling every finger (or pitching the whole hand forward) shortens
+        // the index AND middle extents together — the differential stays flat,
+        // so no click. Only the index moving relative to its neighbor taps.
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+        let e = feedFrames([SyntheticHand.fist()], from: 0.15, count: 6)
+        XCTAssertTrue(downs(e).isEmpty, "whole-hand curl must not read as an index tap")
+    }
+
+    func testIndexTapBandHoldsBothWays() {
+        useMode(.indexTap)
+        // Half-dipped from open: no click.
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+        let e1 = feedFrames([SyntheticHand.mouseTapHalf()], from: 0.15, count: 8)
+        XCTAssertTrue(downs(e1).isEmpty, "a half-dip sits in the hysteresis band")
+
+        // Full dip clicks; returning to half-dip must not release.
+        feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.45, count: 3)
+        let e2 = feedFrames([SyntheticHand.mouseTapHalf()], from: 0.56, count: 8)
+        XCTAssertTrue(ups(e2).isEmpty, "the band must not release a held tap")
+        let e3 = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.85, count: 3)
+        XCTAssertEqual(ups(e3).count, 1)
     }
 
     func testWholeHandPointerIsThePalm() {

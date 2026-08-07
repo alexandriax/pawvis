@@ -143,6 +143,27 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertNotNil(f.isExtended(.middle))
     }
 
+    func testIndexTapRatio() {
+        // Both fingers up → extents match → idles at 1.0 exactly (synthetic
+        // fingers share segment lengths; real hands idle slightly below).
+        XCTAssertEqual(features(SyntheticHand.mouseTap(indexDown: false)).indexTapRatio()!,
+                       1.0, accuracy: 1e-2)
+        // Index dipped → its extent collapses → ratio drops well below engage.
+        XCTAssertLessThan(features(SyntheticHand.mouseTap(indexDown: true)).indexTapRatio()!, 0.4)
+        // Whole-hand curl moves both fingers together → differential stays ~1.
+        XCTAssertEqual(features(SyntheticHand.fist()).indexTapRatio()!, 1.0, accuracy: 0.1)
+    }
+
+    func testIndexTapRatioNilWithoutMiddleFinger() {
+        var joints: [HandJoint: Vec2] = [:]
+        let full = SyntheticHand.mouseTap(indexDown: false)
+        for joint in HandJoint.allCases where joint != .middleTip {
+            if let p = full[joint] { joints[joint] = p }
+        }
+        XCTAssertNil(features(Hand(joints: joints)).indexTapRatio(),
+                     "the differential needs the middle finger as its reference")
+    }
+
     // MARK: Poses
 
     func testSplayDetection() {

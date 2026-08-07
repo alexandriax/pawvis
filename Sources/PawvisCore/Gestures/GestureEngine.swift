@@ -226,6 +226,7 @@ public final class GestureEngine {
         case .pinch: return features.pinchRatio(to: .index)
         case .wholeHandPinch: return features.wholeHandPinchRatio()
         case .thumbCurl: return features.thumbCurlRatio()
+        case .indexTap: return features.indexTapRatio()
         }
     }
 
@@ -236,7 +237,7 @@ public final class GestureEngine {
         switch config.clickGesture {
         case .pinch:
             return features.pointerPoint(.pinchMidpoint)
-        case .wholeHandPinch, .thumbCurl:
+        case .wholeHandPinch, .thumbCurl, .indexTap:
             // Both gestures are all-finger motion; only the palm holds still
             // through them. (A fingertip centroid shifts ~0.08 screen-normalized
             // when the hand opens to release — enough to smear every click
@@ -263,6 +264,10 @@ public final class GestureEngine {
             return !used.isEmpty && used.allSatisfy { confident($0.tip) }
         case .thumbCurl:
             return confident(.thumbTip) && confident(.indexMCP)
+        case .indexTap:
+            // The differential needs both fingers' tip and knuckle.
+            return confident(.indexTip) && confident(.indexMCP)
+                && confident(.middleTip) && confident(.middleMCP)
         }
     }
 
@@ -314,6 +319,11 @@ public final class GestureEngine {
             // reach sporecaster's thumb–index range, so the fixed ramp would
             // read full long before the click.
             progress = ((config.engageRatio + Self.modeStrengthSpan) - ratio) / Self.modeStrengthSpan
+        case .indexTap:
+            // Idles near 1.0; a shorter ramp keeps the resting ring near zero
+            // instead of showing a quarter-closed ring at rest.
+            let span = 0.25
+            progress = ((config.releaseRatio + span) - ratio) / (config.releaseRatio + span - config.engageRatio)
         }
         return min(max(progress, 0), 1)
     }

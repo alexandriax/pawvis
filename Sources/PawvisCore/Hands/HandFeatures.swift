@@ -102,6 +102,24 @@ public struct HandFeatures {
         return thumbTip.distance(to: indexMCP) / scale
     }
 
+    /// The mouse-button measure: how far the index finger has dipped RELATIVE
+    /// to the middle finger, folded into a low-when-tapped ratio:
+    ///   1 + (indexExtent − middleExtent)
+    /// where extent = tip→knuckle distance / hand scale. Idles near 1.0 with
+    /// both fingers up; dips to ~0.5 when the index taps down (flexion
+    /// foreshortens its projected extent). Differencing against the middle
+    /// finger cancels whole-hand tilt — only the index moving *relative to its
+    /// neighbor* reads as a tap, like a finger on a physical mouse button.
+    public func indexTapRatio() -> Double? {
+        guard let indexTip = point(.indexTip), let indexMCP = point(.indexMCP),
+              let middleTip = point(.middleTip), let middleMCP = point(.middleMCP) else {
+            return nil
+        }
+        let indexExtent = indexTip.distance(to: indexMCP) / scale
+        let middleExtent = middleTip.distance(to: middleMCP) / scale
+        return 1 + (indexExtent - middleExtent)
+    }
+
     // MARK: - Finger extension
 
     /// Angle at the PIP joint; π means dead straight.

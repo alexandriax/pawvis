@@ -47,6 +47,11 @@ struct GestureGuideView: View {
                 move: "Hold your hand open like a high-five and move it — the claw cursor rides your palm.",
                 click: "Tuck your thumb in across your palm.",
                 letGo: "swing your thumb back out")
+        case .indexTap:
+            clickDetail = (
+                move: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm.",
+                click: "Dip your index finger down, like tapping a mouse button (keep your other fingers up).",
+                letGo: "lift your index finger")
         }
         return [
             Row(symbol: "hand.point.up.left.fill",

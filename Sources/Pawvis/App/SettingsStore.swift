@@ -59,6 +59,14 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "PawvisMigration.gpt4oTranscribe")
         }
+        // v5: whole-hand pinch proved the most reliable mode in testing and
+        // became the default; move users still on the old pinch default.
+        if !defaults.bool(forKey: "PawvisMigration.wholeHandDefault") {
+            if settings.gestures.clickGesture == .pinch {
+                settings.gestures.clickGesture = .wholeHandPinch
+            }
+            defaults.set(true, forKey: "PawvisMigration.wholeHandDefault")
+        }
     }
 
     private func persist() {
