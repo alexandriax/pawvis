@@ -29,6 +29,20 @@ your Mac; the one exception is the opt-in agent hand-off below.
   <sub>Signed and notarized · macOS 14+ · unzip and drag to Applications</sub>
 </p>
 
+> [!IMPORTANT]
+> **Pawvis really does control your Mac.** It moves the cursor and posts real
+> clicks, drags and scrolls, so an accidental finger dip is an accidental
+> click, and a click lands on whatever is under the cursor at that moment
+> (Send, Delete, Confirm). Treat it like handing someone else your mouse. Give
+> it a few minutes somewhere harmless, like the Finder or a scratch document,
+> until the gestures feel deliberate, and keep the menu bar toggle in reach:
+> tracking stops the moment you switch it off, and the cursor parks whenever
+> you close your hand or take it out of the camera's view. With voice control
+> on, spoken commands do the same thing, and a misheard sentence is still a
+> command. Pawvis is provided as is, without warranty of any kind: its
+> developer accepts no liability for any action taken with it, intentional or
+> not, or for any resulting loss or damage. Please use it responsibly.
+
 ## Gestures
 
 Your hands are tracked whenever tracking is on, but the cursor only follows
@@ -110,9 +124,24 @@ top-of-screen capsule. Only "Pawvis, stop listening" stays local, so you can
 always shut it off instantly. Pausing after the wake word is fine: a bare
 "Pawvis" keeps listening a few seconds for the command, and if dictation
 mangles the wake word ("Paw this…"), the on-device model confirms it was
-meant for Pawvis and recovers the command before the hand-off. Strictly
-opt-in and off by default: the agent runs with permission checks bypassed and
-can do anything you could do at the keyboard.
+meant for Pawvis and recovers the command before the hand-off.
+
+> [!WARNING]
+> **The agent relays are the sharpest thing in Pawvis. They do not ask.**
+> Claude Code and Codex are launched with their own permission prompts turned
+> off (`--dangerously-skip-permissions`,
+> `--dangerously-bypass-approvals-and-sandbox`), so nothing pauses to confirm
+> anything: the agent simply carries out what it was handed, with your user
+> account, your files, your logged-in sessions and your credentials. That
+> covers deleting or rewriting files, installing software, running shell
+> commands, opening apps, and sending things on your behalf. Speech
+> recognition is not perfect, and a misheard command is still executed. It is
+> also the one mode that sends what you say beyond your Mac, to the agent CLI
+> you picked. It is off by default, and Pawvis makes you accept this warning
+> in a dialog before it will turn on. If you want a confirmation step before
+> actions run, stay on the on-device handler. Turning it on is your call and
+> your responsibility: no liability is accepted for what an agent does with
+> your machine, however it was asked.
 
 ## Install
 

@@ -770,6 +770,17 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   font-size: 0.9rem;
 }
 .footer-links a:hover { color: var(--ink); }
+.footer-disclaimer {
+  flex-basis: 100%;
+  max-width: 52em;
+  margin: 22px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.65;
+}
+.footer-disclaimer strong { color: var(--ink-soft); }
 .footer-line {
   flex-basis: 100%;
   margin: 10px 0 0;

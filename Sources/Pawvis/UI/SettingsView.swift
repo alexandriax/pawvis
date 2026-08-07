@@ -370,18 +370,98 @@ private struct GestureSettingsTab: View {
 
 // MARK: - Voice Control
 
+/// The agent hand-off risk copy, in one place, so the warning box and the
+/// acceptance dialog can never drift apart (and so the README and the website
+/// have a single wording to restate).
+@MainActor
+private enum AgentRiskCopy {
+    static func title(_ tool: AgentCLIExecutor.Tool) -> String {
+        "Hand every spoken command to \(tool.displayName)?"
+    }
+
+    /// Short form for the always-visible warning box in Settings.
+    static func short(tool: AgentCLIExecutor.Tool, wake: String) -> String {
+        "High risk: \(tool.displayName) runs with ALL permission checks bypassed. It never asks you to confirm anything, it just does what it was told, as you, with your files and your logged-in sessions. A misheard command still runs. Only “\(wake), stop listening” stays local, and what it does is your responsibility."
+    }
+
+    /// Long form for the dialog the user has to accept.
+    static func body(tool: AgentCLIExecutor.Tool, wake: String) -> String {
+        """
+        \(tool.displayName) is launched with its own permission prompts turned off, so nothing pauses to confirm anything. It carries out what it was handed, as you, with your files, your logged-in sessions and your credentials: deleting or rewriting files, installing software, running shell commands, opening apps, sending things on your behalf.
+
+        Everything you say after “\(wake)” is sent to it, and speech recognition is not perfect, so a misheard command is still executed. This is also the only mode that sends what you say beyond this Mac. Only “\(wake), stop listening” stays local.
+
+        Stay on Apple Intelligence (on-device) if you want a handler that can only do what Pawvis itself can do.
+
+        Turning this on is your call and your responsibility: Pawvis is provided as is, with no warranty, and its developer accepts no liability for anything done with it, intended or not. Please use it responsibly.
+        """
+    }
+}
+
+/// A pending "yes, I understand" for the agent hand-off. `apply` is the change
+/// the user asked for, held back until they accept it.
+private struct AgentConsentRequest: Identifiable {
+    let id = UUID()
+    let tool: AgentCLIExecutor.Tool
+    let apply: () -> Void
+}
+
+/// A warning that reads as a warning: yellow triangle, tinted card, wrapping
+/// text. Used for the risks the user has to weigh, not the ones they can fix
+/// with a button.
+private struct RiskNote: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+            CaptionText(text)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.yellow.opacity(0.12)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.yellow.opacity(0.35)))
+    }
+}
+
 private struct VoiceControlSettingsTab: View {
     @ObservedObject var store: SettingsStore
     @State private var screenRecording = Permissions.screenRecording()
+    @State private var consent: AgentConsentRequest?
 
     private var wake: String { store.settings.voiceControl.wakeWord }
+
+    /// The handler currently in force, if it's an agent CLI.
+    private var selectedAgent: AgentCLIExecutor.Tool? {
+        AgentCLIExecutor.Tool(rawValue: store.settings.voiceControl.agentExecutor)
+    }
 
     var body: some View {
         SettingsPage {
             SettingToggle(
                 title: "Enable voice control (beta)",
                 caption: "Off by default while in beta. Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.",
-                isOn: $store.settings.voiceControl.enabled)
+                isOn: Binding(
+                    get: { store.settings.voiceControl.enabled },
+                    set: { enabled in
+                        // Turning voice control on while an agent handler is
+                        // selected arms the hand-off, so it goes through the
+                        // same acceptance dialog as picking the agent does.
+                        guard enabled, let tool = selectedAgent else {
+                            store.settings.voiceControl.enabled = enabled
+                            return
+                        }
+                        consent = AgentConsentRequest(tool: tool) {
+                            store.settings.voiceControl.enabled = true
+                        }
+                    }))
+
+            RiskNote(text: "Voice control acts on what it hears. It clicks, types, presses keys and opens apps for real, wherever the pointer and focus happen to be, and a misheard command is still a command.")
 
             Divider()
 
@@ -429,7 +509,22 @@ private struct VoiceControlSettingsTab: View {
                 title: "Commands after “\(wake)” are handled by",
                 caption: agentPickerCaption
             ) {
-                Picker("", selection: $store.settings.voiceControl.agentExecutor) {
+                Picker("", selection: Binding(
+                    get: { store.settings.voiceControl.agentExecutor },
+                    set: { selection in
+                        // Switching to an agent CLI is the moment the risk
+                        // becomes real, so the change is held until the user
+                        // accepts it. Setting `consent` re-renders the tab,
+                        // which snaps the picker back to the live value.
+                        guard let tool = AgentCLIExecutor.Tool(rawValue: selection),
+                              selection != store.settings.voiceControl.agentExecutor else {
+                            store.settings.voiceControl.agentExecutor = selection
+                            return
+                        }
+                        consent = AgentConsentRequest(tool: tool) {
+                            store.settings.voiceControl.agentExecutor = selection
+                        }
+                    })) {
                     Text("Apple Intelligence (on-device)").tag("")
                     Text("Claude Code (agent CLI)").tag("claude")
                     Text("Codex CLI (agent CLI)").tag("codex")
@@ -437,7 +532,9 @@ private struct VoiceControlSettingsTab: View {
                 .frame(maxWidth: 320)
             }
 
-            if let tool = AgentCLIExecutor.Tool(rawValue: store.settings.voiceControl.agentExecutor) {
+            if let tool = selectedAgent {
+                RiskNote(text: AgentRiskCopy.short(tool: tool, wake: wake))
+
                 if let path = AgentCLIExecutor.binaryPath(for: tool) {
                     CaptionText("Found \(tool.displayName) at \(path).")
                 } else {
@@ -485,13 +582,28 @@ private struct VoiceControlSettingsTab: View {
             }
         }
         .onAppear { screenRecording = Permissions.screenRecording() }
+        .alert(
+            consent.map { AgentRiskCopy.title($0.tool) } ?? "",
+            isPresented: Binding(
+                get: { consent != nil },
+                set: { if !$0 { consent = nil } }),
+            presenting: consent
+        ) { request in
+            Button("Cancel", role: .cancel) { consent = nil }
+            Button("I understand, turn it on", role: .destructive) {
+                request.apply()
+                consent = nil
+            }
+        } message: { request in
+            Text(AgentRiskCopy.body(tool: request.tool, wake: wake))
+        }
     }
 
     private var agentPickerCaption: String {
         if store.settings.voiceControl.agentExecutor.isEmpty {
             return "On-device: the instant grammar runs first, then Apple Intelligence maps what it missed to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
         }
-        return "⚠️ EVERYTHING after the wake word goes to the agent, asked to perform it via computer use — with ALL permission checks bypassed, it can do anything on this Mac that you could. Only “\(wake), stop listening” stays local. Slower than on-device, far more capable; results flash in the top-of-screen capsule."
+        return "EVERYTHING after the wake word goes to the agent, asked to perform it via computer use. Slower than on-device and far more capable; the run streams in the corner panel and the outcome flashes in the top-of-screen capsule."
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {
@@ -606,6 +718,16 @@ private struct AboutTab: View {
             Divider()
 
             CaptionText("Hand tracking and voice control run entirely on-device — speech, and the screen context used for visual commands, never leave your Mac.")
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Disclaimer")
+                    .font(.callout)
+                CaptionText("Pawvis operates this Mac. It moves the real cursor and posts real clicks, drags and scrolls on your behalf, so a stray gesture can click whatever is under the pointer. With voice control on it can also open apps, type and press keys, and with the optional agent hand-off enabled it can carry out whatever the agent decides to do, without asking first.")
+                CaptionText("Pawvis is provided as is, without warranty of any kind. Its developer accepts no liability for any action taken with it, intentional or not, or for any resulting loss or damage. You are responsible for what happens on your machine: please use it responsibly, and keep the menu bar toggle in reach.")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
