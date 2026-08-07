@@ -1,8 +1,109 @@
 import PawvisCore
 import SwiftUI
 
+// MARK: - Layout primitives
+//
+// Every settings control is laid out label-ABOVE-control in a leading-aligned
+// column, and every caption wraps. macOS `Form`'s two-column layout squeezes
+// long labels into a narrow leading column (truncating them with a leading
+// ellipsis) and clips captions on the right, which is exactly the bug this
+// structure removes: with a single full-width column there is no column to
+// squeeze, so labels and captions can only wrap, never truncate.
+//
+// Rule for future settings: use SettingRow / SettingToggle / LabeledSlider
+// below. Do not add bare `Picker("Long label", …)` or `TextField("Long label",
+// …)` to a Form — see AGENTS.md.
+
+/// Wrapping secondary text. Never truncates: `fixedSize(vertical:)` lets it
+/// grow to as many lines as it needs.
+private struct CaptionText: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Title above an arbitrary control, with an optional wrapping caption below.
+private struct SettingRow<Control: View>: View {
+    let title: String
+    var caption: String?
+    @ViewBuilder var control: () -> Control
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            control()
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let caption { CaptionText(caption) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A checkbox whose label wraps instead of truncating.
+private struct SettingToggle: View {
+    let title: String
+    var caption: String?
+    @Binding var isOn: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(title, isOn: $isOn)
+                .fixedSize(horizontal: false, vertical: true)
+            if let caption { CaptionText(caption) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct LabeledSlider: View {
+    let label: String
+    let caption: String?
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Slider(value: $value, in: range)
+            if let caption { CaptionText(caption) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A scrolling, leading-aligned settings page. Scrolling means long pages can
+/// never be clipped vertically either.
+private struct SettingsPage<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(22)
+        }
+    }
+}
+
+// MARK: - Settings
+
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var updater: UpdateChecker
 
     var body: some View {
         TabView {
@@ -12,10 +113,10 @@ struct SettingsView: View {
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
             DictationSettingsTab(store: store)
                 .tabItem { Label("Dictation", systemImage: "mic") }
-            AboutTab()
+            AboutTab(updater: updater)
                 .tabItem { Label("About", systemImage: "pawprint") }
         }
-        .frame(width: 480)
+        .frame(width: 620, height: 580)
         .tint(PawvisTheme.purpleUI)
     }
 }
@@ -27,19 +128,22 @@ private struct GeneralSettingsTab: View {
     private var cameras: [(id: String, name: String)] { CameraManager.availableCameras() }
 
     var body: some View {
-        Form {
-            Picker("Camera", selection: Binding(
-                get: { store.settings.general.cameraDeviceID ?? "" },
-                set: { store.settings.general.cameraDeviceID = $0.isEmpty ? nil : $0 })) {
-                Text("Automatic").tag("")
-                ForEach(cameras, id: \.id) { camera in
-                    Text(camera.name).tag(camera.id)
+        SettingsPage {
+            SettingRow(title: "Camera") {
+                Picker("", selection: Binding(
+                    get: { store.settings.general.cameraDeviceID ?? "" },
+                    set: { store.settings.general.cameraDeviceID = $0.isEmpty ? nil : $0 })) {
+                    Text("Automatic").tag("")
+                    ForEach(cameras, id: \.id) { camera in
+                        Text(camera.name).tag(camera.id)
+                    }
                 }
             }
 
-            Toggle("Control all displays", isOn: $store.settings.general.controlAllDisplays)
-            Text("Off: hand space maps to the main display only.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingToggle(
+                title: "Control all displays",
+                caption: "Off: hand space maps to the main display only.",
+                isOn: $store.settings.general.controlAllDisplays)
 
             Divider()
 
@@ -51,16 +155,18 @@ private struct GeneralSettingsTab: View {
                     set: { store.settings.gestures.smoothing.beta = $0 }),
                 range: 0.005...0.09)
 
-            Picker("Reach", selection: $store.settings.gestures.reachMode) {
-                Text("Auto (adapts to distance)").tag(ReachMode.auto)
-                Text("Manual").tag(ReachMode.manual)
+            SettingRow(
+                title: "Reach",
+                caption: store.settings.gestures.reachMode == .auto
+                    ? "Sizes the tracking area from your hand's apparent size, so the whole screen stays reachable — near or far — with all fingers visible to the camera. Adjusts gently, and never mid-click."
+                    : "Fixed tracking area, set with the slider below."
+            ) {
+                Picker("", selection: $store.settings.gestures.reachMode) {
+                    Text("Auto (adapts to distance)").tag(ReachMode.auto)
+                    Text("Manual").tag(ReachMode.manual)
+                }
+                .pickerStyle(.radioGroup)
             }
-            Text(store.settings.gestures.reachMode == .auto
-                 ? "Sizes the tracking area from your hand's apparent size, so the whole screen stays reachable — near or far — with all fingers visible to the camera. Adjusts gently, never mid-click."
-                 : "Fixed tracking area, set with the slider below.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             LabeledSlider(
                 label: "Manual reach",
@@ -76,19 +182,18 @@ private struct GeneralSettingsTab: View {
                 range: 0.2...0.45)
                 .disabled(store.settings.gestures.reachMode == .auto)
 
-            Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
-            Text("Leave on for a normal user-facing webcam.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingToggle(
+                title: "Mirror camera",
+                caption: "Leave on for a normal user-facing webcam.",
+                isOn: $store.settings.gestures.mirrorCamera)
 
             Divider()
 
-            Toggle("Show tracking diagnostics", isOn: $store.settings.general.showDiagnostics)
-            Text("Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            SettingToggle(
+                title: "Show tracking diagnostics",
+                caption: "Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
+                isOn: $store.settings.general.showDiagnostics)
         }
-        .padding(20)
     }
 }
 
@@ -98,16 +203,14 @@ private struct GestureSettingsTab: View {
     @ObservedObject var store: SettingsStore
 
     var body: some View {
-        Form {
-            Picker("Click gesture", selection: $store.settings.gestures.clickGesture) {
-                ForEach(ClickGesture.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
+        SettingsPage {
+            SettingRow(title: "Click gesture", caption: clickGestureCaption) {
+                Picker("", selection: $store.settings.gestures.clickGesture) {
+                    ForEach(ClickGesture.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
                 }
             }
-            Text(clickGestureCaption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -128,47 +231,46 @@ private struct GestureSettingsTab: View {
             if rightClickAvailable {
                 Divider()
 
-                Toggle("Right-click", isOn: $store.settings.gestures.rightClickEnabled)
-                Picker("Right-click finger", selection: $store.settings.gestures.rightClickFinger) {
-                    Text("Pinky").tag(Finger.little)
-                    Text("Ring").tag(Finger.ring)
-                    Text("Middle").tag(Finger.middle)
-                    if store.settings.gestures.clickGesture == .thumbCurl {
-                        Text("Index").tag(Finger.index)
+                SettingToggle(
+                    title: "Right-click",
+                    isOn: $store.settings.gestures.rightClickEnabled)
+
+                SettingRow(
+                    title: "Right-click finger",
+                    caption: "Dip that finger like a mouse button to right-click; hold it down to right-drag. Measured against its neighbor, so hand tilt can't trigger it."
+                ) {
+                    Picker("", selection: $store.settings.gestures.rightClickFinger) {
+                        Text("Pinky").tag(Finger.little)
+                        Text("Ring").tag(Finger.ring)
+                        Text("Middle").tag(Finger.middle)
+                        if store.settings.gestures.clickGesture == .thumbCurl {
+                            Text("Index").tag(Finger.index)
+                        }
                     }
+                    .disabled(!store.settings.gestures.rightClickEnabled)
                 }
-                .disabled(!store.settings.gestures.rightClickEnabled)
-                Text("Dip that finger like a mouse button to right-click; hold it down to right-drag. Measured against its neighbor, so hand tilt can't trigger it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
 
-            Toggle("Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
-            Toggle("Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
-            Toggle("Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
-            Toggle("Status pill", isOn: $store.settings.overlay.showStatusPill)
-            Toggle("Show overlay in screen recordings", isOn: $store.settings.overlay.showInScreenCapture)
-            Text("Off keeps the claw and dots out of screenshots and captures (private by default). Turn on to record a demo of Pawvis.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            SettingToggle(title: "Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
+            SettingToggle(title: "Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
+            SettingToggle(title: "Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
+            SettingToggle(title: "Status pill", isOn: $store.settings.overlay.showStatusPill)
+            SettingToggle(
+                title: "Show overlay in screen recordings",
+                caption: "Off keeps the claw and dots out of screenshots and captures (private by default). Turn on to record a demo of Pawvis.",
+                isOn: $store.settings.overlay.showInScreenCapture)
 
             Divider()
 
-            HStack {
+            VStack(alignment: .leading, spacing: 5) {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                Text("Restores sensitivity, smoothing, reach, and timing to the tuned defaults.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                CaptionText("Restores the click gesture, sensitivity, smoothing, reach, and timing to the tuned defaults.")
             }
         }
-        .padding(20)
     }
 
     private var rightClickAvailable: Bool {
@@ -200,88 +302,110 @@ private struct DictationSettingsTab: View {
     private var usesOpenAI: Bool { store.settings.dictation.engine == "openai" }
 
     var body: some View {
-        Form {
-            Toggle("Enable voice dictation", isOn: $store.settings.dictation.enabled)
+        SettingsPage {
+            SettingToggle(title: "Enable voice dictation", isOn: $store.settings.dictation.enabled)
 
-            Picker("Engine", selection: $store.settings.dictation.engine) {
-                Text("Apple (on-device, private)").tag("apple")
-                Text("OpenAI (cloud)").tag("openai")
+            SettingRow(
+                title: "Engine",
+                caption: usesOpenAI
+                    ? "Audio streams to OpenAI only while dictation is armed."
+                    : "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model."
+            ) {
+                Picker("", selection: $store.settings.dictation.engine) {
+                    Text("Apple (on-device, private)").tag("apple")
+                    Text("OpenAI (cloud)").tag("openai")
+                }
             }
-            Text(usesOpenAI
-                 ? "Audio streams to OpenAI only while dictation is armed."
-                 : "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.")
-                .font(.caption).foregroundStyle(.secondary)
 
             Divider()
 
             if usesOpenAI {
                 openAISection
+                Divider()
             }
 
-            TextField("Language (ISO code, blank = auto)", text: $store.settings.dictation.language)
+            SettingRow(title: "Language (ISO code, blank = auto)") {
+                TextField("", text: $store.settings.dictation.language)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 220)
+            }
 
-            TextField("Wake words (comma-separated)", text: listBinding($store.settings.dictation.wakeWords))
-            Text("Start an utterance with one of these to begin typing.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingRow(
+                title: "Wake words (comma-separated)",
+                caption: "Start an utterance with one of these to begin typing."
+            ) {
+                TextField("", text: listBinding($store.settings.dictation.wakeWords))
+                    .textFieldStyle(.roundedBorder)
+            }
 
-            TextField("Stop phrases (comma-separated)", text: listBinding($store.settings.dictation.stopPhrases))
+            SettingRow(
+                title: "Stop phrases (comma-separated)",
+                caption: "Say one of these to stop typing while staying armed."
+            ) {
+                TextField("", text: listBinding($store.settings.dictation.stopPhrases))
+                    .textFieldStyle(.roundedBorder)
+            }
 
-            Toggle("Spoken commands (“new line”, “press enter”…)",
-                   isOn: $store.settings.dictation.commandsEnabled)
-            Toggle("Low-latency typing (experimental)",
-                   isOn: $store.settings.dictation.typeDeltasImmediately)
-            Text("Types words as you say them and corrects revisions with backspaces.")
-                .font(.caption).foregroundStyle(.secondary)
+            SettingToggle(
+                title: "Spoken commands (“new line”, “new paragraph”, “press enter”, “press tab”)",
+                isOn: $store.settings.dictation.commandsEnabled)
+
+            SettingToggle(
+                title: "Low-latency typing (experimental)",
+                caption: "Types words as you say them and corrects revisions with backspaces.",
+                isOn: $store.settings.dictation.typeDeltasImmediately)
         }
-        .padding(20)
     }
 
     @ViewBuilder
     private var openAISection: some View {
-            LabeledContent("OpenAI API key") {
-                VStack(alignment: .trailing, spacing: 6) {
-                    SecureField("sk-proj-…", text: $apiKeyDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 240)
-                    HStack {
-                        if keySaved {
-                            Text("Saved ✓").font(.caption).foregroundStyle(.green)
-                        } else {
-                            Text(keyStatusText).font(.caption).foregroundStyle(.secondary)
+        SettingRow(
+            title: "OpenAI API key",
+            caption: "Stored in your login keychain — never in the app or its settings files. Paste the whole key, including its “sk-” prefix."
+        ) {
+            VStack(alignment: .leading, spacing: 6) {
+                SecureField("sk-proj-…", text: $apiKeyDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 300)
+                HStack(spacing: 10) {
+                    Button("Save") {
+                        store.saveAPIKey(apiKeyDraft)
+                        apiKeyDraft = ""
+                        keySaved = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(2))
+                            keySaved = false
                         }
-                        Button("Save") {
-                            store.saveAPIKey(apiKeyDraft)
-                            apiKeyDraft = ""
-                            keySaved = true
-                            Task {
-                                try? await Task.sleep(for: .seconds(2))
-                                keySaved = false
-                            }
-                        }
-                        .disabled(apiKeyDraft.isEmpty)
-                        Button("Clear") { store.clearAPIKey() }
-                            .disabled(!store.apiKeyInKeychain)
+                    }
+                    .disabled(apiKeyDraft.isEmpty)
+                    Button("Clear") { store.clearAPIKey() }
+                        .disabled(!store.apiKeyInKeychain)
+                    if keySaved {
+                        Text("Saved ✓").font(.caption).foregroundStyle(.green)
+                    } else {
+                        Text(keyStatusText).font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
-            Text("Stored in your login keychain — never in the app or its settings files. Paste the whole key, including its “sk-” prefix.")
-                .font(.caption).foregroundStyle(.secondary)
+            .onAppear { store.ensureKeyStatusLoaded() }
+        }
 
-            Picker("Model", selection: $store.settings.dictation.model) {
+        SettingRow(title: "Model") {
+            Picker("", selection: $store.settings.dictation.model) {
                 Text("gpt-4o-transcribe (recommended)").tag("gpt-4o-transcribe")
                 Text("gpt-live-transcribe (lowest latency)").tag("gpt-live-transcribe")
                 Text("gpt-4o-mini-transcribe").tag("gpt-4o-mini-transcribe")
                 Text("whisper-1").tag("whisper-1")
             }
+        }
 
-            Picker("Microphone profile", selection: $store.settings.dictation.noiseReduction) {
+        SettingRow(title: "Microphone profile") {
+            Picker("", selection: $store.settings.dictation.noiseReduction) {
                 Text("Built-in / far-field").tag("far_field")
                 Text("Headset / near-field").tag("near_field")
                 Text("No noise reduction").tag("")
             }
-            .onAppear { store.ensureKeyStatusLoaded() }
-
-            Divider()
+        }
     }
 
     private var keyStatusText: String {
@@ -306,27 +430,37 @@ private struct DictationSettingsTab: View {
 // MARK: - About
 
 private struct AboutTab: View {
+    @ObservedObject var updater: UpdateChecker
+
     var body: some View {
-        VStack(spacing: 12) {
-            if let icon = NSImage(named: "AppIcon") ?? bundledIcon() {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 96, height: 96)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-            } else {
-                Image(systemName: "pawprint.fill").font(.system(size: 64))
+        SettingsPage {
+            VStack(spacing: 12) {
+                if let icon = bundledIcon() {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 96, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                } else {
+                    Image(systemName: "pawprint.fill").font(.system(size: 64))
+                }
+                Text("Pawvis").font(.title2.bold())
+                Text("macOS visual gesture & voice control")
+                    .italic()
+                    .foregroundStyle(.secondary)
+                Text("Version \(AppVersion.current)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Text("Pawvis").font(.title2.bold())
-            Text("Point, pinch, and speak — hands-free control for your Mac.")
-                .foregroundStyle(.secondary)
-            Text("Hand tracking runs entirely on-device via Apple Vision. " +
-                 "Voice dictation streams audio to OpenAI only while armed.")
-                .font(.caption)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
+            .frame(maxWidth: .infinity)
+
+            Divider()
+
+            UpdateSection(updater: updater)
+
+            Divider()
+
+            CaptionText("Hand tracking runs entirely on-device via Apple Vision. Voice dictation uses Apple's on-device speech engine by default; the optional OpenAI engine streams audio only while dictation is armed.")
         }
-        .padding(28)
     }
 
     private func bundledIcon() -> NSImage? {
@@ -334,27 +468,5 @@ private struct AboutTab: View {
             return nil
         }
         return NSImage(contentsOf: url)
-    }
-}
-
-// MARK: - Shared controls
-
-private struct LabeledSlider: View {
-    let label: String
-    let caption: String?
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Slider(value: $value, in: range) { Text(label) }
-            if let caption {
-                Text(caption)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true) // wrap, don't truncate
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 }

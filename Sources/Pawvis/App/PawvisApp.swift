@@ -10,14 +10,16 @@ struct PawvisApp: App {
         MenuBarExtra {
             MenuContentView(
                 controller: appDelegate.controller,
-                dictation: appDelegate.controller.dictation)
+                dictation: appDelegate.controller.dictation,
+                updater: appDelegate.updater)
         } label: {
             MenuBarIcon(dictationActive: appDelegate.controller.dictation.state.isActive)
         }
         .menuBarExtraStyle(.window)
 
         Settings {
-            SettingsView(store: appDelegate.controller.settingsStore)
+            SettingsView(store: appDelegate.controller.settingsStore,
+                         updater: appDelegate.updater)
         }
 
         Window("Pawvis Gesture Guide", id: "gesture-guide") {
@@ -62,17 +64,22 @@ private struct MenuBarIcon: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let controller: PawvisController
+    let updater: UpdateChecker
     private var dictationObservation: AnyCancellable?
+    private var updaterObservation: AnyCancellable?
 
     override init() {
         // AppDelegate is constructed on the main thread before the run loop starts.
         controller = MainActor.assumeIsolated {
             PawvisController(settingsStore: SettingsStore())
         }
+        updater = MainActor.assumeIsolated { UpdateChecker() }
         super.init()
         // Forward nested state changes so the MenuBarExtra label (which only
         // observes the delegate) updates when dictation starts/stops.
         dictationObservation = controller.dictation.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+        updaterObservation = updater.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
     }
 
@@ -105,6 +112,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
            ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] == nil {
             controller.startTracking()
         }
+
+        // At most one automatic check per day (see UpdatePolicy).
+        updater.checkIfDue()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

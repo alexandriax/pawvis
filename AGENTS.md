@@ -1,0 +1,113 @@
+# Working on Pawvis
+
+Notes for anyone (human or agent) making changes here. Read this before
+touching the UI or the gesture engine — most of it exists because something
+went wrong once.
+
+## Build, test, run
+
+```bash
+swift build            # debug
+swift test             # full suite — keep it green, it's the safety net
+make app               # release build + assembles build/Pawvis.app + signs
+open build/Pawvis.app
+```
+
+Extras:
+
+- `build/Pawvis.app/Contents/MacOS/Pawvis --selftest` — headless smoke test
+  (engine, settings round-trip, realtime protocol, dictation parser, keychain).
+- `PAWVIS_NO_AUTOSTART=1` — launch without starting tracking, so automated
+  runs don't trip the camera permission prompt.
+- `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
+  (CI does this from the release tag; local builds show `0.0.0-dev`).
+
+**Signing matters more than it looks.** `scripts/make_app.sh` prefers an
+`Apple Development` identity from the keychain and falls back to ad-hoc. With
+ad-hoc signing the code signature changes every build, and macOS then silently
+ignores the existing Accessibility grant *while still showing Pawvis as
+enabled* — the symptom is "the cursor moves but nothing clicks, anywhere."
+Fix: remove and re-add Pawvis in System Settings → Privacy & Security →
+Accessibility. With a real identity the grant survives rebuilds.
+
+## Settings UI: never let text truncate
+
+This has regressed several times, so it's now structural. macOS `Form` lays
+controls out in two columns: a narrow leading label column and a trailing
+control column. At any sane window width, long labels get truncated with a
+leading ellipsis ("…age (ISO code, blank = auto)") and captions get clipped on
+the right — both invisible in code review and obvious to the user.
+
+**Rules for `SettingsView.swift`:**
+
+1. Build every control with the helpers at the top of the file —
+   `SettingRow`, `SettingToggle`, `LabeledSlider`, `CaptionText` — inside a
+   `SettingsPage`. They lay the label *above* the control in a single
+   full-width, leading-aligned column, so there is no column to squeeze and
+   text can only wrap.
+2. Never add a bare `Picker("Some long label", …)`, `TextField("Some long
+   label", …)` or `LabeledContent` to a settings page. Wrap it in
+   `SettingRow(title:)` and pass `""` as the control's own label.
+3. Every explanatory `Text` needs
+   `.fixedSize(horizontal: false, vertical: true)` — that's what allows
+   multi-line growth instead of truncation. `CaptionText` does it for you.
+4. Pages are inside a `ScrollView`, so adding rows can't clip the bottom.
+5. After changing settings UI, actually open the window and look at every tab
+   at the default size. Screenshot-review the longest strings.
+
+## Gesture engine
+
+`PawvisCore` is pure logic — no AppKit, no AVFoundation, no clocks. All timing
+comes from frame timestamps passed in, which is why click chaining, drag
+timing, hysteresis and tracking-loss behavior are all unit-testable. Keep it
+that way: if you need "now", take it as a parameter.
+
+Hard-won constraints, each of which broke something real:
+
+- **Vision's hand pose is stateless** (one revision since 2020, not a
+  `VNStatefulRequest`). There is no built-in temporal tracking, so smoothing
+  (One Euro, per joint), hysteresis, debounce and confidence gating are ours
+  to own. Don't remove them expecting the framework to compensate.
+- **The cursor must ride a landmark the click gesture doesn't move.** Modes
+  that gather or dip fingers anchor on the palm. A fingertip centroid shifted
+  ~0.08 (screen-normalized) when a hand *opened to release*, which smeared
+  every click into a drag.
+- **Don't gate clicks on hand "openness."** People pinch with their other
+  fingers half-curled; an openness guard silently blocked nearly every real
+  click.
+- **Low-confidence frames hold state, never flap it.** A missing fingertip
+  must not release a held button; only the tracking-loss grace window does.
+- **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted
+  back-to-back are intermittently dropped by macOS (measured: 20% of mouseUps
+  at 0 ms), and a lost mouseUp wedges the target app into thinking the button
+  is still down. `MouseController` posts through a serial pacing queue —
+  don't bypass it.
+- **The interaction box is a coordinate transform**, so it can never change
+  mid-press (auto-reach freezes while a button is held).
+
+## Adding a click gesture mode
+
+`ClickGesture` in `GestureConfig.swift` is the switchboard: declaration order
+is picker order (best-performing first). A new mode needs a ratio in
+`HandFeatures` (low = engaged), an `engageFactor`, a pointer landmark and
+`closingProgress` branch in `GestureEngine`, engage-confidence joints, plus
+copy in `SettingsView.clickGestureCaption` and `GestureGuideView`. Add
+synthetic poses to `SyntheticHands.swift` and cover click, release, drag,
+hysteresis band and the confidence gate.
+
+## Secrets
+
+`.env` is git-ignored and holds `OPENAI_API_KEY` for local dictation testing
+and the icon-generation script. Never commit it, never print it, never bundle
+it. The shipping path for a user's key is the login keychain
+(`KeychainStore`), and keychain reads are lazy — reading at launch caused
+repeated system permission prompts.
+
+## Releases
+
+Tag-driven and fully automated (`.github/workflows/release.yml`): push a
+`v*` tag and CI builds, bundles, signs ad-hoc, zips, and publishes a GitHub
+Release with `Pawvis.zip` attached. The in-app updater reads
+`releases/latest` from the GitHub API, so the zip asset must stay attached and
+named `Pawvis-<version>.zip` (any `.zip` asset works, but keep it consistent).
+Version comparison lives in `PawvisCore/Update` and is unit-tested.

@@ -27,6 +27,7 @@ struct PawvisButtonStyle: ButtonStyle {
 struct MenuContentView: View {
     @ObservedObject var controller: PawvisController
     @ObservedObject var dictation: DictationController
+    @ObservedObject var updater: UpdateChecker
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
@@ -128,6 +129,12 @@ struct MenuContentView: View {
         }
         // Only meaningful once the (lazy, prompt-causing) keychain status has
         // been loaded — opening the menu must never trigger a keychain prompt.
+        if updater.updateAvailable, case .available(let release) = updater.state {
+            result.append(Warning(
+                text: "Pawvis \(release.version.description) is available.",
+                action: "Update…",
+                handler: { openSettingsInFront() }))
+        }
         if controller.settingsStore.keyStatusLoaded,
            !controller.settingsStore.apiKeyAvailable,
            controller.settingsStore.settings.dictation.enabled,

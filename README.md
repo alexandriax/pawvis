@@ -1,161 +1,141 @@
-# Pawvis
+<h1 align="center">Pawvis</h1>
 
-![Pawvis](docs/banner.png)
+<p align="center">
+  <img src="Resources/icon_1024.png" alt="Pawvis" width="168">
+</p>
 
-**Point, pinch, and speak — hands-free control for your Mac.**
+<p align="center"><em>macOS visual gesture &amp; voice control</em></p>
 
-Pawvis is a macOS menu bar app that turns your webcam into a pointing device
-and your voice into a keyboard. Move the cursor by moving your hand, click by
-pinching, scroll with a two-finger pose, and dictate text with wake words —
-all without touching a mouse or keyboard.
+---
 
-- **All hand tracking runs on-device** (Apple's Vision framework — no cloud,
-  no model downloads).
-- **Voice dictation is optional and on-device by default** (Apple's speech
-  engine — SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
-  Switch to the OpenAI Realtime engine in Settings if you prefer; only then
-  does audio leave your Mac, and only while dictation is armed.
-- **Fingertip overlays** show exactly what Pawvis sees: dots on your
-  fingertips and a ring that tightens as your pinch approaches a click, so
-  grabbing a window and dragging it feels precise.
+Pawvis turns your webcam into a pointing device and your voice into a
+keyboard. Move your hand to move the cursor, dip a finger to click, and speak
+to type — without touching a mouse or keyboard.
+
+Hand tracking runs entirely on-device with Apple's Vision framework, and voice
+dictation defaults to Apple's on-device speech engine, so by default nothing
+you do leaves your Mac.
 
 ## Gestures
 
-Deliberately minimal — three motions, learned in seconds:
+Pick the click gesture that suits you in **Settings → Gestures**. Whichever
+you choose: the cursor follows your hand, holding the gesture drags, and a
+quick release is a clean click.
 
-| Gesture | Action |
+| Click gesture | How you click |
 |---|---|
-| Move your hand | **Move** — the claw cursor sits between your thumb and index fingertip |
-| Pinch thumb + index together | **Left click** — twice quickly = double-click, thrice = triple |
-| Hold the pinch and move | **Drag** — separate your fingers to let go |
+| **Mouse tap** (default) | Hold your hand open and dip your **index finger**, like tapping a mouse button. Measured against your middle finger, so tilting your whole hand can't click. |
+| **Whole-hand pinch** | Gather all your fingertips onto your thumb. Averaging four fingers makes false clicks rare. |
+| **High-five, thumb to click** | Hand open like a high-five; tuck your thumb across your palm. |
+| **Pinch** | Touch your thumb and index fingertip together. |
 
-The claw shows state at a glance: open paw while pointing, retracted purple
-paw while pinched, a ring that tightens as your fingertips approach, and a
-pulse on every registered click. Pinch sensitivity, smoothing, and camera
-reach are tunable in **Settings** (with a one-click reset to defaults), and
-**Settings → General → Show tracking diagnostics** displays live fps, pinch
-ratio, and fingertip confidence when you want to see what the tracker sees.
+- **Right-click** — in mouse-tap and high-five modes, dip a second finger
+  (pinky by default, configurable). Hold it to right-drag.
+- **Drag / hold** — keep the gesture held and move. Deliberate movement starts
+  a drag immediately; otherwise a short window protects quick clicks from
+  turning into accidental drags. The window length is a slider.
+- **Double / triple click** — repeat the gesture quickly in the same spot.
+- **Reach adapts to distance.** Auto mode sizes the tracking area from how big
+  your hand looks, so the whole screen stays reachable up close *and* far away
+  with your fingers staying inside the camera frame. Manual mode gives you a
+  fixed area and a slider.
+
+The on-screen claw is your cursor: open while pointing, retracted and purple
+while the left button is held, blue for the right button, with a ring that
+tightens as your click gesture forms and a pulse confirming every click. Small
+dots mark each detected fingertip.
 
 ## Voice dictation
 
-1. Arm dictation from the menu bar (Start next to Dictation). A pill
-   appears: *listening*.
-2. Start a sentence with a **wake word** — `type`, `text`, `enter`, `write`,
-   or `dictate` (editable): *"type hello world"* types `hello world` into
-   whatever app has focus.
-3. Keep talking; each utterance is typed with sensible spacing. Say
-   **"new line"**, **"new paragraph"**, **"press enter"**, or **"press tab"**
-   for those actions.
-4. Say **"stop typing"** (or any configured stop phrase) to stop typing while
-   staying armed; use the gesture again to disarm completely.
+1. Open the menu bar icon and press **Start** next to Dictation.
+2. Say a **wake word** — `type`, `text`, `enter`, `write`, or `dictate`
+   (editable) — and everything after it is typed into the focused app:
+   *"type hello world"*.
+3. Say **"stop typing"** to stop. While dictating, *"new line"*,
+   *"new paragraph"*, *"press enter"* and *"press tab"* do what they say.
 
 The default engine is **Apple's on-device recognition** — private, free, no
-setup. The **OpenAI engine** (Settings → Dictation) uses `gpt-4o-transcribe`
-by default (`gpt-live-transcribe`, `gpt-4o-mini-transcribe`, and `whisper-1`
-also available) and needs your API key — paste the whole key including its
-`sk-` prefix. An optional low-latency mode types words as you say them and
-reconciles revisions with backspaces.
+setup (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that). An
+optional **OpenAI** engine is available in Settings if you prefer it; it needs
+your own API key (stored in your login keychain) and streams audio only while
+dictation is armed.
 
-## Install & run
+## Install
 
-Requirements: macOS 14+, Xcode toolchain, a webcam.
+Download the latest `Pawvis.zip` from
+[Releases](https://github.com/alexandriax/pawvis/releases/latest), unzip, and
+drag **Pawvis.app** to your Applications folder.
 
-```bash
-make app       # builds release + assembles build/Pawvis.app
-open build/Pawvis.app
-```
-
-Other targets:
-
-```bash
-make test      # run the unit test suite (120+ tests)
-make build     # debug build
-make icon      # regenerate icon assets via the OpenAI Images API
-build/Pawvis.app/Contents/MacOS/Pawvis --selftest   # headless smoke test
-```
+Pawvis checks for updates once a day and can install them itself —
+**Settings → About → Check Now**.
 
 ### Permissions
 
-Pawvis needs, and will prompt for:
+On first run Pawvis asks for:
 
-- **Camera** — hand tracking (frames never leave your Mac).
-- **Accessibility** — posting mouse/keyboard events (System Settings →
-  Privacy & Security → Accessibility). Tracking runs without it, but clicks
-  won't land until granted.
-- **Microphone** — only when you first arm dictation.
+- **Camera** — hand tracking. Frames are processed in memory and discarded.
+- **Accessibility** — moving the cursor and clicking. Tracking runs without
+  it, but clicks won't land until it's granted (System Settings → Privacy &
+  Security → Accessibility).
+- **Microphone** — only when you first start dictation.
 
-> **Important (ad-hoc signing):** every rebuild changes the app's code
-> signature, and macOS then ignores the old Accessibility grant **while still
-> showing it as enabled** in System Settings. The symptom is "the cursor
-> halo moves but nothing clicks, in every app." Fix: remove Pawvis from
-> Privacy & Security → Accessibility and re-add it after each `make app`.
+> Release builds are ad-hoc signed rather than notarized, so macOS may warn on
+> first launch (right-click → Open). After an update, if clicks stop working,
+> remove and re-add Pawvis in Accessibility — macOS ties that grant to the
+> code signature.
 
-### OpenAI API key (only for the OpenAI engine)
+## Build from source
 
-The default Apple engine needs no key. If you switch to the OpenAI engine,
-add your key in **Settings → Dictation** (the whole key, `sk-` prefix
-included) — it's stored in your login keychain, never in the app bundle or
-settings files. For development, Pawvis also picks up `OPENAI_API_KEY` from
-the environment or a `.env` file in the repo root (git-ignored).
+Requires macOS 14+ and the Xcode toolchain.
 
-## Architecture
+```bash
+make app            # release build → build/Pawvis.app
+open build/Pawvis.app
+```
+
+```bash
+swift test          # 187 unit tests
+swift build         # debug build
+make icon           # regenerate icon art (needs OPENAI_API_KEY)
+```
+
+See [AGENTS.md](AGENTS.md) for architecture notes, the settings-UI rules, and
+the hard-won gesture-engine constraints.
+
+## How it works
 
 ```
 Sources/
-  PawvisCore/          pure logic, fully unit-tested, no AppKit/AVFoundation
+  PawvisCore/          pure logic, unit-tested, no AppKit/AVFoundation
     Geometry/          Vec2 · One Euro filter · interaction-box mapper
-    Hands/             21-landmark model · pinch/splay/fist/shaka features
-    Gestures/          GestureEngine: frames → clicks/drags/scrolls/toggles
-    Dictation/         wake-word parser · OpenAI Realtime protocol codec
+    Hands/             21-landmark model · pinch/dip/curl metrics
+    Gestures/          GestureEngine: frames → clicks, drags, cursor moves
+    Dictation/         wake-word parser · OpenAI Realtime protocol
+    Update/            semantic versions · update-check policy
     Config/            settings tree (field-tolerant decoding)
   Pawvis/              the menu bar app
-    Camera/            AVCaptureSession · Vision hand pose → core Hands
+    Camera/            AVCaptureSession · Vision hand pose
     Control/           CGEvent mouse + keyboard synthesis
-    Overlay/           per-screen click-through windows, fingertip dots,
-                       pinch iris, dictation HUD
-    Dictation/         mic capture (24 kHz PCM16) · realtime websocket ·
-                       dictation controller
-    App/ UI/           MenuBarExtra, settings tabs, gesture guide, self-test
+    Overlay/           click-through claw cursor and indicators
+    Dictation/         mic capture · Apple + OpenAI engines
+    Update/            update checking and self-update
+    App/ UI/           menu bar, settings, gesture guide
 ```
 
-Design notes:
-
-- The gesture engine is **deterministic and clock-free** — timing comes from
-  frame timestamps, so click chaining, hold-to-drag, hysteresis, debounce,
-  and tracking-loss releases are all covered by unit tests.
-- Clicking is a **thumb–index pinch** with sporecaster's exact hysteresis
-  (engage at 0.45, release at 0.68 of the scale-normalized tip distance)
-  plus a two-frame debounce in both directions. The cursor is the pinch
-  **midpoint** — the tips converge onto it as you pinch, so clicks are
-  inherently position-stable. A fingertip dropping below the confidence
-  floor *holds* the pinch state rather than flapping it.
-- Vision's hand pose is stateless (no temporal tracking — verified against
-  the SDK), so the camera pipeline is tuned to feed it a steady signal:
-  frame rate locked at 30 fps (auto-exposure otherwise lengthens frames and
-  smears a moving hand), Center Stage disabled, native YUV buffers, and
-  One Euro smoothing per joint at sporecaster's landmark tuning with slot
-  tracking and a 300 ms stale reset. Mouse events post through a paced
-  serial queue (≥6 ms apart — unpaced pairs get dropped by macOS).
-- If tracking drops mid-drag, held buttons release automatically after a
-  grace window — nothing gets stuck down. Quitting the app does the same.
+The gesture engine is deterministic and clock-free — all timing comes from
+frame timestamps — so click chaining, drag timing, hysteresis, debounce and
+tracking-loss recovery are covered by unit tests rather than by hand.
 
 ## Privacy
 
-- Camera frames are processed in-memory by Vision and discarded; the overlay
-  windows are excluded from screenshots and screen recordings.
-- With the default Apple engine, dictation audio never leaves your Mac.
-  With the OpenAI engine, audio streams to OpenAI **only** between arming and
-  disarming dictation; the pill and menu bar icon always show when that's the
-  case.
-- The API key lives in the keychain. `.env` is git-ignored.
+- Camera frames never leave your Mac, and the overlay is excluded from
+  screenshots and screen recordings by default (there's a toggle if you want
+  to record a demo).
+- Dictation audio stays on-device with the Apple engine. With the optional
+  OpenAI engine, audio is sent only between arming and disarming dictation,
+  and the menu bar icon and on-screen pill always show when that's the case.
+- Your OpenAI key, if you use one, lives in the login keychain.
 
-## Development
+## License
 
-```bash
-swift test                     # 120+ core tests
-swift build                    # debug binary
-scripts/generate_icon.sh       # regenerate icon/banner (needs OPENAI_API_KEY)
-```
-
-Icon and banner artwork were generated with `gpt-image-1.5` via
-`scripts/generate_icon.sh`.
+MIT

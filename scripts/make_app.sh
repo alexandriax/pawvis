@@ -6,7 +6,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="1.0.0"
+# CI stamps the release tag here (`VERSION=1.2.3 ./scripts/make_app.sh`);
+# local builds get a placeholder so the About pane never claims a real version.
+VERSION="${VERSION:-0.0.0-dev}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
 APP="build/Pawvis.app"
 BIN=".build/release/Pawvis"
 
@@ -38,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-    <key>CFBundleVersion</key><string>${VERSION}</string>
+    <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
