@@ -153,8 +153,9 @@ tracking-loss recovery are covered by unit tests rather than by hand.
   screenshots and screen recordings by default (there's a toggle if you want
   to record a demo).
 - Voice audio never leaves your Mac — recognition is Apple's on-device
-  engine, and the menu bar icon and on-screen pill always show when the mic
-  is live.
+  engine, and the menu bar icon carries a dot for as long as the mic is live.
+  (The on-screen pill announces it too, then fades after five seconds so it
+  isn't sitting on your screen all day.)
 - Visual commands are resolved by the on-device Apple Intelligence model; the
   screenshots and accessibility snapshots it reads stay in memory and are
   never written to disk or uploaded.

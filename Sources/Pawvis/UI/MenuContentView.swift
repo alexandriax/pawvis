@@ -120,7 +120,7 @@ struct MenuContentView: View {
         }
         if controller.trackingActive, !controller.accessibilityGranted {
             result.append(Warning(
-                text: "Clicks are blocked: grant Accessibility. If Pawvis already shows as enabled there, remove it and re-add it (rebuilds invalidate the old grant).",
+                text: "Clicks are blocked: grant Pawvis Accessibility in System Settings → Privacy & Security. If it already shows as enabled there, remove it and add it again.",
                 action: "Open…",
                 handler: {
                     Permissions.promptAccessibility()

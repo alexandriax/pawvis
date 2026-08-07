@@ -21,6 +21,9 @@ final class OverlayController {
     private var windows: [OverlayWindow] = []
     private var config = OverlayConfig()
     private var visible = false
+    /// Notices live in their own click-through-exempt panel so they can be
+    /// dismissed; the overlay windows below never receive a mouse event.
+    private let statusPill = StatusPillOverlay()
 
     init() {
         rebuildWindows()
@@ -35,6 +38,10 @@ final class OverlayController {
     func setConfig(_ config: OverlayConfig) {
         let captureChanged = config.showInScreenCapture != self.config.showInScreenCapture
         self.config = config
+        statusPill.showInScreenCapture = config.showInScreenCapture
+        if !config.showStatusPill {
+            statusPill.hide()
+        }
         if captureChanged {
             applySharing()
         }
@@ -54,6 +61,7 @@ final class OverlayController {
 
     func hide() {
         visible = false
+        statusPill.hide()
         windows.forEach { window in
             window.contentOverlayView.clear()
             window.orderOut(nil)
@@ -78,6 +86,13 @@ final class OverlayController {
         diagnostics: String? = nil
     ) {
         guard visible else { return }
+
+        if config.showStatusPill {
+            statusPill.present(
+                Self.notice(for: voice, accessibilityBlocked: accessibilityBlocked),
+                now: CACurrentMediaTime())
+        }
+
         let anyGrab = overlay.grabbed || overlay.rightGrabbed
         let grabRose = anyGrab && !prevGrabbed
         let grabTint = overlay.rightGrabbed ? PawvisTheme.blue : PawvisTheme.purple
@@ -153,11 +168,11 @@ final class OverlayController {
                 }
             }
 
-            if config.showStatusPill, window.isOnMainScreen {
-                model.pill = Self.pill(for: voice, accessibilityBlocked: accessibilityBlocked)
-                    ?? diagnostics.map {
-                        .init(text: $0, background: NSColor.black.withAlphaComponent(0.75))
-                    }
+            // Diagnostics stay a layer in the click-through overlay: they're a
+            // live readout, not a notice, so they have nothing to dismiss.
+            if config.showStatusPill, window.isOnMainScreen, let diagnostics {
+                model.pill = .init(
+                    text: diagnostics, background: NSColor.black.withAlphaComponent(0.75))
             }
 
             window.contentOverlayView.render(model)
@@ -174,16 +189,17 @@ final class OverlayController {
         }
     }
 
-    private static func pill(
+    private static func notice(
         for voice: VoiceHUD, accessibilityBlocked: Bool
-    ) -> OverlayRenderModel.Pill? {
+    ) -> StatusPillOverlay.Notice? {
         // An Accessibility problem beats everything except a voice error:
         // without it, clicks silently do nothing, which looks like total
-        // breakage. Make it impossible to miss.
+        // breakage. It still times out like any other notice — the menu-bar
+        // warning is the copy that stays until the grant does.
         if accessibilityBlocked {
             if case .error = voice {} else {
                 return .init(
-                    text: "⚠️ Clicks blocked — grant Accessibility (after rebuilds: remove & re-add Pawvis)",
+                    text: "⚠️ Clicks blocked — grant Pawvis Accessibility in System Settings",
                     background: NSColor.systemRed.withAlphaComponent(0.92))
             }
         }
@@ -509,8 +525,11 @@ final class OverlayContentView: NSView {
         let height: CGFloat = 28
         pillBackground.isHidden = false
         pillBackground.backgroundColor = pill.background.cgColor
+        // Bottom-center: the top of the screen belongs to the transcript and
+        // notice capsules, and this readout must never sit under them.
         pillBackground.frame = CGRect(
-            x: (bounds.width - width) / 2, y: 48, width: width, height: height)
+            x: (bounds.width - width) / 2, y: bounds.height - height - 48,
+            width: width, height: height)
         pillText.string = pill.text
         pillText.frame = CGRect(x: 8, y: (height - 17) / 2, width: width - 16, height: 17)
     }

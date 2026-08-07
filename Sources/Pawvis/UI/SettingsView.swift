@@ -297,7 +297,10 @@ private struct GestureSettingsTab: View {
             SettingToggle(title: "Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
             SettingToggle(title: "Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
             SettingToggle(title: "Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
-            SettingToggle(title: "Status pill", isOn: $store.settings.overlay.showStatusPill)
+            SettingToggle(
+                title: "Status pill",
+                caption: "Voice hints, confirmations and warnings at the top of the screen. Each one fades after five seconds, or click its ✕ to dismiss it now.",
+                isOn: $store.settings.overlay.showStatusPill)
             SettingToggle(
                 title: "Show overlay in screen recordings",
                 caption: "Off keeps the claw and dots out of screenshots and captures (private by default). Turn on to record a demo of Pawvis.",
