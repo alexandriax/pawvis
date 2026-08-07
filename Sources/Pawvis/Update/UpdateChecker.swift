@@ -18,6 +18,8 @@ final class UpdateChecker: ObservableObject {
         var notes: String
         var pageURL: URL
         var downloadURL: URL?
+        /// The release's published `.sha256` companion, when present.
+        var checksumURL: URL?
     }
 
     enum State: Equatable {
@@ -133,14 +135,24 @@ final class UpdateChecker: ObservableObject {
         }
 
         let assets = json["assets"] as? [[String: Any]] ?? []
-        let zipURL = assets
-            .compactMap { asset -> URL? in
-                guard let name = asset["name"] as? String, name.hasSuffix(".zip"),
+        func assetURL(suffix: String) -> URL? {
+            assets.compactMap { asset -> URL? in
+                guard let name = asset["name"] as? String, name.hasSuffix(suffix),
                       let urlString = asset["browser_download_url"] as? String,
                       let url = URL(string: urlString), url.scheme == "https" else { return nil }
                 return url
-            }
-            .first
+            }.first
+        }
+        // `.sha256` also ends in no ".zip", so order matters: check the
+        // checksum suffix first and exclude it from the zip match.
+        let checksumURL = assetURL(suffix: ".zip.sha256")
+        let zipURL = assets.compactMap { asset -> URL? in
+            guard let name = asset["name"] as? String,
+                  name.hasSuffix(".zip"), !name.hasSuffix(".sha256"),
+                  let urlString = asset["browser_download_url"] as? String,
+                  let url = URL(string: urlString), url.scheme == "https" else { return nil }
+            return url
+        }.first
 
         let pageURLString = json["html_url"] as? String
         let pageURL = pageURLString.flatMap(URL.init)
@@ -151,7 +163,8 @@ final class UpdateChecker: ObservableObject {
             tag: tag,
             notes: (json["body"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
             pageURL: pageURL,
-            downloadURL: zipURL)
+            downloadURL: zipURL,
+            checksumURL: checksumURL)
     }
 
     // MARK: - Installing
@@ -174,6 +187,9 @@ final class UpdateChecker: ObservableObject {
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 throw UpdateError.message("Download failed (HTTP \(http.statusCode))")
             }
+            if let checksumURL = release.checksumURL {
+                try await verifyChecksum(of: tempFile, against: checksumURL)
+            }
             state = .installing
             try await Task.detached(priority: .userInitiated) {
                 try SelfUpdater.install(zipAt: tempFile)
@@ -184,6 +200,27 @@ final class UpdateChecker: ObservableObject {
         } catch {
             Log.app.error("Update install failed: \(error.localizedDescription, privacy: .public)")
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Matches the download against the release's published SHA-256. Belt and
+    /// braces alongside the codesign check in SelfUpdater: this catches a
+    /// corrupt or swapped asset before anything is unpacked.
+    private func verifyChecksum(of file: URL, against checksumURL: URL) async throws {
+        let (data, response) = try await URLSession.shared.data(from: checksumURL)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw UpdateError.message("Could not fetch the update checksum")
+        }
+        // `shasum -a 256` output: "<hex>  <filename>"
+        guard let expected = String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \.isWhitespace).first.map(String.init)?.lowercased(),
+              expected.count == 64 else {
+            throw UpdateError.message("The update checksum is unreadable")
+        }
+        let actual = try SelfUpdater.sha256Hex(of: file)
+        guard actual == expected else {
+            Log.app.error("Update checksum mismatch")
+            throw UpdateError.message("The download didn't match its checksum — update cancelled")
         }
     }
 

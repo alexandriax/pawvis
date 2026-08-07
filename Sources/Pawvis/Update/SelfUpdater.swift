@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Replaces the running app bundle with a downloaded one.
@@ -101,6 +102,17 @@ enum SelfUpdater {
     }
 
     // MARK: - Helpers
+
+    /// Streaming SHA-256 so a large download is never held in memory at once.
+    static func sha256Hex(of file: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
 
     private static func findAppBundle(in directory: URL, fm: FileManager) throws -> URL? {
         let contents = try fm.contentsOfDirectory(
