@@ -133,7 +133,13 @@ Xcode 26+.
 Tag-driven and fully automated (`.github/workflows/release.yml`): push a `v*`
 tag (or run the workflow with a version) and CI tests, stamps the version into
 `Info.plist`, bundles, signs with Developer ID, notarizes, staples, zips, and
-publishes a GitHub Release with `Pawvis-<version>.zip` plus its `.sha256`.
+publishes a GitHub Release with `Pawvis.zip` plus its `.sha256`.
+
+**Keep the asset name fixed, not versioned.** It makes
+`https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip` a
+permanent download link (the README's button, which therefore never needs
+editing per release), and leaves exactly one `.zip` per release so the
+updater's asset pick is unambiguous.
 
 The in-app updater reads `releases/latest` from the GitHub API, so the zip
 asset must stay attached and keep that name; it verifies the download's

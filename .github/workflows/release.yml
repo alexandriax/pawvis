@@ -116,18 +116,18 @@ jobs:
           spctl -a -vv -t exec build/Pawvis.app
 
       - name: Package
-        id: package
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p dist
+          # The asset name is deliberately fixed, not versioned: it makes
+          # https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip
+          # a permanent download link (the README's button), and leaves exactly
+          # one .zip per release for the in-app updater to choose.
           # ditto --keepParent preserves the bundle structure, its signature,
           # and (after stapling) the notarization ticket.
-          ditto -c -k --keepParent build/Pawvis.app "dist/Pawvis-$VERSION.zip"
+          ditto -c -k --keepParent build/Pawvis.app dist/Pawvis.zip
           # Checksum from inside dist/ so the file names the zip alone — a
           # path prefix here would break `shasum -c` for anyone verifying.
-          (cd dist && shasum -a 256 "Pawvis-$VERSION.zip" | tee "Pawvis-$VERSION.zip.sha256")
-          echo "zip=dist/Pawvis-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          (cd dist && shasum -a 256 Pawvis.zip | tee Pawvis.zip.sha256)
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -136,9 +136,9 @@ jobs:
           name: Pawvis ${{ steps.version.outputs.version }}
           generate_release_notes: true
           files: |
-            ${{ steps.package.outputs.zip }}
-            dist/Pawvis-${{ steps.version.outputs.version }}.zip.sha256
+            dist/Pawvis.zip
+            dist/Pawvis.zip.sha256
           body: |
-            **Install:** download `Pawvis-${{ steps.version.outputs.version }}.zip`, unzip, and drag Pawvis.app to Applications.
+            **Install:** download `Pawvis.zip`, unzip, and drag Pawvis.app to Applications.
 
             Pawvis can update itself from here — Settings → About → Check Now.

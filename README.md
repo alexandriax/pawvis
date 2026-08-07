@@ -1,7 +1,7 @@
 <h1 align="center">Pawvis</h1>
 
 <p align="center">
-  <img src="Resources/icon_1024.png" alt="Pawvis" width="168">
+  <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
 <p align="center"><em>macOS visual gesture &amp; voice control</em></p>
@@ -15,6 +15,14 @@ to type — without touching a mouse or keyboard.
 Hand tracking runs entirely on-device with Apple's Vision framework, and voice
 dictation defaults to Apple's on-device speech engine, so by default nothing
 you do leaves your Mac.
+
+<p align="center">
+  <a href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip"><strong>⬇&nbsp; Download Pawvis for macOS</strong></a>
+  <br>
+  <a href="https://github.com/alexandriax/pawvis/releases/latest"><img src="https://img.shields.io/github/v/release/alexandriax/pawvis?label=latest&color=8B5CF6" alt="Latest release"></a>
+  <br>
+  <sub>Signed and notarized · macOS 14+ · unzip and drag to Applications</sub>
+</p>
 
 ## Gestures
 
@@ -62,9 +70,9 @@ dictation is armed.
 
 ## Install
 
-Download the latest `Pawvis.zip` from
-[Releases](https://github.com/alexandriax/pawvis/releases/latest), unzip, and
-drag **Pawvis.app** to your Applications folder.
+[**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
+(always the latest release), unzip, and drag **Pawvis.app** to your
+Applications folder.
 
 Pawvis checks for updates once a day and can install them itself —
 **Settings → About → Check Now**.
