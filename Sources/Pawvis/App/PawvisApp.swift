@@ -19,7 +19,8 @@ struct PawvisApp: App {
 
         Settings {
             SettingsView(store: appDelegate.controller.settingsStore,
-                         updater: appDelegate.updater)
+                         updater: appDelegate.updater,
+                         loginItem: appDelegate.loginItem)
         }
 
         Window("Pawvis Gesture Guide", id: "gesture-guide") {
@@ -65,6 +66,7 @@ private struct MenuBarIcon: View {
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let controller: PawvisController
     let updater: UpdateChecker
+    let loginItem: LoginItemController
     private var voiceObservation: AnyCancellable?
     private var updaterObservation: AnyCancellable?
 
@@ -74,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             PawvisController(settingsStore: SettingsStore())
         }
         updater = MainActor.assumeIsolated { UpdateChecker() }
+        loginItem = MainActor.assumeIsolated { LoginItemController() }
         super.init()
         // Forward nested state changes so the MenuBarExtra label (which only
         // observes the delegate) updates when voice control starts/stops.
@@ -107,10 +110,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         MouseController.postDefensiveButtonRelease()
 
         // PAWVIS_NO_AUTOSTART lets automated smoke tests boot the app without
-        // triggering the camera permission flow.
-        if controller.settingsStore.settings.general.startTrackingOnLaunch,
-           ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] == nil {
+        // triggering the camera permission flow — or, below, leaving a login
+        // item registered on the machine that ran them.
+        let automated = ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] != nil
+
+        if controller.settingsStore.settings.general.startTrackingOnLaunch, !automated {
             controller.startTracking()
+        }
+
+        // Enable the login item on first run, and afterwards keep the setting
+        // and macOS in step — including adopting an "off" the user chose in
+        // System Settings rather than re-registering over it.
+        if !automated {
+            let store = controller.settingsStore
+            let resolved = loginItem.reconcileAtLaunch(desired: store.settings.general.launchAtLogin)
+            if resolved != store.settings.general.launchAtLogin {
+                store.settings.general.launchAtLogin = resolved
+            }
         }
 
         // At most one automatic check per day (see UpdatePolicy).

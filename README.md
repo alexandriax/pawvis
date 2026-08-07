@@ -84,6 +84,10 @@ else works without it.
 (always the latest release), unzip, and drag **Pawvis.app** to your
 Applications folder.
 
+Pawvis starts with you after every login, so gesture control is just there —
+turn it off in **Settings → General → Launch Pawvis at login** (or in System
+Settings → General → Login Items; Pawvis won't put itself back).
+
 Pawvis checks for updates once a day and can install them itself —
 **Settings → About → Check Now**.
 
@@ -114,7 +118,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 214 unit tests
+swift test          # 225 unit tests
 swift build         # debug build
 make icon           # regenerate icon art (needs OPENAI_API_KEY)
 ```

@@ -104,10 +104,11 @@ private struct SettingsPage<Content: View>: View {
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var updater: UpdateChecker
+    @ObservedObject var loginItem: LoginItemController
 
     var body: some View {
         TabView {
-            GeneralSettingsTab(store: store)
+            GeneralSettingsTab(store: store, loginItem: loginItem)
                 .tabItem { Label("General", systemImage: "gearshape") }
             TrackingSettingsTab(store: store)
                 .tabItem { Label("Tracking", systemImage: "cursorarrow.motionlines") }
@@ -127,10 +128,31 @@ struct SettingsView: View {
 
 private struct GeneralSettingsTab: View {
     @ObservedObject var store: SettingsStore
+    @ObservedObject var loginItem: LoginItemController
     private var cameras: [(id: String, name: String)] { CameraManager.availableCameras() }
 
     var body: some View {
         SettingsPage {
+            SettingToggle(
+                title: "Launch Pawvis at login",
+                caption: launchAtLoginCaption,
+                isOn: Binding(
+                    get: { store.settings.general.launchAtLogin },
+                    set: { enabled in
+                        store.settings.general.launchAtLogin = enabled
+                        loginItem.setEnabled(enabled)
+                    }))
+                .disabled(loginItem.status == .unavailable)
+
+            if loginItem.status == .requiresApproval {
+                Button("Open Login Items…") { loginItem.openLoginItemsSettings() }
+            }
+            if let error = loginItem.lastError {
+                CaptionText("Couldn’t change the login item: \(error)")
+            }
+
+            Divider()
+
             SettingRow(title: "Camera") {
                 Picker("", selection: Binding(
                     get: { store.settings.general.cameraDeviceID ?? "" },
@@ -195,6 +217,24 @@ private struct GeneralSettingsTab: View {
                 title: "Show tracking diagnostics",
                 caption: "Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
                 isOn: $store.settings.general.showDiagnostics)
+        }
+        .onAppear {
+            // The login item can also be switched off in System Settings, so
+            // re-read macOS rather than trusting our stored value.
+            if loginItem.systemHasDisabledIt(), store.settings.general.launchAtLogin {
+                store.settings.general.launchAtLogin = false
+            }
+        }
+    }
+
+    private var launchAtLoginCaption: String {
+        switch loginItem.status {
+        case .requiresApproval:
+            return "macOS is holding this back: switch Pawvis on under System Settings → General → Login Items."
+        case .unavailable:
+            return "Only available when Pawvis runs from its app bundle."
+        case .enabled, .notRegistered:
+            return "Starts Pawvis automatically after you log in. It opens straight into the menu bar — no window, no dock icon."
         }
     }
 }
