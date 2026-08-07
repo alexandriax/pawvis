@@ -54,7 +54,7 @@ final class SpeechBufferConverter {
 @available(macOS 26.0, *)
 final class ModernAppleSpeechBackend: @unchecked Sendable {
     /// Delivered on the main queue.
-    var onEvent: ((TranscriptionEvent) -> Void)?
+    var onEvent: ((SpeechEvent) -> Void)?
 
     private let engine = AVAudioEngine()
     private let converter = SpeechBufferConverter()
@@ -70,9 +70,13 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
     private var emittedForSegment = ""
 
     private let preferredLanguage: String
+    /// Vocabulary to bias recognition toward (the wake word isn't a
+    /// dictionary word; without this it's misheard more often).
+    private let contextualStrings: [String]
 
-    init(language: String) {
+    init(language: String, contextualStrings: [String] = []) {
         self.preferredLanguage = language
+        self.contextualStrings = contextualStrings
     }
 
     func start() {
@@ -126,7 +130,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         }
         do {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                Log.dictation.info("Downloading on-device speech model for \(locale.identifier, privacy: .public)…")
+                Log.voice.info("Downloading on-device speech model for \(locale.identifier, privacy: .public)…")
                 try await request.downloadAndInstall()
             }
         } catch {
@@ -137,6 +141,11 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         self.analyzer = analyzer
+        if !contextualStrings.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings = [.general: contextualStrings]
+            try? await analyzer.setContext(context)
+        }
         let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         self.analyzerFormat = format
 
@@ -173,7 +182,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         guard !stopped else { return }
 
         emit(.ready)
-        Log.dictation.info("Apple SpeechAnalyzer dictation started (locale \(locale.identifier, privacy: .public))")
+        Log.voice.info("Apple SpeechAnalyzer voice engine started (locale \(locale.identifier, privacy: .public))")
     }
 
     private func startMicTap() throws {
@@ -228,7 +237,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
         }
     }
 
-    private func emit(_ event: TranscriptionEvent) {
+    private func emit(_ event: SpeechEvent) {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.stopped else { return }
             self.onEvent?(event)

@@ -5,11 +5,11 @@ import PawvisCore
 import QuartzCore
 
 /// The top-level coordinator: camera frames → Vision hand tracking → gesture
-/// engine → mouse/keyboard + overlay, plus dictation and settings propagation.
+/// engine → mouse/keyboard + overlay, plus voice control and settings propagation.
 @MainActor
 final class PawvisController: ObservableObject {
     let settingsStore: SettingsStore
-    let dictation = DictationController()
+    let voice = VoiceController()
 
     @Published private(set) var trackingActive = false
     @Published private(set) var handsDetected = 0
@@ -140,7 +140,7 @@ final class PawvisController: ObservableObject {
     /// Called when the app is quitting: never leave a button stuck down.
     func shutdown() {
         stopTracking()
-        dictation.stop()
+        voice.stop()
     }
 
     func refreshPermissions() {
@@ -157,7 +157,7 @@ final class PawvisController: ObservableObject {
         mouse.apply(events)
         overlay.render(
             overlay: overlayState,
-            dictation: dictation.hud,
+            voice: voice.hud,
             projector: projector,
             accessibilityBlocked: !accessibilityGranted,
             diagnostics: diagnosticsLine(hands: hands, at: time))
@@ -200,7 +200,8 @@ final class PawvisController: ObservableObject {
     private func apply(settings: PawvisSettings) {
         engine.config = settings.gestures
         overlay.setConfig(settings.overlay)
-        dictation.setConfig(settings.dictation)
+        voice.setConfig(settings.voiceControl)
+        voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture
         refreshProjector()
         camera.setDevice(deviceID: settings.general.cameraDeviceID)
     }

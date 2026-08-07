@@ -11,8 +11,8 @@ import Speech
 /// reports one continuously-growing transcript, so when it stops growing for a
 /// quiet interval we finalize the utterance and restart the recognition task
 /// (which also sidesteps the framework's ~1-minute task limit).
-final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
-    var onEvent: ((TranscriptionEvent) -> Void)?
+final class SpeechEngine: NSObject {
+    var onEvent: ((SpeechEvent) -> Void)?
 
     /// The macOS 26+ backend, when running there (typed Any to keep this class
     /// usable on the macOS 14 deployment target).
@@ -23,7 +23,7 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
 
-    private let config: DictationConfig
+    private let config: VoiceControlConfig
     private var stopped = true
     private var itemCounter = 0
     private var currentItemId = "apple-0"
@@ -35,7 +35,7 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
         max(0.6, Double(config.vadSilenceMs) / 1000 + 0.2)
     }
 
-    init(config: DictationConfig) {
+    init(config: VoiceControlConfig) {
         self.config = config
         super.init()
     }
@@ -44,7 +44,9 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
         stopped = false
 
         if #available(macOS 26.0, *) {
-            let backend = ModernAppleSpeechBackend(language: config.language)
+            let backend = ModernAppleSpeechBackend(
+                language: config.language,
+                contextualStrings: [config.wakeWord] + config.wakeWordAliases)
             modernBackend = backend
             backend.onEvent = { [weak self] event in
                 self?.onEvent?(event)
@@ -109,7 +111,7 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
 
         startRecognitionTask()
         onEvent?(.ready)
-        Log.dictation.info("Apple on-device dictation started (locale \(locale.identifier, privacy: .public), onDevice: \(recognizer.supportsOnDeviceRecognition))")
+        Log.voice.info("Apple on-device voice engine started (locale \(locale.identifier, privacy: .public), onDevice: \(recognizer.supportsOnDeviceRecognition))")
     }
 
     private func startAudioIfNeeded() throws {
@@ -133,6 +135,8 @@ final class AppleTranscriptionProvider: NSObject, TranscriptionProvider {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        // Bias recognition toward the wake word (it's not a dictionary word).
+        request.contextualStrings = [config.wakeWord] + config.wakeWordAliases
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }

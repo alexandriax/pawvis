@@ -2,9 +2,10 @@ import AVFoundation
 import AppKit
 import ApplicationServices
 
-/// Snapshot + helpers for the three permissions Pawvis needs:
+/// Snapshot + helpers for the permissions Pawvis needs:
 /// camera (hand tracking), accessibility (posting mouse/keyboard events),
-/// microphone (dictation only).
+/// microphone (voice control), and screen recording (visual voice commands
+/// only — everything else works without it).
 enum Permissions {
     enum Status: Equatable {
         case granted, denied, notDetermined
@@ -28,6 +29,15 @@ enum Permissions {
 
     static func accessibility() -> Status {
         AXIsProcessTrusted() ? .granted : .denied
+    }
+
+    static func screenRecording() -> Status {
+        CGPreflightScreenCaptureAccess() ? .granted : .denied
+    }
+
+    /// Shows the system screen-recording prompt (once per app identity).
+    static func requestScreenRecording() {
+        _ = CGRequestScreenCaptureAccess()
     }
 
     static func requestCamera() async -> Bool {
@@ -58,6 +68,12 @@ enum Permissions {
 
     static func openMicrophoneSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    static func openScreenRecordingSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
         }
     }

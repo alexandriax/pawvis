@@ -55,29 +55,22 @@ func runSelfTest() -> Int32 {
         check("settings.roundtrip", false)
     }
 
-    // Realtime protocol encode/decode.
-    let sessionJSON = try? RealtimeProtocol.sessionUpdateEvent(
-        config: .init(model: "gpt-live-transcribe"))
-    check("realtime.sessionUpdateEncodes", sessionJSON != nil)
-    let delta = RealtimeProtocol.ServerEvent.decode(Data(
-        #"{"type":"conversation.item.input_audio_transcription.delta","item_id":"i","delta":"hi"}"#.utf8))
-    check("realtime.deltaDecodes", delta == .transcriptDelta(itemId: "i", delta: "hi"))
-
-    // Dictation parser wake → type → stop.
-    let parser = DictationParser()
+    // Voice parser: wake word → typing, commands, fuzzy wake matching.
+    let parser = VoiceControlParser()
     parser.beginListening()
-    let typed = parser.handleCompleted(itemId: "a", transcript: "type hello world")
-    check("dictation.wakeWordTypes", typed == [.type("hello world")])
+    let typed = parser.handleCompleted(itemId: "a", transcript: "Pawvis type hello world")
+    check("voice.wakeTypeTypes",
+          typed.typing == [.type("hello world")] && parser.state == .typing)
     _ = parser.handleCompleted(itemId: "b", transcript: "stop typing")
-    check("dictation.stopPhraseStops", parser.state == .listening)
+    check("voice.stopPhraseStops", parser.state == .listening)
+    let goTo = parser.handleCompleted(itemId: "c", transcript: "Pawvis go to alexandria dot com")
+    check("voice.goToParses", goTo.command == .goTo(url: "alexandria.com"))
+    let press = parser.handleCompleted(itemId: "d", transcript: "Pavis press command shift T")
+    check("voice.pressWithFuzzyWake",
+          press.command == .press(KeyChord(key: "t", modifiers: [.command, .shift])))
+    let open = parser.handleCompleted(itemId: "e", transcript: "Pawvis open Safari")
+    check("voice.openParses", open.command == .open(app: "Safari"))
 
-    // Keychain roundtrip with a scratch entry (cleaned up immediately).
-    let keychain = KeychainStore(service: "com.pawvis.Pawvis.selftest", account: "scratch")
-    keychain.write("selftest-value")
-    check("keychain.roundtrip", keychain.read() == "selftest-value")
-    keychain.delete()
-    check("keychain.deleteWorks", keychain.read() == nil)
-
-    print(failures == 0 ? "SELFTEST OK (10 checks)" : "SELFTEST FAILED (\(failures) failures)")
+    print(failures == 0 ? "SELFTEST OK (9 checks)" : "SELFTEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
 }

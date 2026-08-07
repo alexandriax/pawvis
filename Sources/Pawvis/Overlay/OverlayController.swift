@@ -2,18 +2,20 @@ import AppKit
 import PawvisCore
 import QuartzCore
 
-/// What the dictation HUD (status pill) should show.
-enum DictationHUD: Equatable {
+/// What the voice-control HUD (status pill) should show.
+enum VoiceHUD: Equatable {
     case hidden
     case connecting
-    case listening            // armed, waiting for a wake word
-    case dictating(String)    // typing; associated value = latest transcript snippet
+    case listening(wakeWord: String) // armed, waiting for the wake word
+    case typing(String)              // typing; associated value = latest transcript snippet
+    case resolving                   // consulting on-screen context for a command
+    case notice(String)              // transient confirmation ("Opening Safari")
     case error(String)
 }
 
 /// Owns one click-through overlay window per screen and renders the gesture
 /// engine's overlay state: fingertip dots, the contracting pinch iris,
-/// cursor halo, mode glyphs, dictation hold progress, and the status pill.
+/// cursor halo, mode glyphs, and the status pill.
 @MainActor
 final class OverlayController {
     private var windows: [OverlayWindow] = []
@@ -70,7 +72,7 @@ final class OverlayController {
 
     func render(
         overlay: OverlayState,
-        dictation: DictationHUD,
+        voice: VoiceHUD,
         projector: ScreenProjector,
         accessibilityBlocked: Bool = false,
         diagnostics: String? = nil
@@ -142,7 +144,7 @@ final class OverlayController {
             }
 
             if config.showStatusPill, window.isOnMainScreen {
-                model.pill = Self.pill(for: dictation, accessibilityBlocked: accessibilityBlocked)
+                model.pill = Self.pill(for: voice, accessibilityBlocked: accessibilityBlocked)
                     ?? diagnostics.map {
                         .init(text: $0, background: NSColor.black.withAlphaComponent(0.75))
                     }
@@ -163,30 +165,35 @@ final class OverlayController {
     }
 
     private static func pill(
-        for dictation: DictationHUD, accessibilityBlocked: Bool
+        for voice: VoiceHUD, accessibilityBlocked: Bool
     ) -> OverlayRenderModel.Pill? {
-        // An Accessibility problem beats everything except a dictation error:
+        // An Accessibility problem beats everything except a voice error:
         // without it, clicks silently do nothing, which looks like total
         // breakage. Make it impossible to miss.
         if accessibilityBlocked {
-            if case .error = dictation {} else {
+            if case .error = voice {} else {
                 return .init(
                     text: "⚠️ Clicks blocked — grant Accessibility (after rebuilds: remove & re-add Pawvis)",
                     background: NSColor.systemRed.withAlphaComponent(0.92))
             }
         }
-        switch dictation {
+        switch voice {
         case .hidden:
             return nil
         case .connecting:
-            return .init(text: "🎤 Connecting…", background: NSColor.systemGray.withAlphaComponent(0.85))
-        case .listening:
-            return .init(text: "🎤 Say a wake word (“type…”) to dictate",
+            return .init(text: "🎤 Starting voice control…", background: NSColor.systemGray.withAlphaComponent(0.85))
+        case .listening(let wakeWord):
+            return .init(text: "🎤 Say “\(wakeWord) …” — go to · type · press · open · click",
                          background: PawvisTheme.blue.withAlphaComponent(0.88))
-        case .dictating(let snippet):
-            let text = snippet.isEmpty ? "⌨️ Dictating — say “stop typing” to end"
+        case .typing(let snippet):
+            let text = snippet.isEmpty ? "⌨️ Typing — pause or say “stop typing” to end"
                 : "⌨️ \(snippet)"
             return .init(text: text, background: PawvisTheme.purple.withAlphaComponent(0.9))
+        case .resolving:
+            return .init(text: "✨ Looking at your screen…",
+                         background: PawvisTheme.purple.withAlphaComponent(0.9))
+        case .notice(let message):
+            return .init(text: message, background: PawvisTheme.blue.withAlphaComponent(0.88))
         case .error(let message):
             return .init(text: "⚠️ \(message)", background: NSColor.systemRed.withAlphaComponent(0.9))
         }
