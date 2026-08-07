@@ -201,6 +201,7 @@ final class PawvisController: ObservableObject {
         engine.config = settings.gestures
         overlay.setConfig(settings.overlay)
         voice.setConfig(settings.voiceControl)
+        voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture
         refreshProjector()
         camera.setDevice(deviceID: settings.general.cameraDeviceID)
     }

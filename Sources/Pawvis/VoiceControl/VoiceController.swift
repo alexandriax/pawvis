@@ -32,10 +32,15 @@ final class VoiceController: ObservableObject {
     private let typer = TextTyper()
     private let executor = CommandExecutor()
     private let screenContext = ScreenContextProvider()
+    /// The top-of-screen capsule showing what's being heard.
+    let transcriptOverlay = TranscriptOverlay()
     private var engine: SpeechEngine?
     private var config = VoiceControlConfig()
     private var pauseTimer: Timer?
     private var noticeTimer: Timer?
+    /// The in-flight utterance shown live in the capsule.
+    private var liveItemId: String?
+    private var liveText = ""
 
     var hud: VoiceHUD {
         switch state {
@@ -53,6 +58,12 @@ final class VoiceController: ObservableObject {
     func setConfig(_ config: VoiceControlConfig) {
         self.config = config
         parser.config = config
+        transcriptOverlay.enabled = config.transcriptOverlayEnabled
+        transcriptOverlay.timeout = config.transcriptOverlaySeconds
+        transcriptOverlay.manualDismiss = config.transcriptOverlayManualDismiss
+        if !config.transcriptOverlayEnabled {
+            transcriptOverlay.hide()
+        }
     }
 
     /// Menu bar entry point.
@@ -99,6 +110,9 @@ final class VoiceController: ObservableObject {
         pauseTimer?.invalidate()
         pauseTimer = nil
         clearNotice()
+        transcriptOverlay.hide()
+        liveItemId = nil
+        liveText = ""
         state = .off
         lastTranscript = ""
     }
@@ -124,6 +138,12 @@ final class VoiceController: ObservableObject {
             syncStateFromParser()
 
         case .delta(let itemId, let text):
+            if itemId != liveItemId {
+                liveItemId = itemId
+                liveText = ""
+            }
+            liveText += text
+            transcriptOverlay.showLive(liveText.trimmingCharacters(in: .whitespacesAndNewlines))
             let actions = parser.handleDelta(itemId: itemId, delta: text)
             typer.perform(actions)
             if parser.state == .typing {
@@ -132,6 +152,9 @@ final class VoiceController: ObservableObject {
             }
 
         case .completed(let itemId, let transcript):
+            liveItemId = nil
+            liveText = ""
+            transcriptOverlay.complete(transcript)
             let result = parser.handleCompleted(itemId: itemId, transcript: transcript)
             typer.perform(result.typing)
             lastTranscript = parser.state == .typing ? transcript : ""
@@ -227,6 +250,7 @@ final class VoiceController: ObservableObject {
 
     private func flashNotice(_ text: String) {
         notice = text
+        transcriptOverlay.flash(text)
         noticeTimer?.invalidate()
         noticeTimer = Timer.scheduledTimer(
             withTimeInterval: 2.5, repeats: false

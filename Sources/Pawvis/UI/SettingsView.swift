@@ -400,6 +400,27 @@ private struct VoiceControlSettingsTab: View {
             Divider()
 
             SettingToggle(
+                title: "Show what Pawvis hears at the top of the screen",
+                caption: "A capsule shows the live transcript while you speak, so you can see exactly what's being interpreted. Click it to dismiss it early.",
+                isOn: $store.settings.voiceControl.transcriptOverlayEnabled)
+
+            if store.settings.voiceControl.transcriptOverlayEnabled {
+                SettingToggle(
+                    title: "Keep it up until clicked",
+                    caption: "Off: it hides on its own after the delay below.",
+                    isOn: $store.settings.voiceControl.transcriptOverlayManualDismiss)
+
+                LabeledSlider(
+                    label: "Hide after",
+                    caption: "\(String(format: "%.1f", store.settings.voiceControl.transcriptOverlaySeconds)) s after an utterance completes.",
+                    value: $store.settings.voiceControl.transcriptOverlaySeconds,
+                    range: 1.0...10.0)
+                .disabled(store.settings.voiceControl.transcriptOverlayManualDismiss)
+            }
+
+            Divider()
+
+            SettingToggle(
                 title: "Visual commands (Apple Intelligence)",
                 caption: "Commands the grammar doesn't know (“\(wake) click sign in”) are resolved against the screen near your pointer with the on-device model — widening to the whole screen only when needed. Nothing leaves your Mac.",
                 isOn: $store.settings.voiceControl.visualContextEnabled)

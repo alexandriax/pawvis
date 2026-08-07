@@ -30,6 +30,13 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     /// accessibility snapshot of the area around the pointer, using the
     /// on-device Apple Intelligence model. macOS 26+ with Apple Intelligence.
     public var visualContextEnabled: Bool = true
+    /// Show what voice control is hearing in a capsule at the top of the
+    /// screen.
+    public var transcriptOverlayEnabled: Bool = true
+    /// Seconds the capsule stays up after an utterance completes.
+    public var transcriptOverlaySeconds: Double = 3.0
+    /// Keep the capsule up until it's clicked instead of auto-hiding.
+    public var transcriptOverlayManualDismiss: Bool = false
     /// Quiet time (legacy SFSpeechRecognizer path only) before an utterance is
     /// considered done.
     public var vadSilenceMs: Int = 500
@@ -40,6 +47,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         case enabled, language, wakeWord, wakeWordAliases, stopPhrases
         case typingPauseSeconds, inlineCommandsEnabled, typeDeltasImmediately
         case visualContextEnabled, vadSilenceMs
+        case transcriptOverlayEnabled, transcriptOverlaySeconds, transcriptOverlayManualDismiss
     }
 
     /// Field-tolerant decoding, matching GestureConfig's behavior.
@@ -56,5 +64,8 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .typeDeltasImmediately) { typeDeltasImmediately = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .visualContextEnabled) { visualContextEnabled = v }
         if let v = try? c.decodeIfPresent(Int.self, forKey: .vadSilenceMs) { vadSilenceMs = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayEnabled) { transcriptOverlayEnabled = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .transcriptOverlaySeconds) { transcriptOverlaySeconds = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayManualDismiss) { transcriptOverlayManualDismiss = v }
     }
 }
