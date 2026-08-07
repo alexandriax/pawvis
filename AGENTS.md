@@ -277,35 +277,45 @@ quietly.
 
 ## Website
 
-`docs/` is the GitHub Pages site — <https://alexandriax.github.io/pawvis/> —
+`docs/` is the GitHub Pages site, <https://alexandriax.github.io/pawvis/>,
 served straight from `main`'s `docs/` folder. Plain hand-written
 `index.html` + `site.css` + `site.js`, no build step, no framework. Preview
 with `python3 -m http.server` from `docs/` (or just open `index.html`).
 
 **The site restates the README; the README stays the source of truth.** When
-behavior changes — a gesture added or retired, a voice command, a permission,
-a privacy claim, the macOS floor — update the matching section of
-`docs/index.html` in the same PR. The gestures grid, the voice-command chips
-and mock transcript, and the permissions row are the places that go stale.
+behavior changes (a gesture added or retired, a voice command, a permission, a
+privacy claim, the macOS floor) update the matching section of
+`docs/index.html` in the same PR. The gestures grid, the spoken-command chips,
+the agent hand-off card and the permissions row are the places that go stale.
 
 Rules that keep the site honest:
 
-- **Zero third-party requests.** Fonts are self-hosted woff2 in
-  `docs/assets/fonts/`; there are no CDNs, no analytics, no badge images. The
-  privacy section explicitly promises this, so adding any external resource
-  makes the page lie. Don't.
+- **No em-dashes.** Not in `docs/`, not in the README. Rewrite the sentence:
+  a comma, a colon, parentheses, or two sentences. This is a house style rule,
+  so it applies to new copy as well as edits.
+- **Say what leaves the machine, exactly.** The site's privacy section is the
+  reason people trust the app, so it may only claim what is true in the
+  shipped default: hand tracking, speech and Apple Intelligence really are
+  on-device, and the optional agent hand-off really does send what you say to
+  Claude Code or Codex. Any new feature that talks to a network gets named
+  there before it gets marketed anywhere else on the page.
+- **One third party, on purpose.** The page loads Google Analytics
+  (`G-FPVSRRZQTY`) and nothing else: fonts are self-hosted woff2 in
+  `docs/assets/fonts/`, and there are no CDNs, badge images or other embeds.
+  The analytics tag measures the *website*; it has no connection to the app,
+  which still ships with no telemetry of any kind. Don't let the two get
+  conflated in copy, and don't add a second external dependency casually.
 - **The photography and demo video are static, committed assets**
   (`docs/assets/*.jpg`, `demo.mp4`), generated once with OpenAI's image/video
-  APIs using the git-ignored `.env` key. The site itself needs no key, ever —
+  APIs using the git-ignored `.env` key. The site itself needs no key, ever;
   the Secrets section above still holds. Regenerate only deliberately, keeping
   the same filenames (`hero-office.jpg`, `gesture-closeup.jpg`,
   `voice-command.jpg`, `demo.mp4`).
 - **The download button points at the permanent asset URL**
-  (`releases/latest/download/Pawvis.zip`) — same rule as the README button:
+  (`releases/latest/download/Pawvis.zip`), same rule as the README button:
   never version it, and it never needs editing per release.
-- **Icon art on the site derives from the committed sources** — regenerate
-  `docs/assets/icon-*.png` / `claw-*.png` with `sips` from `icon.png`,
-  `claw.png`, and `Resources/claw-closed.png` if those ever change.
+- **Icon art on the site derives from the committed sources.** Regenerate
+  `docs/assets/icon-*.png` with `sips` from `icon.png` if it ever changes.
 
 Site-only pull requests take the `no-release` label: publishing a web page is
 not shipping an app version.
