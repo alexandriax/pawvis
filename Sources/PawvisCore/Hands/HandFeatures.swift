@@ -28,8 +28,33 @@ public struct PoseThresholds: Codable, Equatable, Sendable {
     /// Open-palm splay requires the mean gap between adjacent fingertips,
     /// normalized by hand scale, to exceed this.
     public var splayRatio: Double = 0.25
+    /// The open-hand trigger pose additionally requires `openness()` to reach
+    /// this. The PIP-angle bands alone cannot see fingers curled *toward* the
+    /// camera — their 2D projection stays a straight chain while the tips
+    /// collapse onto the palm — so a closed hand facing the lens read as
+    /// "open" and armed cursor control. The tips standing well off the palm
+    /// is the signal foreshortening can't fake. Raised and lowered by the
+    /// open-hand strictness slider.
+    public var openHandMinOpenness: Double = 0.40
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case extendedAngle, curledAngle, thumbExtendedRatio, splayRatio
+        case openHandMinOpenness
+    }
+
+    /// Field-tolerant decoding, as `GestureConfig`: settings saved before a
+    /// threshold existed keep its default instead of resetting the others.
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .extendedAngle) { extendedAngle = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .curledAngle) { curledAngle = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .thumbExtendedRatio) { thumbExtendedRatio = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .splayRatio) { splayRatio = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .openHandMinOpenness) { openHandMinOpenness = v }
+    }
 }
 
 /// Derived geometry for one hand: scale-normalized distances, finger extension,
@@ -174,13 +199,22 @@ public struct HandFeatures {
         return min(max((mean - lo) / (hi - lo), 0), 1)
     }
 
-    /// The control-trigger pose: every non-thumb finger extended. The thumb is
+    /// The control-trigger pose: every non-thumb finger extended, with the
+    /// tips standing at least `openHandMinOpenness` off the palm. The thumb is
     /// deliberately ignored — the thumb-curl click keeps all four fingers up
     /// while the thumb tucks, and that must still read as "open". A finger
     /// whose joints are missing counts as not extended, so a half-tracked
     /// hand can't arm cursor control.
+    ///
+    /// The openness floor is the second, independent signal: the angle bands
+    /// judge each finger's projected shape, which foreshortening fakes
+    /// (fingers curled toward the camera project as straight chains), while
+    /// `openness()` measures how far the tips actually stand from the palm —
+    /// which a curled hand can't fake at any orientation.
     public func isOpenHand() -> Bool {
-        Finger.allCases.allSatisfy { isExtended($0) == true }
+        guard Finger.allCases.allSatisfy({ isExtended($0) == true }) else { return false }
+        guard let open = openness() else { return false }
+        return open >= thresholds.openHandMinOpenness
     }
 
     /// How many fingers are genuinely curled — the disarm side of the control

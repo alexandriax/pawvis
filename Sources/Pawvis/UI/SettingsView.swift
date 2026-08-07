@@ -255,6 +255,16 @@ private struct TrackingSettingsTab: View {
                 .pickerStyle(.radioGroup)
             }
 
+            if store.settings.gestures.controlTrigger == .openHand {
+                LabeledSlider(
+                    label: "Open-hand strictness",
+                    caption: "How unmistakably open your hand must be to take the cursor. Right: fingers fully extended, well clear of the palm — fewer accidental grabs. Left: a looser hand qualifies sooner.",
+                    value: Binding(
+                        get: { store.settings.gestures.poseThresholds.openHandMinOpenness },
+                        set: { store.settings.gestures.poseThresholds.openHandMinOpenness = $0 }),
+                    range: 0.20...0.60)
+            }
+
             Divider()
 
             SettingToggle(

@@ -325,6 +325,32 @@ final class HandFeaturesTests: XCTestCase {
                        "a dipped finger leaves the pose")
     }
 
+    func testForeshortenedCurlDoesNotReadOpen() {
+        // Fingers curled toward the camera: every 2D chain is dead straight,
+        // so the angle bands alone call all four fingers extended…
+        let f = features(SyntheticHand.curledTowardCamera())
+        for finger in Finger.allCases {
+            XCTAssertEqual(f.isExtended(finger), true,
+                           "\(finger) must fool the angle check — that's the failure under test")
+        }
+        // …but the tips sit on the palm, and the openness floor catches it.
+        XCTAssertLessThan(f.openness()!, PoseThresholds().openHandMinOpenness)
+        XCTAssertFalse(f.isOpenHand(),
+                       "a hand curled toward the camera is not the trigger pose")
+    }
+
+    func testOpenHandStrictnessThresholdIsTunable() {
+        var strict = PoseThresholds()
+        strict.openHandMinOpenness = 0.58
+        let hand = SyntheticHand.openRelaxed()
+        XCTAssertTrue(HandFeatures(hand: hand)!.isOpenHand(),
+                      "the default strictness accepts a plain open hand")
+        XCTAssertFalse(HandFeatures(hand: hand, thresholds: strict)!.isOpenHand(),
+                       "at high strictness a relaxed open hand is not enough…")
+        XCTAssertTrue(HandFeatures(hand: SyntheticHand.openSplayed(), thresholds: strict)!.isOpenHand(),
+                      "…but a fully splayed one still is")
+    }
+
     func testIsOpenHandNeedsEveryFingerTracked() {
         let full = SyntheticHand.openRelaxed()
         var joints: [HandJoint: Vec2] = [:]
