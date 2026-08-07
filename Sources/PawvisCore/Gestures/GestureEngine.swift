@@ -5,6 +5,8 @@ import Foundation
 /// timestamps, so every behavior is unit-testable.
 ///
 /// The gesture model is intentionally minimal:
+///   open hand shown     → cursor control arms (see `config.controlTrigger`;
+///                         `.anyHand` skips the ceremony, a fist parks it again)
 ///   hand tracked        → the cursor follows the click gesture's pointer
 ///   the gesture closes  → left button down (click; twice quickly = double-click)
 ///   move while closed   → drag
@@ -38,6 +40,18 @@ public final class GestureEngine {
                 // next frame (or the next forceRelease).
                 pendingEvents = forceRelease(at: lastHandTime)
             }
+            if config.controlTrigger != oldValue.controlTrigger {
+                armFrames = 0
+                disarmFrames = 0
+                if config.controlTrigger == .openHand {
+                    // The hand on screen never showed the trigger, so it does
+                    // not get to keep the cursor — or a press — it holds.
+                    pendingEvents = forceRelease(at: lastHandTime)
+                    armed = false
+                } else {
+                    armed = true // .anyHand: an in-flight press carries on
+                }
+            }
         }
     }
 
@@ -46,6 +60,7 @@ public final class GestureEngine {
         self.slots = [HandSlot(id: 0, params: config.smoothing),
                       HandSlot(id: 1, params: config.smoothing)]
         self.effectiveInteractionBox = config.interactionBox
+        self.armed = config.controlTrigger == .anyHand
     }
 
     // MARK: - Internal state
@@ -113,9 +128,24 @@ public final class GestureEngine {
     /// reads as the cursor swimming under a still hand.
     private static let reachLerp = 0.05
 
+    /// Consecutive open-hand frames before the `.openHand` trigger arms
+    /// (~0.1 s at 30 fps): enough that a hand flashing through the pose in
+    /// passing doesn't grab the cursor.
+    private static let triggerArmFrames = 3
+    /// Consecutive closed-hand frames before control disarms (~0.3 s):
+    /// comfortably longer than any click gesture's engage transition, so
+    /// closing the hand *into* a click can never drop control mid-gesture.
+    private static let triggerDisarmFrames = 9
+
     private var slots: [HandSlot]
     private var primarySlotID: Int?
     private var lastHandTime: TimeInterval = -.infinity
+
+    /// Whether the control trigger currently lets the hand drive the cursor.
+    /// Always true in `.anyHand` mode.
+    private var armed: Bool
+    private var armFrames = 0
+    private var disarmFrames = 0
 
     private var cursor: Vec2?
     /// At most one press exists at a time, whichever button owns it.
@@ -163,6 +193,9 @@ public final class GestureEngine {
         cursor = nil
         lastHandTime = -.infinity
         smoothedHandScale = nil
+        armed = config.controlTrigger == .anyHand
+        armFrames = 0
+        disarmFrames = 0
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -182,7 +215,7 @@ public final class GestureEngine {
         lastHandTime = frame.time
 
         // 2. Pick the primary (gesture-driving) hand, sticky across frames.
-        let primary: TrackedHand
+        var primary: TrackedHand
         if let id = primarySlotID, let match = tracked.first(where: { $0.slotID == id }) {
             primary = match
         } else {
@@ -190,14 +223,28 @@ public final class GestureEngine {
             primarySlotID = primary.slotID
         }
 
+        // While waiting for the trigger, prefer whichever hand is showing it:
+        // a closed hand that got primary first (resting on the desk, say) must
+        // not block the deliberately opened one from taking the cursor.
+        if config.controlTrigger == .openHand, !armed,
+           !(triggerFeatures(of: primary)?.isOpenHand() ?? false),
+           let open = tracked.first(where: { $0.slotID != primary.slotID
+               && (triggerFeatures(of: $0)?.isOpenHand() ?? false) }) {
+            primary = open
+            primarySlotID = open.slotID
+        }
+
         let features = HandFeatures(
             hand: primary.hand,
             thresholds: config.poseThresholds,
             minJointConfidence: config.minJointConfidence)
 
-        // 3. Cursor follows the mode's pointer (chosen so closing the gesture
-        // barely moves it).
-        if let pointer = pointerPoint(features, hand: primary.hand) {
+        // 3. The control trigger decides whether this hand gets the cursor.
+        updateTrigger(features)
+
+        if armed, let pointer = pointerPoint(features, hand: primary.hand) {
+            // 4. Cursor follows the mode's pointer (chosen so closing the
+            // gesture barely moves it).
             let clamped = pointer.clampedToUnit()
             if var p = press {
                 // Tap window then micro-movement suppression (see dragThreshold).
@@ -218,32 +265,38 @@ public final class GestureEngine {
             }
         }
 
-        // 4. Button state: each button's ratio with hysteresis + debounce.
+        // 5. Button state: each button's ratio with hysteresis + debounce.
         // Left runs first, so a frame where both fingers dip reads as a plain
-        // click; from then on whichever is held locks the other out.
-        let ratio = modeRatio(features)
-        let rightHeld = isHeld(.right)
-        updateButton(.left, state: &leftButton, ratio: ratio,
-                     engage: config.engageRatio, release: config.releaseRatio,
-                     confident: engageConfident(primary.hand), blocked: rightHeld,
-                     at: frame.time, events: &events)
-        let leftHeld = isHeld(.left)
-        updateButton(.right, state: &rightButton, ratio: rightRatio(features),
-                     engage: config.rightEngageRatio, release: config.rightReleaseRatio,
-                     confident: rightEngageConfident(primary.hand), blocked: leftHeld,
-                     at: frame.time, events: &events)
+        // click; from then on whichever is held locks the other out. Disarmed,
+        // the buttons stay untouched (they are at rest — disarming resets
+        // them), so no press can ever begin on a parked cursor.
+        let ratio = armed ? modeRatio(features) : nil
+        if armed {
+            let rightHeld = isHeld(.right)
+            updateButton(.left, state: &leftButton, ratio: ratio,
+                         engage: config.engageRatio, release: config.releaseRatio,
+                         confident: engageConfident(primary.hand), blocked: rightHeld,
+                         at: frame.time, events: &events)
+            let leftHeld = isHeld(.left)
+            updateButton(.right, state: &rightButton, ratio: rightRatio(features),
+                         engage: config.rightEngageRatio, release: config.rightReleaseRatio,
+                         confident: rightEngageConfident(primary.hand), blocked: leftHeld,
+                         at: frame.time, events: &events)
+        }
 
-        // 5. Fit the interaction box to the hand (auto reach). Last, so the
+        // 6. Fit the interaction box to the hand (auto reach). Last, so the
         // box that mapped this frame is the one the press — if any — began in.
+        // Runs while disarmed too: the box is fitted by the time control arms.
         updateReach(rawHand: primary.raw)
 
-        // 6. Overlay state.
+        // 7. Overlay state.
         overlay.hands = tracked.map { th in
             var oh = OverlayHand()
             oh.isPrimary = th.slotID == primarySlotID
             for (joint, p) in th.hand.fingertips { oh.fingertips[joint] = p }
             return oh
         }
+        overlay.armed = armed
         overlay.cursor = cursor
         overlay.grabbed = leftButton.engaged
         overlay.rightGrabbed = rightButton.engaged
@@ -251,6 +304,63 @@ public final class GestureEngine {
         overlay.closingProgress = closingProgress(for: ratio)
 
         return (events, overlay)
+    }
+
+    // MARK: - Control trigger
+
+    /// Pose features for trigger checks on any tracked hand (the ones the
+    /// main pipeline computes only for the primary).
+    private func triggerFeatures(of hand: TrackedHand) -> HandFeatures? {
+        HandFeatures(hand: hand.hand,
+                     thresholds: config.poseThresholds,
+                     minJointConfidence: config.minJointConfidence)
+    }
+
+    /// The arm/disarm state machine for `.openHand`: an open hand held
+    /// `triggerArmFrames` arms cursor control; a closed hand (3+ fingers
+    /// curled) held `triggerDisarmFrames` parks it again. Never disarms while
+    /// a button is engaged or held — every click gesture closes part of the
+    /// hand, and dropping control mid-press would strand the button down.
+    /// Missing joints hold the current state, exactly as the button ratios do.
+    /// (Clicks themselves are deliberately NOT gated on openness — see
+    /// AGENTS.md; only the *arming* of cursor control is.)
+    private func updateTrigger(_ features: HandFeatures?) {
+        guard config.controlTrigger == .openHand else {
+            armed = true
+            armFrames = 0
+            disarmFrames = 0
+            return
+        }
+        guard let features else {
+            armFrames = 0
+            disarmFrames = 0
+            return
+        }
+        if armed {
+            armFrames = 0
+            let pressing = press != nil || leftButton.engaged || rightButton.engaged
+            guard !pressing, features.curledFingerCount() >= 3 else {
+                disarmFrames = 0
+                return
+            }
+            disarmFrames += 1
+            guard disarmFrames >= Self.triggerDisarmFrames else { return }
+            disarmFrames = 0
+            armed = false
+            // A button mid-engage-debounce must not fire on the next arm.
+            leftButton = ButtonState()
+            rightButton = ButtonState()
+        } else {
+            disarmFrames = 0
+            guard features.isOpenHand() else {
+                armFrames = 0
+                return
+            }
+            armFrames += 1
+            guard armFrames >= Self.triggerArmFrames else { return }
+            armFrames = 0
+            armed = true
+        }
     }
 
     // MARK: - Click gesture modes
@@ -479,6 +589,12 @@ public final class GestureEngine {
             // The hand is genuinely gone: the next one sizes the auto box from
             // its own scale rather than inheriting this one's.
             smoothedHandScale = nil
+            if config.controlTrigger == .openHand {
+                // …and it must show the trigger again to take the cursor back.
+                armed = false
+                armFrames = 0
+                disarmFrames = 0
+            }
         } else {
             let held = leftButton.engaged || rightButton.engaged
             overlay.grabbed = leftButton.engaged
@@ -486,6 +602,7 @@ public final class GestureEngine {
             overlay.isDragging = press?.dragging ?? false
             overlay.closingProgress = held ? 1 : 0
         }
+        overlay.armed = armed
         return (events, overlay)
     }
 

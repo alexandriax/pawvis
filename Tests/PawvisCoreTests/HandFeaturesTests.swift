@@ -330,4 +330,40 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertNil(f.pinchRatio(to: .index))
         XCTAssertNotNil(f.pinchRatio(to: .middle))
     }
+
+    // MARK: Control-trigger poses
+
+    func testIsOpenHandOnCanonicalPoses() {
+        XCTAssertTrue(features(SyntheticHand.openRelaxed()).isOpenHand())
+        XCTAssertTrue(features(SyntheticHand.openSplayed()).isOpenHand())
+        XCTAssertTrue(features(SyntheticHand.highFive(thumbTucked: true)).isOpenHand(),
+                      "the thumb is free — a thumb-curl click must not break the trigger pose")
+        XCTAssertFalse(features(SyntheticHand.fist()).isOpenHand())
+        XCTAssertFalse(features(SyntheticHand.halfClosed()).isOpenHand(),
+                       "a relaxed half-curl is not the deliberate trigger")
+        XCTAssertFalse(features(SyntheticHand.shaka()).isOpenHand())
+        XCTAssertFalse(features(SyntheticHand.twoFingerPoint()).isOpenHand())
+        XCTAssertFalse(features(SyntheticHand.mouseTap(indexDown: true)).isOpenHand(),
+                       "a dipped finger leaves the pose")
+    }
+
+    func testIsOpenHandNeedsEveryFingerTracked() {
+        let full = SyntheticHand.openRelaxed()
+        var joints: [HandJoint: Vec2] = [:]
+        for joint in HandJoint.allCases where ![HandJoint.ringPIP, .ringTip].contains(joint) {
+            if let p = full[joint] { joints[joint] = p }
+        }
+        XCTAssertFalse(features(Hand(joints: joints)).isOpenHand(),
+                       "a half-tracked hand must not arm cursor control")
+    }
+
+    func testCurledFingerCountBands() {
+        XCTAssertEqual(features(SyntheticHand.fist()).curledFingerCount(), 4)
+        XCTAssertEqual(features(SyntheticHand.openRelaxed()).curledFingerCount(), 0)
+        XCTAssertEqual(features(SyntheticHand.halfClosed()).curledFingerCount(), 0,
+                       "the neutral band counts for neither pose — hysteresis for free")
+        XCTAssertEqual(features(SyntheticHand.shaka()).curledFingerCount(), 3)
+        XCTAssertEqual(features(SyntheticHand.mouseTap(indexDown: true)).curledFingerCount(), 1,
+                       "a click's finger dip is nowhere near the disarm pose")
+    }
 }

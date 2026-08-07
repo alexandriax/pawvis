@@ -14,6 +14,9 @@ final class GestureEngineTests: XCTestCase {
         config.reachMode = .manual
         config.mirrorCamera = false
         config.smoothing = OneEuroFilter.Params(minCutoff: 1e9, beta: 0, dCutoff: 1e9)
+        // The suite drives hands straight into gestures; the open-hand control
+        // trigger gets its own tests, which opt back in.
+        config.controlTrigger = .anyHand
         return config
     }
 
@@ -1058,6 +1061,259 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertEqual(rightUps(feed([SyntheticHand.fingerDip(.little)], at: 0.25).events).count, 1)
         XCTAssertTrue(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
                                             from: 0.3, count: 6)).isEmpty)
+    }
+
+    // MARK: - Control trigger
+
+    /// The test config with the open-hand control trigger switched back on.
+    private func useOpenHandTrigger(_ clickGesture: ClickGesture = .pinch) {
+        var config = Self.testConfig(clickGesture)
+        config.controlTrigger = .openHand
+        engine = GestureEngine(config: config)
+    }
+
+    /// A pressing hand that also reads deliberately closed (three fingers
+    /// curled around a tight thumb–index pinch) — the pose that would disarm
+    /// control if a held press didn't pin it armed.
+    private func clenchedPinch(wrist: Vec2 = Vec2(0.5, 0.7)) -> Hand {
+        SyntheticHand.build(
+            pose: .init(fingerDirs: SyntheticHand.relaxedDirs,
+                        curled: [.middle, .ring, .little],
+                        thumbTipOffset: SyntheticHand.thumbExtendedOffset,
+                        pinch: (.index, Self.tightGap)),
+            wrist: wrist)
+    }
+
+    func testControlTriggerDefaultsToOpenHand() {
+        XCTAssertEqual(GestureConfig.default.controlTrigger, .openHand,
+                       "a merely visible hand must not seize the cursor")
+        XCTAssertEqual(Self.testConfig().controlTrigger, .anyHand,
+                       "…but the rest of the suite drives hands without the ceremony")
+    }
+
+    func testUnreadableControlTriggerKeepsTheDefault() throws {
+        let bogus = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"controlTrigger":"jazzHands"}"#.utf8))
+        XCTAssertEqual(bogus.controlTrigger, .openHand,
+                       "an unknown trigger must not fail the settings tree")
+        let known = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"controlTrigger":"anyHand"}"#.utf8))
+        XCTAssertEqual(known.controlTrigger, .anyHand)
+    }
+
+    func testDisarmedHandNeverMovesOrClicks() {
+        useOpenHandTrigger()
+        var events: [GestureEvent] = []
+        for i in 0..<10 {
+            events += feed([SyntheticHand.fist(wrist: Vec2(0.3 + Double(i) * 0.04, 0.7))],
+                           at: Double(i) / 30).events
+        }
+        XCTAssertTrue(events.isEmpty, "a hand that never showed the trigger controls nothing")
+
+        // A click gesture from a hand that never armed is just as inert.
+        let pinched = feedFrames([SyntheticHand.pinchIndexCasual(gap: Self.tightGap)],
+                                 from: 0.4, count: 10)
+        XCTAssertTrue(downs(pinched).isEmpty, "click gestures are inert until control arms")
+
+        let (_, overlay) = feed([SyntheticHand.fist(wrist: Vec2(0.7, 0.7))], at: 0.8)
+        XCTAssertFalse(overlay.armed)
+        XCTAssertNil(overlay.cursor, "no cursor exists before control has ever armed")
+        XCTAssertEqual(overlay.hands.count, 1, "the hand still tracks — the dots render")
+        XCTAssertEqual(overlay.closingProgress, 0, accuracy: 1e-9)
+    }
+
+    func testOpenHandArmsOnTheThirdConsecutiveFrame() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.fist()], from: 0, count: 3)
+
+        let e1 = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.50, 0.7))], at: 0.20).events
+        let e2 = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.52, 0.7))], at: 0.233).events
+        XCTAssertTrue(moves(e1).isEmpty && moves(e2).isEmpty,
+                      "two open frames are not yet the trigger")
+        let (e3, overlay) = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.54, 0.7))], at: 0.267)
+        XCTAssertEqual(moves(e3).count, 1,
+                       "the third consecutive open frame arms control and the cursor moves")
+        XCTAssertTrue(overlay.armed)
+    }
+
+    func testAFlashOfOpenHandDoesNotArm() {
+        useOpenHandTrigger()
+        var events: [GestureEvent] = []
+        let sequence = [SyntheticHand.openRelaxed(), SyntheticHand.openRelaxed(),
+                        SyntheticHand.fist(),
+                        SyntheticHand.openRelaxed(), SyntheticHand.openRelaxed()]
+        for (i, hand) in sequence.enumerated() {
+            events += feed([hand], at: Double(i) / 30).events
+        }
+        XCTAssertTrue(moves(events).isEmpty,
+                      "the arm debounce needs consecutive open frames, not a total")
+    }
+
+    func testArmedIndexTapClicksAndStaysArmed() {
+        useOpenHandTrigger(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4) // arms
+
+        let tapping = feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.15, count: 3)
+        XCTAssertEqual(downs(tapping).count, 1, "an armed hand clicks exactly as before")
+        let lifting = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.28, count: 3)
+        XCTAssertEqual(ups(lifting).count, 1)
+
+        let (_, overlay) = feed([SyntheticHand.mouseTap(indexDown: false)], at: 0.5)
+        XCTAssertTrue(overlay.armed, "a click's finger dip must never disarm control")
+    }
+
+    func testHeldPressPinsControlArmed() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4) // arms
+
+        let closing = feedFrames([clenchedPinch()], from: 0.15, count: 3)
+        XCTAssertEqual(downs(closing).count, 1, "a clenched pinch still clicks")
+
+        // A full second of a hand that reads deliberately closed: the held
+        // press must pin control armed, or the button strands mid-drag.
+        let held = feedFrames([clenchedPinch()], from: 0.3, count: 30)
+        XCTAssertTrue(ups(held).isEmpty, "a held press pins control armed, however closed the hand")
+
+        let opening = feedFrames([SyntheticHand.openRelaxed()], from: 1.4, count: 3)
+        XCTAssertEqual(ups(opening).count, 1)
+        let after = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.6, 0.7))], at: 1.6).events
+        XCTAssertEqual(moves(after).count, 1, "…and control is still armed after the release")
+    }
+
+    func testFistDisarmsAndParksTheCursor() {
+        // Index-tap mode: the one whose click a fist does NOT contain (a
+        // whole-hand curl keeps the tap differential flat). In pinch and
+        // thumb-curl modes a fist physically includes the click gesture, so
+        // there it starts a press — and a press always pins control armed.
+        useOpenHandTrigger(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4) // arms
+
+        // A closing hand keeps the cursor through the disarm debounce…
+        var during: [GestureEvent] = []
+        for i in 0..<9 {
+            during += feed([SyntheticHand.fist(wrist: Vec2(0.5 + Double(i) * 0.01, 0.7))],
+                           at: 0.2 + Double(i) / 30).events
+        }
+        XCTAssertFalse(moves(during).isEmpty, "the debounce window still tracks")
+        XCTAssertTrue(downs(during).isEmpty, "a whole-hand curl is not an index tap")
+
+        // …then lets go: further movement of the closed hand is ignored.
+        var after: [GestureEvent] = []
+        for i in 0..<6 {
+            after += feed([SyntheticHand.fist(wrist: Vec2(0.3, 0.5 + Double(i) * 0.03))],
+                          at: 0.55 + Double(i) / 30).events
+        }
+        XCTAssertTrue(moves(after).isEmpty, "a sustained fist parks the cursor")
+        let (_, overlay) = feed([SyntheticHand.fist(wrist: Vec2(0.3, 0.68))], at: 0.78)
+        XCTAssertFalse(overlay.armed)
+        XCTAssertNotNil(overlay.cursor, "the claw stays parked where control was let go")
+
+        // Reopening re-arms through the same debounce.
+        let rearmed = feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.6, 0.4))],
+                                 from: 0.85, count: 3)
+        XCTAssertEqual(moves(rearmed).count, 1, "an open hand takes the cursor back")
+    }
+
+    func testFistHoldsAPressInsteadOfDisarmingInPinchMode() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4) // arms
+
+        // A fist physically contains a pinch — the tucked thumb lands against
+        // the curled index — so in pinch mode closing the hand is a click-hold,
+        // and a held press always beats the disarm gesture. (Park the cursor
+        // by taking the hand out of view in this mode.)
+        let closing = feedFrames([SyntheticHand.fist()], from: 0.15, count: 30)
+        XCTAssertEqual(downs(closing).count, 1)
+        XCTAssertTrue(ups(closing).isEmpty)
+        let (_, overlay) = feed([SyntheticHand.fist()], at: 1.2)
+        XCTAssertTrue(overlay.armed, "a press pins control armed, however closed the hand")
+    }
+
+    func testBriefDropoutKeepsControlArmed() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4) // arms
+        XCTAssertTrue(feed([], at: 0.15).events.isEmpty, "one lost frame is inside the grace")
+        let back = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.6, 0.7))], at: 0.183).events
+        XCTAssertEqual(moves(back).count, 1,
+                       "control survives a dropout shorter than the tracking-loss grace")
+    }
+
+    func testHandLossPastGraceRequiresReArm() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4) // arms
+        feed([], at: 0.5) // past the grace: the hand is really gone
+
+        var events: [GestureEvent] = []
+        for i in 0..<6 {
+            events += feed([SyntheticHand.fist(wrist: Vec2(0.4 + Double(i) * 0.03, 0.6))],
+                           at: 0.6 + Double(i) / 30).events
+        }
+        XCTAssertTrue(moves(events).isEmpty, "a returning hand must show the trigger again")
+        let rearmed = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.4, 0.6))],
+                                 from: 0.85, count: 3)
+        XCTAssertEqual(moves(rearmed).count, 1)
+    }
+
+    func testOpenSecondHandTakesPrimaryWhileDisarmed() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.fist(wrist: Vec2(0.3, 0.7))], from: 0, count: 5)
+
+        // A second, open hand appears: it — not the sticky closed primary —
+        // gets to arm control and drive the cursor.
+        var events: [GestureEvent] = []
+        var lastOverlay = OverlayState()
+        for i in 0..<4 {
+            let (e, o) = feed([SyntheticHand.fist(wrist: Vec2(0.3, 0.7)),
+                               SyntheticHand.openRelaxed(wrist: Vec2(0.7, 0.5))],
+                              at: 0.2 + Double(i) / 30)
+            events += e
+            lastOverlay = o
+        }
+        XCTAssertEqual(moves(events).count, 1, "the open hand arms and the cursor jumps to it once")
+        XCTAssertGreaterThan(moves(events)[0].x, 0.5, "…near the open hand, not the fist")
+        XCTAssertTrue(lastOverlay.armed)
+        XCTAssertEqual(lastOverlay.hands.count, 2)
+        XCTAssertTrue(lastOverlay.hands[1].isPrimary, "the open hand (slot 1) is primary now")
+    }
+
+    func testSwitchingToOpenHandTriggerMidPressReleases() {
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3) // .anyHand test config
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)],
+                                        from: 0.1, count: 3)).count, 1)
+
+        engine.config.controlTrigger = .openHand
+
+        let next = feed([SyntheticHand.pinchIndexCasual(gap: Self.tightGap)], at: 0.25).events
+        XCTAssertEqual(ups(next).count, 1, "a trigger change must not strand the button down")
+        let more = feedFrames([SyntheticHand.pinchIndexCasual(gap: Self.tightGap)],
+                              from: 0.283, count: 10)
+        XCTAssertTrue(downs(more).isEmpty, "…and the un-triggered hand cannot re-press")
+
+        // Re-arm somewhere else: the shared pinch/open pointer spot means an
+        // in-place reopen would land inside the jitter deadband.
+        let rearmed = feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.6, 0.5))],
+                                 from: 0.65, count: 3)
+        XCTAssertEqual(moves(rearmed).count, 1, "showing the trigger takes control back")
+    }
+
+    func testSwitchingToAnyHandTriggerMidPressKeepsThePress() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 4) // arms
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)],
+                                        from: 0.15, count: 3)).count, 1)
+
+        engine.config.controlTrigger = .anyHand
+
+        let held = feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap)], from: 0.3, count: 5)
+        XCTAssertTrue(ups(held).isEmpty, "loosening the trigger must not interrupt the press")
+        XCTAssertEqual(ups(feedFrames([SyntheticHand.openRelaxed()], from: 0.5, count: 3)).count, 1)
+    }
+
+    func testAnyHandModeIsAlwaysArmed() {
+        let (events, overlay) = feed([SyntheticHand.fist()], at: 0)
+        XCTAssertEqual(moves(events).count, 1,
+                       "legacy behavior: any tracked hand moves the cursor at once")
+        XCTAssertTrue(overlay.armed)
     }
 
     // MARK: - Auto reach

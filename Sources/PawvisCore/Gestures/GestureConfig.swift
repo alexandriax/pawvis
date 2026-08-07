@@ -42,6 +42,27 @@ public enum ClickGesture: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// What a tracked hand must do before it controls the cursor. Tracking itself
+/// always runs while enabled — this gates only whether the hand may move the
+/// cursor and click.
+public enum ControlTrigger: String, Codable, CaseIterable, Sendable {
+    /// Show an open hand — all four fingers extended, thumb free — to take
+    /// control; close the hand into a fist for a moment to let go. Keeps a
+    /// hand that is merely visible (resting, typing, gesturing) from dragging
+    /// the cursor around. Default.
+    case openHand
+    /// Any tracked hand controls the cursor immediately (the original
+    /// behavior).
+    case anyHand
+
+    public var displayName: String {
+        switch self {
+        case .openHand: return "Open hand"
+        case .anyHand: return "Any detected hand"
+        }
+    }
+}
+
 /// How the interaction box — the slice of the camera view that maps onto the
 /// whole screen — is chosen.
 public enum ReachMode: String, Codable, CaseIterable, Sendable {
@@ -57,6 +78,11 @@ public enum ReachMode: String, Codable, CaseIterable, Sendable {
 /// moves the cursor and `clickGesture` clicks/drags. Pinch thresholds,
 /// smoothing, and slot-tracking defaults come from sporecaster's tuned values.
 public struct GestureConfig: Codable, Equatable, Sendable {
+    // MARK: Control trigger
+    /// What arms cursor control: `.openHand` requires showing an open hand
+    /// before the cursor follows; `.anyHand` follows any tracked hand.
+    public var controlTrigger: ControlTrigger = .openHand
+
     // MARK: Pinch detection
     /// Which hand shape clicks. The rest of the pinch tuning applies to all
     /// modes.
@@ -155,6 +181,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public static let `default` = GestureConfig()
 
     enum CodingKeys: String, CodingKey {
+        case controlTrigger
         case clickGesture
         case pinchEngageRatio, pinchReleaseHysteresis, pinchDebounceFrames
         case rightClickEnabled, rightClickFinger
@@ -170,6 +197,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let v = try? c.decodeIfPresent(ControlTrigger.self, forKey: .controlTrigger) { controlTrigger = v }
         if let v = try? c.decodeIfPresent(ClickGesture.self, forKey: .clickGesture) { clickGesture = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) { pinchEngageRatio = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseHysteresis) { pinchReleaseHysteresis = v }

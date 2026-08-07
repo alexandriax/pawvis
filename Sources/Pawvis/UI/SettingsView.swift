@@ -109,6 +109,8 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsTab(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            TrackingSettingsTab(store: store)
+                .tabItem { Label("Tracking", systemImage: "cursorarrow.motionlines") }
             GestureSettingsTab(store: store)
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
             DictationSettingsTab(store: store)
@@ -197,6 +199,50 @@ private struct GeneralSettingsTab: View {
     }
 }
 
+// MARK: - Tracking
+
+private struct TrackingSettingsTab: View {
+    @ObservedObject var store: SettingsStore
+
+    var body: some View {
+        SettingsPage {
+            SettingRow(title: "Take control of the cursor with", caption: triggerCaption) {
+                Picker("", selection: $store.settings.gestures.controlTrigger) {
+                    ForEach(ControlTrigger.allCases, id: \.self) { trigger in
+                        Text(trigger.displayName).tag(trigger)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+            }
+
+            Divider()
+
+            SettingToggle(
+                title: "Start tracking when Pawvis launches",
+                caption: "Off: hand tracking waits until you flip the switch in the menu bar.",
+                isOn: $store.settings.general.startTrackingOnLaunch)
+        }
+    }
+
+    private var triggerCaption: String {
+        switch store.settings.gestures.controlTrigger {
+        case .openHand:
+            // A fist physically contains the pinch and thumb-curl click
+            // gestures, so in those modes it clicks rather than parks.
+            let park: String
+            switch store.settings.gestures.clickGesture {
+            case .indexTap, .wholeHandPinch:
+                park = "Close your hand into a fist for a moment — or take it out of view — to park the cursor again."
+            case .pinch, .thumbCurl:
+                park = "Take your hand out of view to park the cursor again (with your click gesture, a closing fist reads as a click and holds it instead)."
+            }
+            return "Your hands are tracked whenever tracking is on, but the cursor only follows after you show an open hand — all four fingers up, thumb free. \(park) A click or drag in progress never lets go, and the claw dims while control is parked."
+        case .anyHand:
+            return "Any hand the camera sees moves the cursor immediately — no trigger gesture."
+        }
+    }
+}
+
 // MARK: - Gestures
 
 private struct GestureSettingsTab: View {
@@ -268,7 +314,7 @@ private struct GestureSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the click gesture, sensitivity, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the click gesture, control trigger, sensitivity, smoothing, reach, and timing to the tuned defaults.")
             }
         }
     }
