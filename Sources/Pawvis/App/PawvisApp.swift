@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // At most one automatic check per day (see UpdatePolicy).
         updater.checkIfDue()
+
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

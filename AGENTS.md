@@ -52,8 +52,12 @@ the right — both invisible in code review and obvious to the user.
    `.fixedSize(horizontal: false, vertical: true)` — that's what allows
    multi-line growth instead of truncation. `CaptionText` does it for you.
 4. Pages are inside a `ScrollView`, so adding rows can't clip the bottom.
-5. After changing settings UI, actually open the window and look at every tab
-   at the default size. Screenshot-review the longest strings.
+5. After changing settings UI, actually open the window and look at every tab.
+   There is no headless shortcut: SwiftUI's `ImageRenderer` produces blank
+   output for these views without a running app, and the `Settings` scene
+   can't be opened programmatically from a launch hook in a menu-bar-only
+   app. Run `make app`, open Pawvis, and check the tabs — paying attention to
+   the longest strings (the OpenAI dictation section has them).
 
 ## Gesture engine
 
