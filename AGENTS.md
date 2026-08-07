@@ -16,7 +16,7 @@ open build/Pawvis.app
 Extras:
 
 - `build/Pawvis.app/Contents/MacOS/Pawvis --selftest` — headless smoke test
-  (engine, settings round-trip, realtime protocol, dictation parser, keychain).
+  (engine, settings round-trip, launch-at-login rules, voice parser).
 - `PAWVIS_NO_AUTOSTART=1` — launch without starting tracking, so automated
   runs don't trip the camera permission prompt.
 - `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
@@ -69,7 +69,7 @@ the right — both invisible in code review and obvious to the user.
    output for these views without a running app, and the `Settings` scene
    can't be opened programmatically from a launch hook in a menu-bar-only
    app. Run `make app`, open Pawvis, and check the tabs — paying attention to
-   the longest strings (the OpenAI dictation section has them).
+   the longest strings (the Voice control and Tracking tabs have them).
 
 ## Launch at login
 
@@ -192,7 +192,7 @@ stays git-ignored: never commit it, never print it, never bundle it.
 
 `.github/workflows/ci.yml` runs `swift test`, `make app` and the bundle
 self-test on every push and PR. The runner is pinned to **macos-26** because
-the Apple dictation engine compiles against the macOS 26 SDK
+the Apple speech engine compiles against the macOS 26 SDK
 (`SpeechAnalyzer`); an older runner image will fail to build, not silently
 degrade. If GitHub retires that label, move to the next macOS image that ships
 Xcode 26+.
