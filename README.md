@@ -136,11 +136,12 @@ swift test          # 239 unit tests
 swift build         # debug build
 ```
 
-Icon art is derived deterministically from `claw.png` — no API, no key:
+Every icon asset — app icon, `.icns`, menu bar glyph, claw cursor — is derived
+from the hand-drawn `claw.png` by one deterministic script. Re-running it on an
+unchanged `claw.png` reproduces the committed art byte for byte:
 
 ```bash
-swift scripts/process_claw.swift        # app icon, menu bar glyph, claw cursor
-./scripts/generate_icon.sh --icns-only  # rebuild AppIcon.icns from that art
+make icon           # == swift scripts/process_claw.swift
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture notes, the settings-UI rules, and

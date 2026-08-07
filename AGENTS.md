@@ -181,11 +181,12 @@ band, tracking loss, and the guards. Copy lives in `SettingsView` and
 
 ## Secrets
 
-`.env` is git-ignored and holds `OPENAI_API_KEY` for local dictation testing
-and the icon-generation script. Never commit it, never print it, never bundle
-it. The shipping path for a user's key is the login keychain
-(`KeychainStore`), and keychain reads are lazy — reading at launch caused
-repeated system permission prompts.
+Pawvis needs no API key and talks to no network service. Speech recognition is
+Apple's on-device engine, visual commands go through on-device Apple
+Intelligence, and icon art is derived from `claw.png` by
+`scripts/process_claw.swift`, which calls nothing. Keep it that way — a feature
+that wants a key is a design discussion, not an implementation detail. `.env`
+stays git-ignored: never commit it, never print it, never bundle it.
 
 ## CI
 
