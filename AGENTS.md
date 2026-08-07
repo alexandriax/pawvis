@@ -107,6 +107,15 @@ it. The shipping path for a user's key is the login keychain
 (`KeychainStore`), and keychain reads are lazy — reading at launch caused
 repeated system permission prompts.
 
+## CI
+
+`.github/workflows/ci.yml` runs `swift test`, `make app` and the bundle
+self-test on every push and PR. The runner is pinned to **macos-26** because
+the Apple dictation engine compiles against the macOS 26 SDK
+(`SpeechAnalyzer`); an older runner image will fail to build, not silently
+degrade. If GitHub retires that label, move to the next macOS image that ships
+Xcode 26+.
+
 ## Releases
 
 Tag-driven and fully automated (`.github/workflows/release.yml`): push a
