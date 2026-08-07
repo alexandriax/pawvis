@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    # macOS 26 SDK is required: the Apple dictation engine uses SpeechAnalyzer.
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Test
+        run: swift test
+
+      - name: Build app bundle
+        run: make app
+
+      - name: Bundle self-test
+        run: build/Pawvis.app/Contents/MacOS/Pawvis --selftest

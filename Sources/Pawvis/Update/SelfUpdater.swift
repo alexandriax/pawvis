@@ -63,6 +63,9 @@ enum SelfUpdater {
         done
         rm -rf "\(currentBundle.path)"
         /usr/bin/ditto "\(staged.path)" "\(currentBundle.path)" || exit 1
+        # Downloads carry a quarantine flag; left in place, Gatekeeper blocks
+        # the app we just installed on the user's behalf.
+        /usr/bin/xattr -dr com.apple.quarantine "\(currentBundle.path)" 2>/dev/null
         rm -rf "\(staged.deletingLastPathComponent().path)"
         /usr/bin/open "\(currentBundle.path)"
         """

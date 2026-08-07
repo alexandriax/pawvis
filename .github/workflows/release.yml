@@ -1,0 +1,79 @@
+name: Release
+
+# Push a tag to ship:  git tag v1.2.3 && git push origin v1.2.3
+# Or run this workflow manually with a version — it creates the tag for you.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the leading v (e.g. 1.2.3)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+      - name: Test
+        run: swift test
+
+      - name: Build app bundle
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        # No Developer ID secrets here, so make_app.sh ad-hoc signs. The
+        # in-app updater only needs the signature to be internally valid
+        # (integrity); HTTPS to GitHub provides provenance.
+        run: make app
+
+      - name: Verify the bundle runs
+        run: build/Pawvis.app/Contents/MacOS/Pawvis --selftest
+
+      - name: Package
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          ZIP="dist/Pawvis-$VERSION.zip"
+          # ditto --keepParent preserves the bundle structure and its signature.
+          ditto -c -k --keepParent build/Pawvis.app "$ZIP"
+          shasum -a 256 "$ZIP" | tee "dist/Pawvis-$VERSION.zip.sha256"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Pawvis ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.package.outputs.zip }}
+            dist/Pawvis-${{ steps.version.outputs.version }}.zip.sha256
+          body: |
+            **Install:** download `Pawvis-${{ steps.version.outputs.version }}.zip`, unzip, and drag Pawvis.app to Applications.
+
+            Builds are ad-hoc signed rather than notarized, so on first launch macOS may warn — right-click the app and choose **Open**. Pawvis then grants itself updates from inside the app (Settings → About).
