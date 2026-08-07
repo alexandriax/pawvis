@@ -7,7 +7,6 @@ enum VoiceHUD: Equatable {
     case hidden
     case connecting
     case listening(wakeWord: String) // armed, waiting for the wake word
-    case typing(String)              // typing; associated value = latest transcript snippet
     case resolving                   // consulting on-screen context for a command
     case notice(String)              // transient confirmation ("Opening Safari")
     case error(String)
@@ -183,12 +182,8 @@ final class OverlayController {
         case .connecting:
             return .init(text: "🎤 Starting voice control…", background: NSColor.systemGray.withAlphaComponent(0.85))
         case .listening(let wakeWord):
-            return .init(text: "🎤 Say “\(wakeWord) …” — go to · type · press · open · click",
+            return .init(text: "🎤 Say “\(wakeWord) …” — open · go to · type · press · click",
                          background: PawvisTheme.blue.withAlphaComponent(0.88))
-        case .typing(let snippet):
-            let text = snippet.isEmpty ? "⌨️ Typing — pause or say “stop typing” to end"
-                : "⌨️ \(snippet)"
-            return .init(text: text, background: PawvisTheme.purple.withAlphaComponent(0.9))
         case .resolving:
             return .init(text: "✨ Looking at your screen…",
                          background: PawvisTheme.purple.withAlphaComponent(0.9))
