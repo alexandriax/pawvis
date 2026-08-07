@@ -7,14 +7,19 @@ public enum MouseButton: String, Codable, Equatable, Sendable {
 /// Discrete output of the gesture engine, consumed by the app's mouse
 /// controller. All positions are screen-normalized ([0,1], top-left origin).
 ///
-/// The gesture model is deliberately minimal: the thumb–index midpoint moves
-/// the cursor, closing that pinch presses the left button (click), moving
-/// while pinched drags, opening the pinch releases. Nothing else.
+/// The gesture model is deliberately minimal: the palm moves the cursor,
+/// dipping the index finger presses the left button (click), moving while
+/// dipped drags, lifting the finger releases; a second finger's dip does the
+/// same on the right button; and the scroll pose scrolls.
 public enum GestureEvent: Equatable, Sendable {
     case move(to: Vec2)
     case buttonDown(MouseButton, at: Vec2, clickCount: Int)
     case drag(MouseButton, to: Vec2)
     case buttonUp(MouseButton, at: Vec2, clickCount: Int)
+    /// Scroll-wheel travel in screen-normalized units: positive = scroll up
+    /// (toward the top of the document), matching Quartz's positive axis-1
+    /// wheel direction. The cursor does not move.
+    case scroll(deltaY: Double)
 }
 
 /// Per-hand overlay data: small dots for every detected fingertip.
@@ -42,6 +47,9 @@ public struct OverlayState: Equatable, Sendable {
     public var rightGrabbed: Bool = false
     /// True once a press has moved past the drag threshold.
     public var isDragging: Bool = false
+    /// True while the scroll pose is held: the cursor is parked
+    /// and vertical hand movement scrolls.
+    public var isScrolling: Bool = false
     /// Pinch strength ramp: 0 = tips comfortably apart, 1 = pinched. Drives the
     /// closing-ring feedback around the cursor. Pinned at 1 while *either*
     /// button is down — the ring says "you are pressing", not which finger.

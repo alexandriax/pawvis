@@ -29,32 +29,31 @@ resolved by on-device Apple Intelligence. Nothing you do leaves your Mac.
 
 ## Gestures
 
-Pick the click gesture that suits you in **Settings → Gestures**. Whichever
-you choose: the cursor follows your hand, holding the gesture drags, and a
-quick release is a clean click.
+Your hand is the mouse: the cursor rides your palm, and your fingers are the
+buttons. Everything below is tunable in **Settings → Gestures**.
 
-| Click gesture | How you click |
-|---|---|
-| **Mouse tap** (default) | Hold your hand open and dip your **index finger**, like tapping a mouse button. Measured against your middle finger, so tilting your whole hand can't click. |
-| **Whole-hand pinch** | Gather all your fingertips onto your thumb. Averaging four fingers makes false clicks rare. |
-| **High-five, thumb to click** | Hand open like a high-five; tuck your thumb across your palm. |
-| **Pinch** | Touch your thumb and index fingertip together. |
-
-- **Right-click** — in mouse-tap and high-five modes, dip a second finger
-  (pinky by default, configurable). Hold it to right-drag.
-- **Drag / hold** — keep the gesture held and move. Deliberate movement starts
+- **Move** — hold your hand open, fingers up, and move it.
+- **Click** — dip your **index finger**, like tapping a mouse button.
+  Measured against your middle finger, so tilting your whole hand can't
+  click. A quick release is always a clean click.
+- **Right-click** — dip a second finger (**pinky** by default, configurable).
+  Hold it to right-drag.
+- **Drag / hold** — keep the finger down and move. Deliberate movement starts
   a drag immediately; otherwise a short window protects quick clicks from
   turning into accidental drags. The window length is a slider.
-- **Double / triple click** — repeat the gesture quickly in the same spot.
+- **Double / triple click** — tap again quickly in the same spot.
+- **Scroll** — fold your **middle and ring fingers** in, index and pinky up,
+  then move your hand up and down. The cursor parks while the pose is held.
+  Toggle it — or invert the direction — in Settings.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a
   fixed area and a slider.
 
 The on-screen claw is your cursor: open while pointing, retracted and purple
-while the left button is held, blue for the right button, with a ring that
-tightens as your click gesture forms and a pulse confirming every click. Small
-dots mark each detected fingertip.
+while the left button is held, blue for the right button, ringed in light blue
+while scrolling, with a ring that tightens as your click forms and a pulse
+confirming every click. Small dots mark each detected fingertip.
 
 ## Voice control
 
@@ -115,7 +114,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 187 unit tests
+swift test          # 214 unit tests
 swift build         # debug build
 make icon           # regenerate icon art (needs OPENAI_API_KEY)
 ```
@@ -130,7 +129,7 @@ Sources/
   PawvisCore/          pure logic, unit-tested, no AppKit/AVFoundation
     Geometry/          Vec2 · One Euro filter · interaction-box mapper
     Hands/             21-landmark model · pinch/dip/curl metrics
-    Gestures/          GestureEngine: frames → clicks, drags, cursor moves
+    Gestures/          GestureEngine: frames → clicks, drags, scrolls, cursor moves
     VoiceControl/      wake-word + command parser · spoken URLs & key chords
     Update/            semantic versions · update-check policy
     Config/            settings tree (field-tolerant decoding)

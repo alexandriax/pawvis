@@ -120,7 +120,17 @@ final class OverlayController {
 
                 // No ring while control is parked: it advertises a click that
                 // can't happen until the trigger arms.
-                if config.showPinchRing, overlay.armed {
+                if config.showPinchRing, overlay.armed, overlay.isScrolling {
+                    // Scrolling: a light-blue ring around the parked claw
+                    // says "wheel mode" — distinct from both button tints.
+                    model.rings.append(.init(
+                        center: local,
+                        radius: 24,
+                        lineWidth: 3,
+                        strokeColor: PawvisTheme.blueLight,
+                        fillColor: PawvisTheme.blueLight.withAlphaComponent(0.25),
+                        alpha: 1))
+                } else if config.showPinchRing, overlay.armed {
                     let progress = overlay.closingProgress
                     let ringRadius: CGFloat = anyGrab
                         ? (overlay.isDragging ? 26 : 20)

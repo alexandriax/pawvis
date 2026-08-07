@@ -30,61 +30,42 @@ struct GestureGuideView: View {
     }
 
     private var pointingRows: [Row] {
-        let clickDetail: (move: String, click: String, letGo: String)
-        switch store.settings.gestures.clickGesture {
-        case .pinch:
-            clickDetail = (
-                move: "Move your hand — the claw cursor sits between your thumb and index fingertip.",
-                click: "Touch your thumb and index fingertip together briefly.",
-                letGo: "separate your fingers")
-        case .wholeHandPinch:
-            clickDetail = (
-                move: "Move your hand — the claw cursor rides your palm.",
-                click: "Gather all your fingertips onto your thumb briefly.",
-                letGo: "open your hand")
-        case .thumbCurl:
-            clickDetail = (
-                move: "Hold your hand open like a high-five and move it — the claw cursor rides your palm.",
-                click: "Tuck your thumb in across your palm.",
-                letGo: "swing your thumb back out")
-        case .indexTap:
-            clickDetail = (
-                move: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm.",
-                click: "Dip your index finger down, like tapping a mouse button (keep your other fingers up).",
-                letGo: "lift your index finger")
-        }
         var rows: [Row] = []
         if store.settings.gestures.controlTrigger == .openHand {
-            let park = [ClickGesture.indexTap, .wholeHandPinch]
-                .contains(store.settings.gestures.clickGesture)
-                ? "Make a brief fist to park it again."
-                : "Move your hand out of view to park it again (with your click gesture, a fist reads as a click)."
             rows.append(Row(
                 symbol: "hand.raised.fill",
                 title: "Take control",
-                detail: "Show the camera an open hand — all four fingers up — and the claw brightens: you have the cursor. Pawvis keeps watching while you type or rest, but the cursor stays parked until you show the trigger. \(park)"))
+                detail: "Show the camera an open hand — all four fingers up — and the claw brightens: you have the cursor. Pawvis keeps watching while you type or rest, but the cursor stays parked until you show the trigger. Make a brief fist to park it again."))
         }
         rows += [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move",
-                detail: clickDetail.move + " The ring around the claw tightens as the click gesture forms."),
+                detail: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm. The ring around the claw tightens as the click gesture forms."),
             Row(symbol: "hand.pinch.fill",
                 title: "Click",
-                detail: clickDetail.click + " Release quickly for a clean click — small wobbles are ignored. Twice quickly = double-click, three times = triple."),
+                detail: "Dip your index finger down, like tapping a mouse button (keep your other fingers up). Release quickly for a clean click — small wobbles are ignored. Twice quickly = double-click, three times = triple."),
             Row(symbol: "hand.draw.fill",
                 title: "Drag / hold",
-                detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you \(clickDetail.letGo). (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
+                detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you lift your index finger. (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
 
-        let gesture = store.settings.gestures.clickGesture
-        if store.settings.gestures.rightClickEnabled,
-           gesture == .indexTap || gesture == .thumbCurl {
+        if store.settings.gestures.rightClickEnabled {
             let fingerName = store.settings.gestures.rightClickFinger == .little
                 ? "pinky" : store.settings.gestures.rightClickFinger.rawValue
             rows.append(Row(
                 symbol: "hand.point.right.fill",
                 title: "Right-click",
                 detail: "Dip your \(fingerName) finger the same way — the claw turns blue while it's down. Hold it to right-drag."))
+        }
+
+        if store.settings.gestures.scrollEnabled {
+            let direction = store.settings.gestures.scrollInvert
+                ? "Move your hand up to scroll down and down to scroll up (you inverted the direction in Settings)."
+                : "Move your hand up to scroll up and down to scroll down."
+            rows.append(Row(
+                symbol: "arrow.up.arrow.down.circle.fill",
+                title: "Scroll",
+                detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
         }
         return rows
     }
