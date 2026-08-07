@@ -216,18 +216,16 @@ struct MenuContentView: View {
     private var voiceStatusText: String {
         let wakeWord = controller.settingsStore.settings.voiceControl.wakeWord
         switch voice.state {
-        case .off: return "Voice control off"
+        case .off: return "Voice control (beta) off"
         case .connecting: return "Voice control starting…"
         case .listening: return "Listening for “\(wakeWord) …”"
-        case .typing: return "Typing your words"
-        case .resolving: return "Looking at your screen…"
+        case .resolving: return "Working on your command…"
         case .error(let message): return message
         }
     }
 
     private var voiceIcon: String {
         switch voice.state {
-        case .typing: return "keyboard.fill"
         case .resolving: return "sparkles"
         case .error: return "mic.slash.fill"
         default: return "mic.fill"
@@ -239,7 +237,6 @@ struct MenuContentView: View {
         case .off: return .secondary
         case .connecting: return .orange
         case .listening: return .orange
-        case .typing: return .red
         case .resolving: return .purple
         case .error: return .red
         }

@@ -1,18 +1,18 @@
 import Foundation
 import PawvisCore
 
-/// Orchestrates voice control: the on-device speech engine feeds the
-/// wake-word command parser; commands run through the executor (and, for
-/// free-form ones, the visual-context resolver); typing mode drives synthetic
-/// keystrokes. Toggled from the menu bar.
+/// Orchestrates voice control (beta): the on-device speech engine feeds the
+/// wake-word parser; recognized commands run through the executor, and
+/// free-form ones go to the on-device intent mapper (or the opt-in agent
+/// CLI). Every command is one-shot — nothing keeps listening-side state
+/// between utterances, and speech without the wake word is ignored entirely.
 @MainActor
 final class VoiceController: ObservableObject {
     enum State: Equatable {
         case off
         case connecting
-        case listening   // armed; waiting for the wake word
-        case typing      // typing what you say
-        case resolving   // consulting the on-screen context for a command
+        case listening   // armed; every command starts with the wake word
+        case resolving   // consulting the on-device model / screen context
         case error(String)
 
         var isActive: Bool {
@@ -24,7 +24,6 @@ final class VoiceController: ObservableObject {
     }
 
     @Published private(set) var state: State = .off
-    @Published private(set) var lastTranscript: String = ""
     /// Transient confirmation ("Opening Safari"), auto-cleared.
     @Published private(set) var notice: String?
 
@@ -32,13 +31,14 @@ final class VoiceController: ObservableObject {
     private let typer = TextTyper()
     private let executor = CommandExecutor()
     private let screenContext = ScreenContextProvider()
+    private let agent = AgentCLIExecutor()
     /// The top-of-screen capsule showing what's being heard.
     let transcriptOverlay = TranscriptOverlay()
     private var engine: SpeechEngine?
     private var config = VoiceControlConfig()
-    private var pauseTimer: Timer?
     private var noticeTimer: Timer?
-    /// The in-flight utterance shown live in the capsule.
+    /// The in-flight utterance (shown in the capsule only once it starts
+    /// with the wake word).
     private var liveItemId: String?
     private var liveText = ""
 
@@ -49,7 +49,6 @@ final class VoiceController: ObservableObject {
         case .listening:
             if let notice { return .notice(notice) }
             return .listening(wakeWord: config.wakeWord)
-        case .typing: return .typing(String(lastTranscript.suffix(60)))
         case .resolving: return .resolving
         case .error(let message): return .error(message)
         }
@@ -78,7 +77,7 @@ final class VoiceController: ObservableObject {
     func start() {
         guard !state.isActive else { return }
         guard config.enabled else {
-            state = .error("Voice control is disabled in Settings")
+            state = .error("Voice control (beta) is off — enable it in Settings → Voice")
             return
         }
 
@@ -107,27 +106,24 @@ final class VoiceController: ObservableObject {
     func stop() {
         engine?.stop()
         engine = nil
-        pauseTimer?.invalidate()
-        pauseTimer = nil
         clearNotice()
         transcriptOverlay.hide()
         liveItemId = nil
         liveText = ""
         state = .off
-        lastTranscript = ""
     }
 
     private func launchEngine() {
         let engine = SpeechEngine(config: config)
         self.engine = engine
-        parser.beginListening()
         engine.onEvent = { [weak self] event in
             self?.handle(event)
         }
         engine.start()
-        // Warm the on-device model now so the first visual command doesn't
+        // Warm the on-device model now so the first mapped command doesn't
         // pay the ~5 s cold-start cost.
-        if config.visualContextEnabled, #available(macOS 26.0, *) {
+        if config.visualContextEnabled, config.agentExecutor.isEmpty, #available(macOS 26.0, *) {
+            IntentMapper.prewarm()
             VisualIntentResolver.prewarm()
         }
     }
@@ -135,7 +131,7 @@ final class VoiceController: ObservableObject {
     private func handle(_ event: SpeechEvent) {
         switch event {
         case .ready:
-            syncStateFromParser()
+            if state.isActive { state = .listening }
 
         case .delta(let itemId, let text):
             if itemId != liveItemId {
@@ -143,27 +139,27 @@ final class VoiceController: ObservableObject {
                 liveText = ""
             }
             liveText += text
-            transcriptOverlay.showLive(liveText.trimmingCharacters(in: .whitespacesAndNewlines))
-            let actions = parser.handleDelta(itemId: itemId, delta: text)
-            typer.perform(actions)
-            if parser.state == .typing {
-                lastTranscript += text
-                armPauseTimer() // speech is ongoing — push the pause out
+            // The capsule shows only speech addressed to Pawvis — ambient
+            // conversation is never displayed.
+            let live = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if parser.hasWakePrefix(live) {
+                transcriptOverlay.showLive(live)
             }
 
-        case .completed(let itemId, let transcript):
+        case .completed(_, let transcript):
             liveItemId = nil
             liveText = ""
+            guard parser.hasWakePrefix(transcript) else {
+                // A partial hypothesis may have matched and shown the
+                // capsule; the final says it wasn't for us.
+                transcriptOverlay.hide()
+                return
+            }
             transcriptOverlay.complete(transcript)
-            let result = parser.handleCompleted(itemId: itemId, transcript: transcript)
+            let result = parser.parse(transcript)
             typer.perform(result.typing)
-            lastTranscript = parser.state == .typing ? transcript : ""
-            syncStateFromParser()
-            armPauseTimer()
-            // Execute last: a .resolve command switches state to .resolving,
-            // which syncStateFromParser would otherwise stomp.
             if let command = result.command {
-                execute(command)
+                execute(command, fallbackTranscript: parser.wakeRemainder(transcript))
             }
 
         case .failed(let message):
@@ -175,42 +171,157 @@ final class VoiceController: ObservableObject {
 
     // MARK: - Commands
 
-    private func execute(_ command: VoiceCommand) {
+    private func execute(_ command: VoiceCommand, fallbackTranscript: String? = nil) {
         switch command {
         case .stopVoiceControl:
             stop()
         case .resolve(let transcript):
-            resolveWithContext(transcript)
+            handleFreeForm(transcript)
         default:
             Task { [weak self] in
                 guard let self else { return }
-                self.show(await self.executor.execute(command))
+                let outcome = await self.executor.execute(command)
+                // The grammar can mis-slice a garbled utterance ("open up
+                // safari please" → app "up safari please"). When an app
+                // command fails to resolve, give the intent mapper the whole
+                // phrase for a second opinion instead of surfacing the error.
+                if case .failed = outcome,
+                   let fallback = fallbackTranscript,
+                   Self.mapperCanRescue(command) {
+                    self.handleFreeForm(fallback)
+                } else {
+                    self.show(outcome)
+                }
             }
         }
     }
 
-    /// Free-form command: look at the screen around the pointer, ask the
-    /// on-device model what to do, escalate to the full screen if the target
-    /// isn't nearby.
-    private func resolveWithContext(_ transcript: String) {
+    /// Commands whose failures are usually a mis-sliced argument (worth an
+    /// AI retry) rather than a true "can't do that".
+    private static func mapperCanRescue(_ command: VoiceCommand) -> Bool {
+        switch command {
+        case .open, .switchTo: return true
+        default: return false
+        }
+    }
+
+    /// A command the deterministic grammar didn't recognize. The transcript
+    /// is already stripped of the wake word — clean for whichever brain
+    /// handles it: the opt-in agent CLI, or the on-device intent mapper
+    /// (with screen grounding for commands that refer to what's visible).
+    private func handleFreeForm(_ transcript: String) {
+        if let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor) {
+            runAgent(transcript, tool: tool)
+            return
+        }
         guard config.visualContextEnabled else {
             flashNotice("Didn't recognize a command: “\(transcript)”")
             return
         }
-        guard #available(macOS 26.0, *), VisualIntentResolver.isSupported else {
+        guard #available(macOS 26.0, *), IntentMapper.isSupported else {
             flashNotice("“\(transcript)” needs Apple Intelligence (macOS 26)")
             return
         }
         state = .resolving
         Task { [weak self] in
             guard let self else { return }
+            if Self.isTargetedClick(transcript) {
+                // "click <target>" is screen grounding by definition — skip
+                // the intent-mapping round trip.
+                let outcome = await VisualIntentResolver.resolveAndExecute(
+                    transcript: transcript,
+                    screenContext: self.screenContext,
+                    executor: self.executor)
+                self.show(outcome)
+            } else {
+                do {
+                    let intent = try await IntentMapper.map(transcript)
+                    await self.perform(intent, transcript: transcript)
+                } catch {
+                    Log.voice.error("Intent mapping failed: \(error.localizedDescription, privacy: .public)")
+                    self.flashNotice("⚠️ Couldn't work out “\(transcript)”")
+                }
+            }
+            if self.state == .resolving {
+                self.state = .listening
+            }
+        }
+    }
+
+    /// "click …" / "tap …" with any target words after the verb.
+    private static func isTargetedClick(_ transcript: String) -> Bool {
+        let tokens = VoiceControlParser.normalize(transcript)
+            .split(separator: " ").map(String.init)
+        guard let first = tokens.first else { return false }
+        var rest = tokens.dropFirst()
+        if first == "right" || first == "double", rest.first == "click" || rest.first == "tap" {
+            rest = rest.dropFirst()
+        } else if first != "click" && first != "tap" {
+            return false
+        }
+        return !rest.isEmpty
+    }
+
+    @available(macOS 26.0, *)
+    private func perform(_ intent: IntentMapper.MappedIntent, transcript: String) async {
+        // The model labels targeted clicks as pointer clicks but still
+        // extracts the target — that's a screen action.
+        let clickish = intent.action == .clickAtPointer
+            || intent.action == .rightClickAtPointer
+            || intent.action == .doubleClickAtPointer
+        if clickish, let target = intent.argument,
+           !target.trimmingCharacters(in: .whitespaces).isEmpty {
             let outcome = await VisualIntentResolver.resolveAndExecute(
                 transcript: transcript,
-                screenContext: self.screenContext,
-                executor: self.executor)
-            if self.state == .resolving {
-                self.syncStateFromParser()
+                screenContext: screenContext,
+                executor: executor)
+            show(outcome)
+            return
+        }
+
+        switch intent.action {
+        case .typeText:
+            guard let text = intent.argument, !text.isEmpty else {
+                flashNotice("Nothing to type")
+                return
             }
+            typer.perform([.type(text)])
+
+        case .stopListening:
+            stop()
+
+        case .screenAction:
+            // Refers to something visible: ground it against the screen
+            // around the pointer (escalating to the whole screen if needed).
+            let outcome = await VisualIntentResolver.resolveAndExecute(
+                transcript: transcript,
+                screenContext: screenContext,
+                executor: executor)
+            show(outcome)
+
+        case .none:
+            flashNotice("Didn't understand: “\(transcript)”")
+
+        default:
+            if let command = IntentMapper.command(for: intent) {
+                show(await executor.execute(command))
+            } else {
+                flashNotice("Didn't understand: “\(transcript)”")
+            }
+        }
+    }
+
+    /// Background agent run: voice control stays fully responsive (the run
+    /// doesn't hold the parser or the HUD state); the capsule shows a
+    /// persistent "working" note until the outcome flash replaces it.
+    private func runAgent(_ transcript: String, tool: AgentCLIExecutor.Tool) {
+        transcriptOverlay.showLive("🤖 \(tool.displayName): “\(transcript)”…")
+        notice = "\(tool.displayName) is working…"
+        let timeout = config.agentTimeoutSeconds
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.agent.run(
+                instruction: transcript, tool: tool, timeout: timeout)
             self.show(outcome)
         }
     }
@@ -221,28 +332,6 @@ final class VoiceController: ObservableObject {
             if let notice { flashNotice(notice) }
         case .failed(let message):
             flashNotice("⚠️ \(message)")
-        }
-    }
-
-    // MARK: - Typing pause
-
-    /// Typing mode ends on its own after a quiet spell — no stop phrase
-    /// needed. Re-armed on every delta and completed utterance.
-    private func armPauseTimer() {
-        pauseTimer?.invalidate()
-        pauseTimer = nil
-        guard parser.state == .typing else { return }
-        pauseTimer = Timer.scheduledTimer(
-            withTimeInterval: max(1.0, config.typingPauseSeconds), repeats: false
-        ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.state.isActive else { return }
-                if self.parser.handlePauseTimeout() {
-                    self.lastTranscript = ""
-                    self.syncStateFromParser()
-                    self.flashNotice("Stopped typing (pause)")
-                }
-            }
         }
     }
 
@@ -265,10 +354,5 @@ final class VoiceController: ObservableObject {
         noticeTimer?.invalidate()
         noticeTimer = nil
         notice = nil
-    }
-
-    private func syncStateFromParser() {
-        guard state.isActive else { return }
-        state = parser.state == .typing ? .typing : .listening
     }
 }

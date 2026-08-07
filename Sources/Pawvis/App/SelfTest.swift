@@ -66,21 +66,20 @@ func runSelfTest() -> Int32 {
     check("launchAtLogin.respectsSystemSettingsRemoval", LaunchAtLoginPolicy.reconcile(
         desired: true, status: .notRegistered, defaultApplied: true) == .adoptDisabled)
 
-    // Voice parser: wake word → typing, commands, fuzzy wake matching.
+    // Voice parser: one-shot commands, wake word required for each.
     let parser = VoiceControlParser()
-    parser.beginListening()
-    let typed = parser.handleCompleted(itemId: "a", transcript: "Pawvis type hello world")
-    check("voice.wakeTypeTypes",
-          typed.typing == [.type("hello world")] && parser.state == .typing)
-    _ = parser.handleCompleted(itemId: "b", transcript: "stop typing")
-    check("voice.stopPhraseStops", parser.state == .listening)
-    let goTo = parser.handleCompleted(itemId: "c", transcript: "Pawvis go to alexandria dot com")
+    let typed = parser.parse("Pawvis type hello world")
+    check("voice.wakeTypeIsOneShot", typed == VoiceParseResult(typing: [.type("hello world")]))
+    check("voice.noWakeNoAction", parser.parse("type hello world") == VoiceParseResult())
+    let goTo = parser.parse("Pawvis go to alexandria dot com")
     check("voice.goToParses", goTo.command == .goTo(url: "alexandria.com"))
-    let press = parser.handleCompleted(itemId: "d", transcript: "Pavis press command shift T")
+    let press = parser.parse("Pavis press command shift T")
     check("voice.pressWithFuzzyWake",
           press.command == .press(KeyChord(key: "t", modifiers: [.command, .shift])))
-    let open = parser.handleCompleted(itemId: "e", transcript: "Pawvis open Safari")
+    let open = parser.parse("Pawvis open Safari")
     check("voice.openParses", open.command == .open(app: "Safari"))
+    check("voice.wakePrefixGate",
+          parser.hasWakePrefix("Pawvis do the thing") && !parser.hasWakePrefix("random speech"))
 
     print(failures == 0 ? "SELFTEST OK (\(checks) checks)" : "SELFTEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
