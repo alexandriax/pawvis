@@ -61,23 +61,47 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Prefer a real signing identity: ad-hoc signatures change every build, which
-# silently invalidates the Accessibility grant (while System Settings still
-# shows it enabled) — the classic "cursor moves but nothing clicks" trap.
-# `|| true`: with `set -euo pipefail`, grep finding no identity (every CI
-# machine) would otherwise abort the whole build.
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"' || true)
+# Signing identity, best first. This matters more than it looks: macOS ties the
+# Accessibility grant to the app's *designated requirement*. A real identity
+# yields an identity-based requirement that survives rebuilds and updates; an
+# ad-hoc signature yields a per-binary cdhash, so every new build looks like a
+# different app and clicking silently stops working (while System Settings
+# still shows Pawvis as enabled).
+#
+# Developer ID is preferred over Apple Development so that locally built and
+# CI-released copies share one requirement — grant Accessibility once, and it
+# holds across updates.
+#
+# `|| true`: under `set -euo pipefail`, grep matching nothing (every CI machine
+# without secrets) would otherwise abort the build.
+find_identity() {
+    security find-identity -v -p codesigning 2>/dev/null \
+        | grep -o "\"$1: [^\"]*\"" | head -1 | tr -d '"' || true
+}
+
+IDENTITY=$(find_identity "Developer ID Application")
+SIGN_KIND="Developer ID"
+if [[ -z "$IDENTITY" ]]; then
+    IDENTITY=$(find_identity "Apple Development")
+    SIGN_KIND="Apple Development"
+fi
+
 if [[ -n "$IDENTITY" ]]; then
-    codesign --force --sign "$IDENTITY" "$APP"
+    SIGN_ARGS=(--force --sign "$IDENTITY" --timestamp)
+    if [[ "$SIGN_KIND" == "Developer ID" ]]; then
+        # Notarization requires the Hardened Runtime; the entitlements give the
+        # camera and microphone back under it.
+        SIGN_ARGS+=(--options runtime --entitlements Resources/Pawvis.entitlements)
+    fi
+    codesign "${SIGN_ARGS[@]}" "$APP"
     echo "Signed with '$IDENTITY' — stable identity, permissions survive rebuilds"
 else
     codesign --force --sign - "$APP"
     cat >&2 <<'WARN'
-WARNING: ad-hoc signed (no "Apple Development" identity found in the keychain).
-After EVERY rebuild you must remove and re-add Pawvis in
-System Settings → Privacy & Security → Accessibility, or clicks silently fail.
-(Sign into Xcode with an Apple ID to get a free stable identity.)
+WARNING: ad-hoc signed (no Developer ID or Apple Development identity found).
+Every rebuild changes the signature, so macOS silently drops the Accessibility
+grant: remove and re-add Pawvis in System Settings → Privacy & Security →
+Accessibility, or clicks will do nothing.
 WARN
 fi
 

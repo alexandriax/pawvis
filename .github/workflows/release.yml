@@ -22,6 +22,15 @@ jobs:
   release:
     runs-on: macos-26
 
+    env:
+      # Signing and notarization are optional: with no secrets set the build
+      # still succeeds, ad-hoc signed. See scripts/setup_signing.sh.
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,17 +49,54 @@ jobs:
       - name: Test
         run: swift test
 
+      - name: Import signing certificate
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          # A throwaway keychain, unlocked for this job only.
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security list-keychains -d user -s build.keychain login.keychain
+
+          echo "$MACOS_CERT_P12" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k build.keychain \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f /tmp/cert.p12
+          # Lets codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain > /dev/null
+          security find-identity -v -p codesigning build.keychain
+
       - name: Build app bundle
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
-        # No Developer ID secrets here, so make_app.sh ad-hoc signs. The
-        # in-app updater only needs the signature to be internally valid
-        # (integrity); HTTPS to GitHub provides provenance.
+        # make_app.sh picks Developer ID when the certificate imported above is
+        # present (hardened runtime + entitlements), else falls back to ad-hoc.
         run: make app
 
       - name: Verify the bundle runs
         run: build/Pawvis.app/Contents/MacOS/Pawvis --selftest
+
+      - name: Notarize and staple
+        if: env.NOTARY_KEY_P8 != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "$NOTARY_KEY_P8" | base64 --decode > /tmp/notary.p8
+          mkdir -p dist
+          # Notarization takes a zip; the ticket is stapled to the .app after.
+          ditto -c -k --keepParent build/Pawvis.app dist/notarize.zip
+          xcrun notarytool submit dist/notarize.zip \
+            --key /tmp/notary.p8 \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 30m
+          rm -f /tmp/notary.p8 dist/notarize.zip
+          xcrun stapler staple build/Pawvis.app
+          # Proves a fresh download will launch without a Gatekeeper prompt.
+          spctl -a -vv -t exec build/Pawvis.app
 
       - name: Package
         id: package
@@ -58,7 +104,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p dist
-          # ditto --keepParent preserves the bundle structure and its signature.
+          # ditto --keepParent preserves the bundle structure, its signature,
+          # and (after stapling) the notarization ticket.
           ditto -c -k --keepParent build/Pawvis.app "dist/Pawvis-$VERSION.zip"
           # Checksum from inside dist/ so the file names the zip alone — a
           # path prefix here would break `shasum -c` for anyone verifying.
@@ -77,4 +124,4 @@ jobs:
           body: |
             **Install:** download `Pawvis-${{ steps.version.outputs.version }}.zip`, unzip, and drag Pawvis.app to Applications.
 
-            Builds are ad-hoc signed rather than notarized, so on first launch macOS may warn — right-click the app and choose **Open**. Pawvis then grants itself updates from inside the app (Settings → About).
+            Pawvis can update itself from here — Settings → About → Check Now.
