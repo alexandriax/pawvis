@@ -1,15 +1,32 @@
 name: Release
 
-# Push a tag to ship:  git tag v1.2.3 && git push origin v1.2.3
-# Or run this workflow manually with a version — it creates the tag for you.
+# Merging a labelled pull request into main ships it: the label (major/minor/
+# patch, or no-release to skip) says how the version moves, and the tag is
+# created by the publish step at the end — so a build that falls over leaves no
+# tag pointing at a release that is not coming.
+#
+# The old ways still work. Push a tag:  git tag v1.2.3 && git push origin v1.2.3
+# Or run this workflow manually with a bump kind, or an exact version.
+#
+# Note the merge path needs the pull request to come from a branch in this repo,
+# not a fork: GITHUB_TOKEN is read-only on fork pull requests and cannot publish.
+# Release a fork's work by pushing the tag once it is on main.
 on:
+  pull_request:
+    types: [closed]
+    branches: [main]
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
+      bump:
+        description: How to move the version
+        type: choice
+        options: [patch, minor, major]
+        default: patch
       version:
-        description: 'Version to release, without the leading v (e.g. 1.2.3)'
-        required: true
+        description: 'Or an exact version, without the leading v (e.g. 1.2.3)'
+        required: false
 
 permissions:
   contents: write
@@ -19,7 +36,71 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: resolve the version
+    # A pull request that was closed without merging is not a release.
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.sha.outputs.sha }}
+      skip: ${{ steps.kind.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge commit on main, not refs/pull/N/merge — that ref is gone
+          # once the pull request closes.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
+          # next_version.sh reads the tag list; a shallow clone fetches none.
+          fetch-depth: 0
+
+      - name: Commit to release
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Which way does the version move
+        id: kind
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request)     kind="$(./scripts/select_bump.sh)" ;;
+            workflow_dispatch) kind="${{ inputs.bump }}" ;;
+            *)                kind="tag" ;;  # the tag already names the version
+          esac
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          if [ "$kind" = none ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::no-release label set — merged without cutting a release"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve version
+        id: version
+        if: steps.kind.outputs.skip != 'true'
+        env:
+          KIND: ${{ steps.kind.outputs.kind }}
+          EXACT: ${{ inputs.version }}
+        run: |
+          if [ -n "$EXACT" ]; then
+            VERSION="${EXACT#v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          elif [ "$KIND" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          else
+            # Writes version= and tag= to $GITHUB_OUTPUT itself.
+            VERSION="$(./scripts/next_version.sh "$KIND")"
+          fi
+          echo "Releasing $VERSION"
+
   release:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: macos-26
 
     env:
@@ -39,18 +120,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Releasing $VERSION"
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Test
         run: swift test
@@ -76,7 +147,7 @@ jobs:
 
       - name: Build app bundle
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         # make_app.sh picks Developer ID when the certificate imported above is
         # present (hardened runtime + entitlements), else falls back to ad-hoc.
@@ -88,7 +159,7 @@ jobs:
       - name: Notarize and staple
         if: env.NOTARY_KEY_P8 != '' || env.NOTARY_APPLE_ID != ''
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir -p dist
           # Notarization takes a zip; the ticket is stapled to the .app after.
@@ -132,8 +203,12 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Pawvis ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          # Creates the tag here, at the merge commit, when it does not already
+          # exist. Needed explicitly: on a pull_request event github.sha is the
+          # merge *ref*, which is not on main and would tag the wrong commit.
+          target_commitish: ${{ needs.prepare.outputs.sha }}
+          name: Pawvis ${{ needs.prepare.outputs.version }}
           generate_release_notes: true
           files: |
             dist/Pawvis.zip
