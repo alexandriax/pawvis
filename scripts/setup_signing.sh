@@ -9,13 +9,18 @@
 # What it needs first:
 #   1. A "Developer ID Application" certificate in your login keychain
 #      (already present if `security find-identity -v` lists one).
-#   2. An App Store Connect API key for notarization, from
-#      https://appstoreconnect.apple.com/access/integrations/api
-#      → Team Keys → "+" → Access: Developer. Download the .p8 ONCE and note
-#      the Key ID and Issuer ID.
+#   2. Notarization credentials — EITHER of:
+#      a. An app-specific password (simplest, instant): sign in at
+#         https://account.apple.com → Sign-In and Security → App-Specific
+#         Passwords → generate one for "Pawvis notarization".
+#      b. An App Store Connect API key:
+#         https://appstoreconnect.apple.com/access/integrations/api
+#         → Team Keys → "+" → Access: Developer. Downloads the .p8 once.
+#         (Requires requesting API access, which Apple reviews.)
 #
-# The secrets it sets: MACOS_CERT_P12, MACOS_CERT_PASSWORD, NOTARY_KEY_P8,
-# NOTARY_KEY_ID, NOTARY_ISSUER_ID.
+# Secrets it sets: MACOS_CERT_P12, MACOS_CERT_PASSWORD, plus either
+# NOTARY_APPLE_ID/NOTARY_PASSWORD/NOTARY_TEAM_ID or
+# NOTARY_KEY_P8/NOTARY_KEY_ID/NOTARY_ISSUER_ID.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -58,22 +63,49 @@ unset P12_PASSWORD
 echo "✓ MACOS_CERT_P12, MACOS_CERT_PASSWORD set"
 
 # -------------------------------------------------------------- notarization
+# The team ID is the parenthesised code in the certificate name.
+TEAM_ID=$(sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p' <<<"$IDENTITY")
+
 echo
-read -rp "Path to your App Store Connect .p8 key (blank to skip notarization): " P8_PATH
-if [[ -n "$P8_PATH" ]]; then
+echo "Notarization removes the right-click → Open prompt on a fresh download."
+echo "  1) App-specific password  (simplest — account.apple.com, instant)"
+echo "  2) App Store Connect API key (.p8)"
+echo "  3) Skip for now"
+read -rp "Choose [1/2/3]: " NOTARY_CHOICE
+
+case "${NOTARY_CHOICE:-3}" in
+  1)
+    read -rp "Apple ID email: " APPLE_ID
+    read -rsp "App-specific password (xxxx-xxxx-xxxx-xxxx): " ASP; echo
+    read -rp "Team ID [$TEAM_ID]: " ENTERED_TEAM
+    TEAM_ID="${ENTERED_TEAM:-$TEAM_ID}"
+    [[ -n "$APPLE_ID" && -n "$ASP" && -n "$TEAM_ID" ]] || {
+        echo "All three are required" >&2; exit 1; }
+
+    printf '%s' "$APPLE_ID" | gh secret set NOTARY_APPLE_ID --repo "$REPO"
+    printf '%s' "$ASP"      | gh secret set NOTARY_PASSWORD --repo "$REPO"
+    printf '%s' "$TEAM_ID"  | gh secret set NOTARY_TEAM_ID  --repo "$REPO"
+    unset ASP
+    echo "✓ NOTARY_APPLE_ID, NOTARY_PASSWORD, NOTARY_TEAM_ID set"
+    ;;
+  2)
+    read -rp "Path to the .p8 key: " P8_PATH
     P8_PATH="${P8_PATH/#\~/$HOME}"
     [[ -f "$P8_PATH" ]] || { echo "No such file: $P8_PATH" >&2; exit 1; }
-    read -rp "Key ID (the 10-character ID from the key's filename): " KEY_ID
+    read -rp "Key ID (10 characters, from the key's filename): " KEY_ID
     read -rp "Issuer ID (UUID shown above the key list): " ISSUER_ID
 
     base64 -i "$P8_PATH" | gh secret set NOTARY_KEY_P8 --repo "$REPO"
-    printf '%s' "$KEY_ID" | gh secret set NOTARY_KEY_ID --repo "$REPO"
+    printf '%s' "$KEY_ID"    | gh secret set NOTARY_KEY_ID    --repo "$REPO"
     printf '%s' "$ISSUER_ID" | gh secret set NOTARY_ISSUER_ID --repo "$REPO"
     echo "✓ NOTARY_KEY_P8, NOTARY_KEY_ID, NOTARY_ISSUER_ID set"
-else
-    echo "Skipped notarization secrets — releases will be signed but not"
-    echo "notarized, so a fresh download still needs right-click → Open."
-fi
+    ;;
+  *)
+    echo "Skipped notarization — releases will be signed but not notarized,"
+    echo "so a fresh download still needs right-click → Open. (The signature"
+    echo "alone is what keeps Accessibility working across updates.)"
+    ;;
+esac
 
 echo
 echo "Done. Secrets on $REPO:"

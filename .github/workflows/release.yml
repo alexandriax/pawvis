@@ -27,9 +27,15 @@ jobs:
       # still succeeds, ad-hoc signed. See scripts/setup_signing.sh.
       MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
       MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      # Notarization takes either an App Store Connect API key…
       NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+      # …or an Apple ID with an app-specific password, which needs no API
+      # access request. Either set is enough.
+      NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+      NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+      NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -80,20 +86,31 @@ jobs:
         run: build/Pawvis.app/Contents/MacOS/Pawvis --selftest
 
       - name: Notarize and staple
-        if: env.NOTARY_KEY_P8 != ''
+        if: env.NOTARY_KEY_P8 != '' || env.NOTARY_APPLE_ID != ''
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          echo "$NOTARY_KEY_P8" | base64 --decode > /tmp/notary.p8
           mkdir -p dist
           # Notarization takes a zip; the ticket is stapled to the .app after.
           ditto -c -k --keepParent build/Pawvis.app dist/notarize.zip
-          xcrun notarytool submit dist/notarize.zip \
-            --key /tmp/notary.p8 \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER_ID" \
-            --wait --timeout 30m
-          rm -f /tmp/notary.p8 dist/notarize.zip
+
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            echo "$NOTARY_KEY_P8" | base64 --decode > /tmp/notary.p8
+            xcrun notarytool submit dist/notarize.zip \
+              --key /tmp/notary.p8 \
+              --key-id "$NOTARY_KEY_ID" \
+              --issuer "$NOTARY_ISSUER_ID" \
+              --wait --timeout 30m
+            rm -f /tmp/notary.p8
+          else
+            xcrun notarytool submit dist/notarize.zip \
+              --apple-id "$NOTARY_APPLE_ID" \
+              --password "$NOTARY_PASSWORD" \
+              --team-id "$NOTARY_TEAM_ID" \
+              --wait --timeout 30m
+          fi
+
+          rm -f dist/notarize.zip
           xcrun stapler staple build/Pawvis.app
           # Proves a fresh download will launch without a Gatekeeper prompt.
           spctl -a -vv -t exec build/Pawvis.app
