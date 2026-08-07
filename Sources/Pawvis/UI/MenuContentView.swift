@@ -1,6 +1,27 @@
 import PawvisCore
 import SwiftUI
 
+/// Readable buttons on the translucent menu material: white text on a solid
+/// purple chip in dark mode, purple text on a faint purple chip in light mode.
+/// (Plain purple text was illegible against the dark vibrancy background.)
+struct PawvisButtonStyle: ButtonStyle {
+    @Environment(\.colorScheme) private var scheme
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(scheme == .dark
+                          ? PawvisTheme.purpleUI
+                          : PawvisTheme.purpleUI.opacity(0.14)))
+            .foregroundStyle(scheme == .dark ? Color.white : PawvisTheme.purpleUI)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
 /// The MenuBarExtra dropdown: live status, master toggles, permission
 /// warnings, and navigation to settings / gesture guide.
 struct MenuContentView: View {
@@ -63,7 +84,7 @@ struct MenuContentView: View {
                 Button(dictation.state.isActive ? "Stop" : "Start") {
                     dictation.toggle()
                 }
-                .controlSize(.small)
+                .buttonStyle(PawvisButtonStyle())
                 .disabled(!controller.settingsStore.settings.dictation.enabled
                           && !dictation.state.isActive)
             }
@@ -128,7 +149,7 @@ struct MenuContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button(warning.action, action: warning.handler)
-                .controlSize(.small)
+                .buttonStyle(PawvisButtonStyle())
         }
     }
 
@@ -144,7 +165,7 @@ struct MenuContentView: View {
                 NSApplication.shared.terminate(nil)
             }
         }
-        .controlSize(.small)
+        .buttonStyle(PawvisButtonStyle())
     }
 
     /// LSUIElement apps don't activate when a window opens, so the Settings
