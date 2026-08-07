@@ -5,14 +5,14 @@ import Foundation
 /// timestamps, so every behavior is unit-testable.
 ///
 /// The gesture model is intentionally minimal:
-///   hand tracked        → the cursor follows the thumb–index midpoint
-///   thumb meets index   → left button down (click; twice quickly = double-click)
-///   move while pinched  → drag
-///   open the pinch      → button up
+///   hand tracked        → the cursor follows the click gesture's pointer
+///   the gesture closes  → left button down (click; twice quickly = double-click)
+///   move while closed   → drag
+///   the gesture opens   → button up
 ///
-/// The two tips converge toward their midpoint as the pinch closes, so the
-/// cursor holds still through a click on its own — no rollback, anchor, or
-/// freeze logic needed.
+/// Which shape clicks is `config.clickGesture`; every mode reduces to one
+/// scale-normalized ratio crossing a threshold, and each pairs with a pointer
+/// the gesture itself barely moves — so a click doesn't shift the cursor.
 ///
 /// Input hands are in **camera space**: normalized [0,1], x right, y down,
 /// unmirrored. The engine mirrors, maps through the interaction box, and
@@ -24,6 +24,12 @@ public final class GestureEngine {
         didSet {
             if config.smoothing != oldValue.smoothing {
                 for i in slots.indices { slots[i].setFilterParams(config.smoothing) }
+            }
+            if config.clickGesture != oldValue.clickGesture {
+                // The new mode's ratio says nothing about the old mode's hold,
+                // so switching mid-pinch would strand the button down. The up
+                // rides out with the next frame (or the next forceRelease).
+                pendingEvents = forceRelease(at: lastHandTime)
             }
         }
     }
@@ -71,6 +77,15 @@ public final class GestureEngine {
     /// `strengthCeiling`, 1 once the tips are `strengthSpan` closer.
     private static let strengthCeiling = 0.9
     private static let strengthSpan = 0.5
+    /// The other modes' ratios sit in a narrower band than the thumb–index gap,
+    /// so their ring ramps over this much above their own engage threshold.
+    private static let modeStrengthSpan = 0.45
+
+    /// Joint confidence required to *engage*. Vision reports low confidence
+    /// exactly when it is guessing at overlapping or foreshortened joints —
+    /// which is when phantom clicks come from. Above `minJointConfidence` so a
+    /// shaky joint still holds and releases normally.
+    private static let engageConfidenceFloor = 0.40
 
     private var slots: [HandSlot]
     private var primarySlotID: Int?
@@ -81,6 +96,9 @@ public final class GestureEngine {
     private var pinched = false
     private var engageFrames = 0
     private var releaseFrames = 0
+    /// Events produced outside `process` (a mid-session mode switch), flushed
+    /// ahead of the next frame's.
+    private var pendingEvents: [GestureEvent] = []
 
     // Double-click chaining.
     private var lastUpTime: TimeInterval = -.infinity
@@ -92,7 +110,8 @@ public final class GestureEngine {
     /// Release a held pinch (used on shutdown / tracking disable so the button
     /// is never left stuck down).
     public func forceRelease(at time: TimeInterval) -> [GestureEvent] {
-        var events: [GestureEvent] = []
+        var events = pendingEvents
+        pendingEvents = []
         if let p = press {
             events.append(.buttonUp(.left, at: cursor ?? p.downAt, clickCount: p.clickCount))
         }
@@ -115,13 +134,15 @@ public final class GestureEngine {
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
-        var events: [GestureEvent] = []
+        var events = pendingEvents
+        pendingEvents = []
         var overlay = OverlayState()
 
         let usableHands = frame.hands.filter { $0.confidence >= config.minHandConfidence }
 
         guard !usableHands.isEmpty else {
-            return handleNoHands(at: frame.time)
+            let (noHandEvents, noHandOverlay) = handleNoHands(at: frame.time)
+            return (events + noHandEvents, noHandOverlay)
         }
 
         // 1. Assign hands to persistent slots, map to screen space, smooth.
@@ -142,29 +163,36 @@ public final class GestureEngine {
             thresholds: config.poseThresholds,
             minJointConfidence: config.minJointConfidence)
 
-        // 3. Cursor follows the pinch midpoint (the tips converge onto it, so a
-        // click barely moves it).
-        if let pointer = features?.pointerPoint(.pinchMidpoint) {
+        // 3. Cursor follows the mode's pointer (chosen so closing the gesture
+        // barely moves it).
+        if let pointer = pointerPoint(features, hand: primary.hand) {
             let clamped = pointer.clampedToUnit()
             if var p = press {
-                // Micro-movement suppression: quick clicks shouldn't smear
-                // into drags; past the threshold it's a real drag.
-                if p.dragging || clamped.distance(to: p.downAt) >= config.dragActivationDistance {
+                // Tap window then micro-movement suppression (see dragThreshold).
+                if p.dragging || clamped.distance(to: p.downAt) >= dragThreshold(for: p, at: frame.time) {
                     p.dragging = true
                     press = p
-                    cursor = clamped
-                    events.append(.drag(.left, to: clamped))
+                    // Deadband against the last *emitted* position, which is
+                    // what `cursor` holds — so the button-up still lands on the
+                    // last place we sent the pointer.
+                    if clamped.distance(to: cursor ?? p.downAt) >= config.jitterDeadband {
+                        cursor = clamped
+                        events.append(.drag(.left, to: clamped))
+                    }
                 }
-            } else if cursor != clamped {
+            } else if cursor.map({ clamped.distance(to: $0) >= config.jitterDeadband / 2 }) ?? true {
                 cursor = clamped
                 events.append(.move(to: clamped))
             }
         }
 
-        // 4. Pinch state: thumb–index ratio with hysteresis + debounce.
-        let ratio = features?.pinchRatio(to: .index)
+        // 4. Gesture state: the mode's ratio with hysteresis + debounce.
+        let ratio = modeRatio(features)
         if let ratio {
-            updatePinch(ratio: ratio, at: frame.time, events: &events)
+            updatePinch(ratio: ratio,
+                        confident: engageConfident(primary.hand),
+                        at: frame.time,
+                        events: &events)
         } else {
             // A tip below the confidence floor must never flap the state: hold
             // it and restart both counters. Real dropouts go through the
@@ -188,12 +216,69 @@ public final class GestureEngine {
         return (events, overlay)
     }
 
+    // MARK: - Click gesture modes
+
+    /// The scale-normalized quantity this mode thresholds. nil (a joint below
+    /// `minJointConfidence`) holds the current state, as it always has.
+    private func modeRatio(_ features: HandFeatures?) -> Double? {
+        guard let features else { return nil }
+        switch config.clickGesture {
+        case .pinch: return features.pinchRatio(to: .index)
+        case .wholeHandPinch: return features.wholeHandPinchRatio()
+        case .thumbCurl: return features.thumbCurlRatio()
+        }
+    }
+
+    /// The landmark that drives the cursor in this mode — always one the click
+    /// motion itself doesn't move.
+    private func pointerPoint(_ features: HandFeatures?, hand: Hand) -> Vec2? {
+        guard let features else { return nil }
+        switch config.clickGesture {
+        case .pinch:
+            return features.pointerPoint(.pinchMidpoint)
+        case .wholeHandPinch, .thumbCurl:
+            // Both gestures are all-finger motion; only the palm holds still
+            // through them. (A fingertip centroid shifts ~0.08 screen-normalized
+            // when the hand opens to release — enough to smear every click
+            // into a drag.)
+            return features.pointerPoint(.palmCenter)
+        }
+    }
+
+    /// Whether every joint this mode's ratio depends on is tracked confidently
+    /// enough to *start* a press. Consulted only on the engage side.
+    private func engageConfident(_ hand: Hand) -> Bool {
+        func confident(_ joint: HandJoint) -> Bool {
+            hand.confidence(for: joint) >= Self.engageConfidenceFloor
+        }
+        switch config.clickGesture {
+        case .pinch:
+            return confident(.thumbTip) && confident(.indexTip)
+        case .wholeHandPinch:
+            guard confident(.thumbTip) else { return false }
+            // Only the tips that fed the mean this frame have to be trustworthy.
+            let used = Finger.allCases.filter {
+                hand.point(for: $0.tip, minConfidence: config.minJointConfidence) != nil
+            }
+            return !used.isEmpty && used.allSatisfy { confident($0.tip) }
+        case .thumbCurl:
+            return confident(.thumbTip) && confident(.indexMCP)
+        }
+    }
+
     // MARK: - Pinch detection
 
-    private func updatePinch(ratio: Double, at time: TimeInterval, events: inout [GestureEvent]) {
+    private func updatePinch(ratio: Double, confident: Bool, at time: TimeInterval,
+                             events: inout [GestureEvent]) {
         if !pinched {
             releaseFrames = 0
-            guard ratio < config.pinchEngageRatio else {
+            guard confident else {
+                // Reset, not pause: a phantom needs *consecutive* confident
+                // frames, and low confidence is where phantoms live.
+                engageFrames = 0
+                return
+            }
+            guard ratio < config.engageRatio else {
                 engageFrames = 0 // includes the hysteresis band: no transition there
                 return
             }
@@ -204,7 +289,7 @@ public final class GestureEngine {
             beginPress(at: time, events: &events)
         } else {
             engageFrames = 0
-            guard ratio > config.pinchReleaseRatio else {
+            guard ratio > config.releaseRatio else {
                 releaseFrames = 0
                 return
             }
@@ -216,11 +301,33 @@ public final class GestureEngine {
         }
     }
 
-    /// 0 when the tips sit comfortably apart, 1 while pinched.
+    /// 0 when the hand sits comfortably open, 1 while pinched.
     private func closingProgress(for ratio: Double?) -> Double {
         if pinched { return 1 }
         guard let ratio else { return 0 }
-        return min(max((Self.strengthCeiling - ratio) / Self.strengthSpan, 0), 1)
+        let progress: Double
+        switch config.clickGesture {
+        case .pinch:
+            progress = (Self.strengthCeiling - ratio) / Self.strengthSpan
+        case .wholeHandPinch, .thumbCurl:
+            // Anchored on this mode's own engage threshold: their ratios never
+            // reach sporecaster's thumb–index range, so the fixed ramp would
+            // read full long before the click.
+            progress = ((config.engageRatio + Self.modeStrengthSpan) - ratio) / Self.modeStrengthSpan
+        }
+        return min(max(progress, 0), 1)
+    }
+
+    // MARK: - Drag activation
+
+    /// How far the pointer must leave the press point to drag. Inside the tap
+    /// window only a deliberate flick qualifies — everything smaller is the
+    /// wobble of a hand closing and opening, and used to smear clicks into
+    /// one-pixel drags.
+    private func dragThreshold(for press: PressState, at time: TimeInterval) -> Double {
+        time - press.downTime < config.dragStartDelay
+            ? config.dragIntentDistance
+            : config.dragActivationDistance
     }
 
     private func beginPress(at time: TimeInterval, events: inout [GestureEvent]) {

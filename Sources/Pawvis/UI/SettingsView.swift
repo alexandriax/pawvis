@@ -87,18 +87,31 @@ private struct GestureSettingsTab: View {
 
     var body: some View {
         Form {
-            Text("Move your hand to point · pinch thumb and index finger to click · hold the pinch and move to drag.")
-                .font(.callout)
+            Picker("Click gesture", selection: $store.settings.gestures.clickGesture) {
+                ForEach(ClickGesture.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            Text(clickGestureCaption)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
             LabeledSlider(
-                label: "Pinch sensitivity",
-                caption: "Right = a lighter pinch clicks. Left = your fingertips must nearly touch.",
+                label: "Sensitivity",
+                caption: "Right = a lighter gesture clicks. Left = it must close more fully.",
                 value: $store.settings.gestures.pinchEngageRatio,
                 range: 0.30...0.60)
+
+            LabeledSlider(
+                label: "Click vs. grab",
+                caption: "Releases faster than this are clean clicks (small wobbles ignored). Hold longer — or move deliberately — to start a drag. Far left = drags start immediately.",
+                value: Binding(
+                    get: { store.settings.gestures.dragStartDelay },
+                    set: { store.settings.gestures.dragStartDelay = $0 }),
+                range: 0...0.6)
 
             Divider()
 
@@ -125,6 +138,17 @@ private struct GestureSettingsTab: View {
             }
         }
         .padding(20)
+    }
+
+    private var clickGestureCaption: String {
+        switch store.settings.gestures.clickGesture {
+        case .pinch:
+            return "Touch your thumb and index fingertip together to click. The cursor rides their midpoint."
+        case .wholeHandPinch:
+            return "Gather all your fingertips onto your thumb to click — deliberate, and averaging four fingers makes phantom clicks much rarer. The cursor rides your palm."
+        case .thumbCurl:
+            return "Hold your hand open like a high-five and tuck your thumb across your palm to click. Your fingers stay visible to the camera, so tracking stays solid. The cursor rides your palm."
+        }
     }
 }
 

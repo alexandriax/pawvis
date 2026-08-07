@@ -53,6 +53,66 @@ final class HandFeaturesTests: XCTestCase {
                              "index must read clearly open during a middle-finger pinch")
     }
 
+    // MARK: Whole-hand pinch
+
+    func testWholeHandPinchRatioIsMeanTipDistance() {
+        let gathered = features(SyntheticHand.wholeHandPinch(gap: 0.3))
+        XCTAssertEqual(gathered.wholeHandPinchRatio()!, 0.3, accuracy: 1e-9)
+        XCTAssertGreaterThan(features(SyntheticHand.openRelaxed()).wholeHandPinchRatio()!, 1.5)
+    }
+
+    func testThumbIndexPinchLeavesWholeHandMeanHigh() {
+        // The averaging is the whole point: the three idle fingers keep the mean
+        // far from the threshold even with the index tip touching the thumb.
+        let f = features(SyntheticHand.pinchIndex(gap: 0.1))
+        XCTAssertEqual(f.pinchRatio(to: .index)!, 0.1, accuracy: 1e-9)
+        XCTAssertGreaterThan(f.wholeHandPinchRatio()!, 0.7)
+    }
+
+    func testWholeHandPinchRatioAveragesOnlyVisibleTips() {
+        var hand = SyntheticHand.wholeHandPinch(gap: 0.3)
+        // Ring and little occluded: the mean is over index + middle, which sit
+        // at the same gap, so it still reads 0.3.
+        hand.setPoint(hand[.ringTip]!, for: .ringTip, confidence: 0.1)
+        hand.setPoint(hand[.littleTip]!, for: .littleTip, confidence: 0.1)
+        let f = HandFeatures(hand: hand, minJointConfidence: 0.25)!
+        XCTAssertEqual(f.wholeHandPinchRatio()!, 0.3, accuracy: 1e-9)
+
+        // Down to one visible tip it degenerates into a plain pinch — no answer.
+        hand.setPoint(hand[.middleTip]!, for: .middleTip, confidence: 0.1)
+        XCTAssertNil(HandFeatures(hand: hand, minJointConfidence: 0.25)!.wholeHandPinchRatio())
+    }
+
+    func testWholeHandPinchRatioNilWithoutThumb() {
+        var hand = SyntheticHand.wholeHandPinch(gap: 0.3)
+        hand.setPoint(hand[.thumbTip]!, for: .thumbTip, confidence: 0.1)
+        XCTAssertNil(HandFeatures(hand: hand, minJointConfidence: 0.25)!.wholeHandPinchRatio())
+    }
+
+    // MARK: Thumb curl
+
+    func testThumbCurlRatioDropsWhenTucked() {
+        let hand = SyntheticHand.highFive(thumbTucked: true)
+        let f = features(hand)
+        let expected = hand[.thumbTip]!.distance(to: hand[.indexMCP]!) / f.scale
+        XCTAssertEqual(f.thumbCurlRatio()!, expected, accuracy: 1e-9)
+        XCTAssertLessThan(f.thumbCurlRatio()!, 0.36, "a tucked thumb clears the default engage threshold")
+        XCTAssertGreaterThan(features(SyntheticHand.highFive(thumbTucked: false)).thumbCurlRatio()!, 0.6)
+    }
+
+    func testThumbCurlRatioNilWhenJointMissing() {
+        var hand = SyntheticHand.highFive(thumbTucked: true)
+        hand.setPoint(hand[.indexMCP]!, for: .indexMCP, confidence: 0.1)
+        XCTAssertNil(HandFeatures(hand: hand, minJointConfidence: 0.25)!.thumbCurlRatio())
+    }
+
+    func testThumbExtendedStillThresholdsTheCurlRatio() {
+        // The shared metric must not have moved isThumbExtended's line.
+        XCTAssertEqual(features(SyntheticHand.openRelaxed()).isThumbExtended(), true)
+        XCTAssertEqual(features(SyntheticHand.fist()).isThumbExtended(), false)
+        XCTAssertEqual(features(SyntheticHand.highFive(thumbTucked: true)).isThumbExtended(), false)
+    }
+
     // MARK: Finger extension
 
     func testExtensionOnOpenHand() {

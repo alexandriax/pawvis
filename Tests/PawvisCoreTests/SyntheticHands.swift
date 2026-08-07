@@ -172,6 +172,44 @@ enum SyntheticHand {
                      wrist: wrist, scale: scale)
     }
 
+    /// All four fingertips gathered onto the thumb tip — the whole-hand pinch.
+    /// Every tip sits exactly `gap`·scale from the thumb in a small fan, so the
+    /// mean (what `wholeHandPinchRatio` measures) is exactly `gap`. The cluster
+    /// sits where `pinchIndex` closes, so the two poses share a pointer spot.
+    static func wholeHandPinch(gap: Double, wrist: Vec2 = Vec2(0.5, 0.7),
+                               scale: Double = 0.15) -> Hand {
+        var hand = build(pose: Pose(fingerDirs: relaxedDirs, thumbTipOffset: thumbExtendedOffset),
+                         wrist: wrist, scale: scale)
+        let cluster = wrist + Vec2(-0.57, -1.30) * scale
+        hand.setPoint(cluster, for: .thumbTip)
+        hand.setPoint(wrist.lerp(to: cluster, t: 0.72), for: .thumbIP)
+        hand.setPoint(wrist.lerp(to: cluster, t: 0.45), for: .thumbMP)
+
+        // Fan the tips back toward the knuckles they came from (index widest,
+        // little tightest) so the fingers reach in without crossing.
+        let base = 0.485 // cluster → middleMCP, radians in y-down space
+        let spread: [Finger: Double] = [.index: 0.45, .middle: 0.15, .ring: -0.15, .little: -0.45]
+        for finger in Finger.allCases {
+            let angle = base + spread[finger]!
+            let tip = cluster + Vec2(cos(angle), sin(angle)) * (gap * scale)
+            let mcp = hand[finger.mcp]!
+            hand.setPoint(tip, for: finger.tip)
+            hand.setPoint(mcp.lerp(to: tip, t: 0.55), for: finger.pip)
+            hand.setPoint(mcp.lerp(to: tip, t: 0.8), for: finger.dip)
+        }
+        return hand
+    }
+
+    /// Flat "high-five" hand for the thumb-curl click mode: fingers extended,
+    /// thumb either out to the side (open) or tucked across the index knuckle
+    /// (clicked). Untucked it is the same shape as `openRelaxed`.
+    static func highFive(thumbTucked: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+                         scale: Double = 0.15) -> Hand {
+        build(pose: Pose(fingerDirs: relaxedDirs,
+                         thumbTipOffset: thumbTucked ? thumbTuckedOffset : thumbExtendedOffset),
+              wrist: wrist, scale: scale)
+    }
+
     /// Shaka: thumb + little out, middle three curled.
     static func shaka(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
         build(pose: Pose(fingerDirs: relaxedDirs,

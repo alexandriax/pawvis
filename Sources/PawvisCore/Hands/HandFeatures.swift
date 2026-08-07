@@ -82,6 +82,26 @@ public struct HandFeatures {
         return thumb.midpoint(with: tip)
     }
 
+    /// Mean thumb-tip→fingertip distance over the fingers currently visible,
+    /// normalized by hand scale: the whole-hand pinch measure. Averaging over
+    /// four fingers is what makes it robust — a single collapsed tip distance
+    /// (perspective, occlusion) can't drag the mean below the threshold on its
+    /// own. Needs at least two fingertips; one is just a plain pinch.
+    public func wholeHandPinchRatio() -> Double? {
+        guard let thumb = point(.thumbTip) else { return nil }
+        let tips = Finger.allCases.compactMap { point($0.tip) }
+        guard tips.count >= 2 else { return nil }
+        return tips.reduce(0.0) { $0 + thumb.distance(to: $1) } / Double(tips.count) / scale
+    }
+
+    /// Thumb-tip→index-knuckle distance, normalized by hand scale: low means
+    /// the thumb is tucked across the palm. `isThumbExtended()` thresholds this
+    /// same quantity.
+    public func thumbCurlRatio() -> Double? {
+        guard let thumbTip = point(.thumbTip), let indexMCP = point(.indexMCP) else { return nil }
+        return thumbTip.distance(to: indexMCP) / scale
+    }
+
     // MARK: - Finger extension
 
     /// Angle at the PIP joint; π means dead straight.
@@ -101,8 +121,7 @@ public struct HandFeatures {
     }
 
     public func isThumbExtended() -> Bool? {
-        guard let thumbTip = point(.thumbTip), let indexMCP = point(.indexMCP) else { return nil }
-        return thumbTip.distance(to: indexMCP) / scale > thresholds.thumbExtendedRatio
+        thumbCurlRatio().map { $0 > thresholds.thumbExtendedRatio }
     }
 
     // MARK: - Poses

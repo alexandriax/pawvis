@@ -30,16 +30,34 @@ struct GestureGuideView: View {
     }
 
     private var pointingRows: [Row] {
-        [
+        let clickDetail: (move: String, click: String, letGo: String)
+        switch store.settings.gestures.clickGesture {
+        case .pinch:
+            clickDetail = (
+                move: "Move your hand — the claw cursor sits between your thumb and index fingertip.",
+                click: "Touch your thumb and index fingertip together briefly.",
+                letGo: "separate your fingers")
+        case .wholeHandPinch:
+            clickDetail = (
+                move: "Move your hand — the claw cursor rides your palm.",
+                click: "Gather all your fingertips onto your thumb briefly.",
+                letGo: "open your hand")
+        case .thumbCurl:
+            clickDetail = (
+                move: "Hold your hand open like a high-five and move it — the claw cursor rides your palm.",
+                click: "Tuck your thumb in across your palm.",
+                letGo: "swing your thumb back out")
+        }
+        return [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move",
-                detail: "Move your hand — the claw cursor sits between your thumb and index fingertip. The ring around it tightens as they come together."),
+                detail: clickDetail.move + " The ring around the claw tightens as the click gesture forms."),
             Row(symbol: "hand.pinch.fill",
                 title: "Click",
-                detail: "Touch your thumb and index fingertip together briefly. The claw retracts and turns purple while pinched. Pinch twice quickly for a double-click, three times for a triple."),
+                detail: clickDetail.click + " Release quickly for a clean click — small wobbles are ignored. Twice quickly = double-click, three times = triple."),
             Row(symbol: "hand.draw.fill",
                 title: "Drag / hold",
-                detail: "Pinch and hold while you move — grab a window title bar, select text, drag files. The button stays down as long as you hold the pinch; separate your fingers to let go."),
+                detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you \(clickDetail.letGo). (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
     }
 
