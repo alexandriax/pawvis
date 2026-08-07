@@ -145,6 +145,13 @@ guess here ships a version number that can never be taken back. The labels
 themselves come from `.github/workflows/labels.yml`, run once from the Actions
 tab.
 
+**Label the pull requests you open, at creation** — `gh pr create --label …`,
+not as an afterthought for a human to fill in. `patch` for fixes, docs and
+chores; `minor` for features; `major` for anything that breaks existing
+behavior; `no-release` when the change should not ship on its own (CI
+plumbing, this file). Pick deliberately: the label *is* the release decision,
+because merging is publishing.
+
 On merge, `.github/workflows/release.yml` tests, stamps the version into
 `Info.plist`, bundles, signs with Developer ID, notarizes, staples, zips, and
 publishes a GitHub Release with `Pawvis.zip` plus its `.sha256`. Pushing a `v*`
