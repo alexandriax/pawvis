@@ -55,7 +55,13 @@ public final class VoiceControlParser {
         guard !trimmed.isEmpty, let remainder = matchWakeWord(in: trimmed) else {
             return VoiceParseResult()
         }
+        return parseRemainder(remainder)
+    }
 
+    /// Interpret an utterance whose wake word is already stripped — either by
+    /// `parse` above, or spoken in an earlier segment and stitched on by the
+    /// utterance gate's capture window.
+    public func parseRemainder(_ remainder: String) -> VoiceParseResult {
         // Leading noise only: a trailing "." or "!" belongs to typed payloads
         // ("Pawvis type hello world."); command targets are trimmed in
         // payload().
