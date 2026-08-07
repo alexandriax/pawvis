@@ -420,10 +420,41 @@ private struct VoiceControlSettingsTab: View {
 
             Divider()
 
+            SettingRow(
+                title: "Free-form commands (“\(wake) \(String(repeating: "_", count: 6))”) are handled by",
+                caption: agentPickerCaption
+            ) {
+                Picker("", selection: $store.settings.voiceControl.agentExecutor) {
+                    Text("Apple Intelligence (on-device)").tag("")
+                    Text("Claude Code (agent CLI)").tag("claude")
+                    Text("Codex CLI (agent CLI)").tag("codex")
+                }
+                .frame(maxWidth: 320)
+            }
+
+            if let tool = AgentCLIExecutor.Tool(rawValue: store.settings.voiceControl.agentExecutor) {
+                if let path = AgentCLIExecutor.binaryPath(for: tool) {
+                    CaptionText("Found \(tool.displayName) at \(path).")
+                } else {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        CaptionText("\(tool.displayName) wasn't found on this Mac — install it (and sign in) or pick another handler.")
+                    }
+                }
+
+                LabeledSlider(
+                    label: "Agent timeout",
+                    caption: "Give up on a background run after \(Int(store.settings.voiceControl.agentTimeoutSeconds)) s.",
+                    value: $store.settings.voiceControl.agentTimeoutSeconds,
+                    range: 30...300)
+            }
+
             SettingToggle(
                 title: "Visual commands (Apple Intelligence)",
-                caption: "Commands the grammar doesn't know (“\(wake) click sign in”) are resolved against the screen near your pointer with the on-device model — widening to the whole screen only when needed. Nothing leaves your Mac.",
+                caption: "With the on-device handler, free-form commands (“\(wake) click sign in”) are resolved against the screen near your pointer — widening to the whole screen only when needed. Nothing leaves your Mac.",
                 isOn: $store.settings.voiceControl.visualContextEnabled)
+                .disabled(!store.settings.voiceControl.agentExecutor.isEmpty)
 
             if store.settings.voiceControl.visualContextEnabled,
                screenRecording != .granted {
@@ -447,6 +478,13 @@ private struct VoiceControlSettingsTab: View {
             }
         }
         .onAppear { screenRecording = Permissions.screenRecording() }
+    }
+
+    private var agentPickerCaption: String {
+        if store.settings.voiceControl.agentExecutor.isEmpty {
+            return "On-device: private, fast, limited to what's visible on screen."
+        }
+        return "⚠️ The agent CLI runs in the background with ALL permission checks bypassed and can execute anything on this Mac that you could — a spoken command becomes an autonomous agent run. It's slower than on-device, far more capable, and reports back in the top-of-screen capsule."
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {

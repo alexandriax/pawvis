@@ -37,6 +37,13 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     public var transcriptOverlaySeconds: Double = 3.0
     /// Keep the capsule up until it's clicked instead of auto-hiding.
     public var transcriptOverlayManualDismiss: Bool = false
+    /// Hand free-form commands to an installed agent CLI instead of the
+    /// on-device visual resolver: "" (off), "claude" (Claude Code), or
+    /// "codex" (Codex CLI). The agent runs headless with permission checks
+    /// bypassed — strictly opt-in.
+    public var agentExecutor: String = ""
+    /// Seconds before a background agent run is abandoned.
+    public var agentTimeoutSeconds: Double = 120
     /// Quiet time (legacy SFSpeechRecognizer path only) before an utterance is
     /// considered done.
     public var vadSilenceMs: Int = 500
@@ -48,6 +55,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         case typingPauseSeconds, inlineCommandsEnabled, typeDeltasImmediately
         case visualContextEnabled, vadSilenceMs
         case transcriptOverlayEnabled, transcriptOverlaySeconds, transcriptOverlayManualDismiss
+        case agentExecutor, agentTimeoutSeconds
     }
 
     /// Field-tolerant decoding, matching GestureConfig's behavior.
@@ -67,5 +75,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayEnabled) { transcriptOverlayEnabled = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .transcriptOverlaySeconds) { transcriptOverlaySeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayManualDismiss) { transcriptOverlayManualDismiss = v }
+        if let v = try? c.decodeIfPresent(String.self, forKey: .agentExecutor) { agentExecutor = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .agentTimeoutSeconds) { agentTimeoutSeconds = v }
     }
 }

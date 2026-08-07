@@ -79,6 +79,15 @@ key, no cloud (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
 Visual commands need macOS 26 with Apple Intelligence enabled; everything
 else works without it.
 
+### Agent hand-off (optional)
+
+Settings → Voice can route free-form commands to an installed agent CLI —
+**Claude Code** or **Codex** — instead of the on-device resolver. "Pawvis,
+*anything*" then becomes a headless, auto-approved agent run in the
+background, and the result (or error) flashes in the top-of-screen capsule.
+Strictly opt-in and off by default: the agent runs with permission checks
+bypassed and can do anything you could do at the keyboard.
+
 ## Install
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)

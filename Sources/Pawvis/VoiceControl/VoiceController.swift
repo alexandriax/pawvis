@@ -32,6 +32,7 @@ final class VoiceController: ObservableObject {
     private let typer = TextTyper()
     private let executor = CommandExecutor()
     private let screenContext = ScreenContextProvider()
+    private let agent = AgentCLIExecutor()
     /// The top-of-screen capsule showing what's being heard.
     let transcriptOverlay = TranscriptOverlay()
     private var engine: SpeechEngine?
@@ -189,10 +190,15 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// Free-form command: look at the screen around the pointer, ask the
-    /// on-device model what to do, escalate to the full screen if the target
-    /// isn't nearby.
+    /// Free-form command: hand it to the configured agent CLI if one is
+    /// selected; otherwise look at the screen around the pointer and ask the
+    /// on-device model, escalating to the full screen if the target isn't
+    /// nearby.
     private func resolveWithContext(_ transcript: String) {
+        if let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor) {
+            runAgent(transcript, tool: tool)
+            return
+        }
         guard config.visualContextEnabled else {
             flashNotice("Didn't recognize a command: “\(transcript)”")
             return
@@ -211,6 +217,21 @@ final class VoiceController: ObservableObject {
             if self.state == .resolving {
                 self.syncStateFromParser()
             }
+            self.show(outcome)
+        }
+    }
+
+    /// Background agent run: voice control stays fully responsive (the run
+    /// doesn't hold the parser or the HUD state); the capsule shows a
+    /// persistent "working" note until the outcome flash replaces it.
+    private func runAgent(_ transcript: String, tool: AgentCLIExecutor.Tool) {
+        transcriptOverlay.showLive("🤖 \(tool.displayName): “\(transcript)”…")
+        notice = "\(tool.displayName) is working…"
+        let timeout = config.agentTimeoutSeconds
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.agent.run(
+                instruction: transcript, tool: tool, timeout: timeout)
             self.show(outcome)
         }
     }
