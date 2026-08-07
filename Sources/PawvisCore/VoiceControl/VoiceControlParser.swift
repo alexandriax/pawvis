@@ -1,8 +1,7 @@
 import Foundation
 
-/// What one finalized utterance amounts to: typing actions to perform (text
-/// mode, including reconciliation of streamed deltas) and/or a machine
-/// command to execute.
+/// What one finalized utterance amounts to: typing actions to perform and/or
+/// a machine command to execute.
 public struct VoiceParseResult: Equatable, Sendable {
     public var typing: [TypingAction] = []
     public var command: VoiceCommand? = nil
@@ -13,219 +12,66 @@ public struct VoiceParseResult: Equatable, Sendable {
     }
 }
 
-/// Turns transcription events into typing actions and voice commands.
+/// Turns finalized utterances into typing actions and voice commands.
 ///
-/// States: `listening` (armed — only wake-word utterances do anything) and
-/// `typing` (after "Pawvis type …": every utterance is typed until a stop
-/// phrase or a pause). The parser is pure state-machine logic: no audio, no
-/// screen access, no key events.
+/// Stateless by design: EVERY command must start with the wake word — speech
+/// without it is ignored, and no utterance changes how the next one is
+/// interpreted. "Pawvis type hello" types "hello" and that's the end of it;
+/// there is no lingering dictation mode to fall out of.
 public final class VoiceControlParser {
-    public enum State: Equatable, Sendable {
-        case listening
-        case typing
-    }
-
     public var config: VoiceControlConfig
-    public private(set) var state: State = .listening
-
-    /// True when the last emitted character was whitespace/newline (controls
-    /// smart spacing between utterances).
-    private var lastEndedInWhitespace = true
-
-    /// Per-item record of exactly what we've already typed for that utterance
-    /// (delta mode), including any smart-space prefix.
-    private var emittedForItem: [String: String] = [:]
-    /// Whether a smart space was decided for the item when its first delta was
-    /// typed (so reconciliation recomputes the same desired string).
-    private var spacePrefixForItem: [String: Bool] = [:]
 
     public init(config: VoiceControlConfig = VoiceControlConfig()) {
         self.config = config
     }
 
-    /// Reset to the armed state (called when voice control is toggled on).
-    public func beginListening() {
-        state = .listening
-        lastEndedInWhitespace = true
-        emittedForItem.removeAll()
-        spacePrefixForItem.removeAll()
+    /// True when the utterance begins with the wake word or a close
+    /// mishearing — used to gate the transcript capsule so ambient speech is
+    /// never displayed.
+    public func hasWakePrefix(_ transcript: String) -> Bool {
+        wakeRemainder(transcript) != nil
     }
 
-    /// The typing-pause timer fired: leave typing mode.
-    /// Returns true if the state changed.
-    @discardableResult
-    public func handlePauseTimeout() -> Bool {
-        guard state == .typing else { return false }
-        state = .listening
-        lastEndedInWhitespace = true
-        return true
+    /// The utterance with the wake word stripped (nil when it doesn't start
+    /// with the wake word) — what the free-form handlers should receive.
+    public func wakeRemainder(_ transcript: String) -> String? {
+        matchWakeWord(in: transcript.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    // MARK: - Event handling
-
-    /// Streamed partial transcript. Only types in delta mode while typing.
-    public func handleDelta(itemId: String, delta: String) -> [TypingAction] {
-        guard config.typeDeltasImmediately, state == .typing, !delta.isEmpty else { return [] }
-
-        var out: [TypingAction] = []
-        var emission = delta
-        if emittedForItem[itemId] == nil {
-            // First delta of this utterance: decide smart spacing once.
-            let needsSpace = needsSmartSpace(before: delta)
-            spacePrefixForItem[itemId] = needsSpace
-            if needsSpace { emission = " " + emission }
-            emittedForItem[itemId] = ""
-        }
-        emittedForItem[itemId]! += emission
-        out.append(.type(emission))
-        updateWhitespaceState(afterTyping: emission)
-        return out
-    }
-
-    /// Final transcript for one utterance. Interprets wake words, commands,
-    /// and stop phrases; reconciles anything already typed via deltas.
-    public func handleCompleted(itemId: String, transcript: String) -> VoiceParseResult {
-        let alreadyTyped = emittedForItem.removeValue(forKey: itemId) ?? ""
-        let hadSpacePrefix = spacePrefixForItem.removeValue(forKey: itemId)
-
-        let interpretation = interpret(transcript)
-
-        // Compute the exact string this utterance should leave behind.
-        var desiredText: String? = nil
-        switch interpretation.emission {
-        case .text(let text):
-            if text.isEmpty {
-                desiredText = ""
-            } else {
-                let needsSpace = hadSpacePrefix ?? needsSmartSpace(before: text)
-                desiredText = (needsSpace ? " " : "") + text
-            }
-        case .key:
-            desiredText = nil // keys can't be expressed as typed text
-        case .none:
-            desiredText = ""
-        }
-
-        var out: [TypingAction] = []
-
-        if let desired = desiredText {
-            if desired == alreadyTyped {
-                // Deltas already produced exactly the right text.
-            } else if !alreadyTyped.isEmpty, desired.hasPrefix(alreadyTyped) {
-                let remainder = String(desired.dropFirst(alreadyTyped.count))
-                if !remainder.isEmpty {
-                    out.append(.type(remainder))
-                    updateWhitespaceState(afterTyping: remainder)
-                }
-            } else {
-                if !alreadyTyped.isEmpty {
-                    out.append(.backspace(alreadyTyped.count))
-                }
-                if !desired.isEmpty {
-                    out.append(.type(desired))
-                    updateWhitespaceState(afterTyping: desired)
-                } else if !alreadyTyped.isEmpty {
-                    lastEndedInWhitespace = true
-                }
-            }
-        } else {
-            // Key emission (inline command): un-type any deltas, press the key.
-            if !alreadyTyped.isEmpty {
-                out.append(.backspace(alreadyTyped.count))
-            }
-            if case .key(let chord) = interpretation.emission {
-                out.append(.key(chord))
-                lastEndedInWhitespace = true
-            }
-        }
-
-        state = interpretation.newState
-        if state == .listening {
-            // Leaving typing mode: forget spacing context.
-            lastEndedInWhitespace = true
-        }
-        return VoiceParseResult(typing: out, command: interpretation.command)
-    }
-
-    // MARK: - Interpretation
-
-    private enum Emission: Equatable {
-        case none
-        case text(String)
-        case key(KeyChord)
-    }
-
-    private struct Interpretation {
-        var emission: Emission = .none
-        var newState: State
-        var command: VoiceCommand? = nil
-    }
-
-    private func interpret(_ transcript: String) -> Interpretation {
+    /// Interpret one finalized utterance.
+    public func parse(_ transcript: String) -> VoiceParseResult {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return Interpretation(newState: state) }
-
-        switch state {
-        case .listening:
-            guard let remainder = matchWakeWord(in: trimmed) else {
-                return Interpretation(newState: .listening)
-            }
-            return interpretCommand(remainder)
-
-        case .typing:
-            if let remainder = matchWakeWord(in: trimmed) {
-                // Addressed directly while typing ("Pawvis press enter",
-                // "Pawvis stop typing"): a command, never typed text. Checked
-                // before stop phrases so "Pawvis stop typing" doesn't type
-                // "Pawvis".
-                return interpretCommand(remainder)
-            }
-            if let prefix = matchStopPhrase(in: trimmed) {
-                return Interpretation(
-                    emission: prefix.isEmpty ? .none : .text(prefix),
-                    newState: .listening)
-            }
-            if config.inlineCommandsEnabled, let inline = matchInlineCommand(trimmed) {
-                return inline
-            }
-            return Interpretation(emission: .text(trimmed), newState: .typing)
+        guard !trimmed.isEmpty, let remainder = matchWakeWord(in: trimmed) else {
+            return VoiceParseResult()
         }
-    }
 
-    /// Parse what follows the wake word. Falls back to `.resolve` (on-screen
-    /// context + on-device model) for anything the grammar doesn't cover.
-    private func interpretCommand(_ remainder: String) -> Interpretation {
         // Leading noise only: a trailing "." or "!" belongs to typed payloads
-        // ("type hello world."); command targets are trimmed in payload().
+        // ("Pawvis type hello world."); command targets are trimmed in
+        // payload().
         let cleaned = Self.trimLeadingNoise(remainder)
         guard !cleaned.isEmpty else {
             // Bare "Pawvis" — attention with nothing to do.
-            return Interpretation(newState: state)
+            return VoiceParseResult()
         }
         let tokens = Self.normalize(cleaned).split(separator: " ").map(String.init)
 
-        // Stop phrases addressed via wake word ("Pawvis stop typing").
-        if state == .typing, matchStopPhrase(in: cleaned) != nil {
-            return Interpretation(newState: .listening)
-        }
-
-        if let interpretation = matchTypeVerb(cleaned: cleaned, tokens: tokens) {
-            return interpretation
+        // "type …" / "dictate …" types its payload — one-shot.
+        if let payload = typePayload(cleaned: cleaned, tokens: tokens) {
+            return VoiceParseResult(typing: payload.isEmpty ? [] : [.type(payload)])
         }
         if let command = matchCommandVerb(cleaned: cleaned, tokens: tokens) {
-            return Interpretation(newState: stateAfter(command), command: command)
+            return VoiceParseResult(command: command)
         }
-        return Interpretation(newState: state, command: .resolve(transcript: cleaned))
+        return VoiceParseResult(command: .resolve(transcript: cleaned))
     }
 
-    /// "type …" / "dictate …" enters typing mode and types the payload.
-    private func matchTypeVerb(cleaned: String, tokens: [String]) -> Interpretation? {
+    // MARK: - Command grammar
+
+    /// "type …" / "dictate …" / "write …" → the original-cased payload.
+    private func typePayload(cleaned: String, tokens: [String]) -> String? {
         let typeVerbs: Set<String> = ["type", "dictate", "write"]
         guard let first = tokens.first, typeVerbs.contains(first) else { return nil }
-        let payload = Self.trimLeadingNoise(String(dropFirstWord(of: cleaned)))
-        return Interpretation(
-            emission: payload.isEmpty ? .none : .text(payload),
-            newState: .typing)
+        return Self.trimLeadingNoise(String(dropFirstWord(of: cleaned)))
     }
 
     private func matchCommandVerb(cleaned: String, tokens: [String]) -> VoiceCommand? {
@@ -286,11 +132,6 @@ public final class VoiceControlParser {
         }
 
         return nil
-    }
-
-    private func stateAfter(_ command: VoiceCommand) -> State {
-        if case .stopVoiceControl = command { return .listening }
-        return state
     }
 
     private func scrollCommand(from tokens: [String]) -> VoiceCommand {
@@ -411,52 +252,10 @@ public final class VoiceControlParser {
         return true
     }
 
-    // MARK: - Stop phrases & inline commands
-
-    /// If the utterance is (or ends with) a stop phrase, returns the content
-    /// before it ("wrap it up stop typing" → "wrap it up"; "stop typing" → "").
-    private func matchStopPhrase(in transcript: String) -> String? {
-        let normalized = Self.normalize(transcript)
-        for stop in config.stopPhrases {
-            let s = Self.normalize(stop)
-            guard !s.isEmpty else { continue }
-            if normalized == s { return "" }
-            if normalized.hasSuffix(" " + s) {
-                // Find the stop phrase's start in the original (case-insensitive
-                // search from the end) and keep what precedes it.
-                if let range = transcript.range(of: stop, options: [.caseInsensitive, .backwards]) {
-                    let prefix = String(transcript[..<range.lowerBound])
-                    return Self.trimTrailingNoise(prefix)
-                }
-                return ""
-            }
-        }
-        return nil
-    }
-
-    /// Spoken whole-utterance commands while typing, no wake word needed:
-    /// "new line", "new paragraph", "press enter", "press tab", …
-    private func matchInlineCommand(_ transcript: String) -> Interpretation? {
-        let tokens = Self.normalize(transcript).split(separator: " ").map(String.init)
-        switch tokens.joined(separator: " ") {
-        case "new line", "newline":
-            return Interpretation(emission: .text("\n"), newState: .typing)
-        case "new paragraph":
-            return Interpretation(emission: .text("\n\n"), newState: .typing)
-        default:
-            break
-        }
-        if tokens.count >= 2, tokens[0] == "press" || tokens[0] == "hit",
-           let chord = SpokenKeyParser.chord(from: Array(tokens.dropFirst())) {
-            return Interpretation(emission: .key(chord), newState: .typing)
-        }
-        return nil
-    }
-
     // MARK: - Text helpers
 
     /// Lowercase, strip punctuation, collapse whitespace — for matching only.
-    static func normalize(_ s: String) -> String {
+    public static func normalize(_ s: String) -> String {
         let lowered = s.lowercased()
         let stripped = lowered.unicodeScalars.filter {
             !CharacterSet.punctuationCharacters.contains($0)
@@ -486,21 +285,5 @@ public final class VoiceControlParser {
             result.removeLast()
         }
         return result
-    }
-
-    private static let noSpaceBeforePrefixes: Set<Character> = [
-        ".", ",", "!", "?", ";", ":", ")", "]", "}", "'", "”", "%",
-    ]
-
-    private func needsSmartSpace(before text: String) -> Bool {
-        guard !lastEndedInWhitespace, let first = text.first else { return false }
-        if first.isWhitespace || first.isNewline { return false }
-        return !Self.noSpaceBeforePrefixes.contains(first)
-    }
-
-    private func updateWhitespaceState(afterTyping text: String) {
-        if let last = text.last {
-            lastEndedInWhitespace = last.isWhitespace || last.isNewline
-        }
     }
 }

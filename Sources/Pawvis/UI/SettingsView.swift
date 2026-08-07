@@ -115,7 +115,7 @@ struct SettingsView: View {
             GestureSettingsTab(store: store)
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
             VoiceControlSettingsTab(store: store)
-                .tabItem { Label("Voice", systemImage: "mic") }
+                .tabItem { Label("Voice (Beta)", systemImage: "mic") }
             AboutTab(updater: updater)
                 .tabItem { Label("About", systemImage: "pawprint") }
         }
@@ -379,15 +379,15 @@ private struct VoiceControlSettingsTab: View {
     var body: some View {
         SettingsPage {
             SettingToggle(
-                title: "Enable voice control",
-                caption: "Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.",
+                title: "Enable voice control (beta)",
+                caption: "Off by default while in beta. Recognition runs entirely on this Mac — nothing leaves it. First use may download a speech model.",
                 isOn: $store.settings.voiceControl.enabled)
 
             Divider()
 
             SettingRow(
                 title: "Wake word",
-                caption: "Address Pawvis by saying this first: “\(wake) go to github.com”, “\(wake) type hello”, “\(wake) press enter”, “\(wake) open Safari”, “\(wake) click”, “\(wake) scroll down”."
+                caption: "Every command starts with this word — speech without it is ignored. “\(wake) go to github.com”, “\(wake) type hello”, “\(wake) press enter”, “\(wake) open Safari”, “\(wake) click”, “\(wake) scroll down”."
             ) {
                 TextField("", text: $store.settings.voiceControl.wakeWord)
                     .textFieldStyle(.roundedBorder)
@@ -401,31 +401,6 @@ private struct VoiceControlSettingsTab: View {
                 TextField("", text: listBinding($store.settings.voiceControl.wakeWordAliases))
                     .textFieldStyle(.roundedBorder)
             }
-
-            Divider()
-
-            LabeledSlider(
-                label: "Typing pause",
-                caption: "While typing (“\(wake) type …”), this much silence ends typing mode: \(String(format: "%.1f", store.settings.voiceControl.typingPauseSeconds)) s.",
-                value: $store.settings.voiceControl.typingPauseSeconds,
-                range: 1.0...6.0)
-
-            SettingRow(
-                title: "Stop phrases (comma-separated)",
-                caption: "Saying one of these while typing also ends typing mode."
-            ) {
-                TextField("", text: listBinding($store.settings.voiceControl.stopPhrases))
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            SettingToggle(
-                title: "Spoken commands while typing (“new line”, “new paragraph”, “press enter”)",
-                isOn: $store.settings.voiceControl.inlineCommandsEnabled)
-
-            SettingToggle(
-                title: "Low-latency typing (experimental)",
-                caption: "Types words as you say them and corrects revisions with backspaces.",
-                isOn: $store.settings.voiceControl.typeDeltasImmediately)
 
             Divider()
 
@@ -450,10 +425,41 @@ private struct VoiceControlSettingsTab: View {
 
             Divider()
 
+            SettingRow(
+                title: "Free-form commands (“\(wake) \(String(repeating: "_", count: 6))”) are handled by",
+                caption: agentPickerCaption
+            ) {
+                Picker("", selection: $store.settings.voiceControl.agentExecutor) {
+                    Text("Apple Intelligence (on-device)").tag("")
+                    Text("Claude Code (agent CLI)").tag("claude")
+                    Text("Codex CLI (agent CLI)").tag("codex")
+                }
+                .frame(maxWidth: 320)
+            }
+
+            if let tool = AgentCLIExecutor.Tool(rawValue: store.settings.voiceControl.agentExecutor) {
+                if let path = AgentCLIExecutor.binaryPath(for: tool) {
+                    CaptionText("Found \(tool.displayName) at \(path).")
+                } else {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                        CaptionText("\(tool.displayName) wasn't found on this Mac — install it (and sign in) or pick another handler.")
+                    }
+                }
+
+                LabeledSlider(
+                    label: "Agent timeout",
+                    caption: "Give up on a background run after \(Int(store.settings.voiceControl.agentTimeoutSeconds)) s.",
+                    value: $store.settings.voiceControl.agentTimeoutSeconds,
+                    range: 30...300)
+            }
+
             SettingToggle(
-                title: "Visual commands (Apple Intelligence)",
-                caption: "Commands the grammar doesn't know (“\(wake) click sign in”) are resolved against the screen near your pointer with the on-device model — widening to the whole screen only when needed. Nothing leaves your Mac.",
+                title: "Apple Intelligence understanding",
+                caption: "Maps commands the grammar doesn't recognize to intents, and resolves screen commands (“\(wake) click sign in”) against the area near your pointer — widening to the whole screen only when needed. Nothing leaves your Mac.",
                 isOn: $store.settings.voiceControl.visualContextEnabled)
+                .disabled(!store.settings.voiceControl.agentExecutor.isEmpty)
 
             if store.settings.voiceControl.visualContextEnabled,
                screenRecording != .granted {
@@ -477,6 +483,13 @@ private struct VoiceControlSettingsTab: View {
             }
         }
         .onAppear { screenRecording = Permissions.screenRecording() }
+    }
+
+    private var agentPickerCaption: String {
+        if store.settings.voiceControl.agentExecutor.isEmpty {
+            return "On-device: Apple Intelligence maps the spoken words to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
+        }
+        return "⚠️ The agent CLI runs in the background with ALL permission checks bypassed and can execute anything on this Mac that you could — a spoken command becomes an autonomous agent run. It's slower than on-device, far more capable, and reports back in the top-of-screen capsule."
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {

@@ -22,13 +22,21 @@ final class SettingsStore: ObservableObject {
     }
 
     /// One-time migrations for settings persisted by older builds.
-    /// (There are none at present: retirement happens in the tolerant
-    /// decoders instead. Dictation-era keys — engine, model, API key — are
-    /// absorbed by PawvisSettings, which maps the legacy `dictation` section
-    /// onto `voiceControl` and no longer reads the OpenAI keychain entry;
-    /// retired gesture keys — pointer source, the click-gesture picker whose
-    /// mouse-tap mode won and became the only click — are simply ignored.)
-    private func migrate() {}
+    /// (Most retirement happens in the tolerant decoders instead. Dictation-era
+    /// keys — engine, model, API key — are absorbed by PawvisSettings, which
+    /// maps the legacy `dictation` section onto `voiceControl` and no longer
+    /// reads the OpenAI keychain entry; retired gesture keys — pointer source,
+    /// the click-gesture picker whose mouse-tap mode won and became the only
+    /// click — are simply ignored.)
+    private func migrate() {
+        let defaults = UserDefaults.standard
+        // v7: voice control entered beta — off until explicitly enabled,
+        // including for settings persisted by pre-beta builds.
+        if !defaults.bool(forKey: "PawvisMigration.voiceBetaOff") {
+            settings.voiceControl.enabled = false
+            defaults.set(true, forKey: "PawvisMigration.voiceBetaOff")
+        }
+    }
 
     private func persist() {
         if let data = try? JSONEncoder().encode(settings) {
