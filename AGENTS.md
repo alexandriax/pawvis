@@ -264,3 +264,38 @@ With no secrets at all the workflow still succeeds (ad-hoc), so forks aren't
 blocked. The notarize step asserts with `spctl` that a fresh download will
 launch clean, so a broken signing setup fails the release rather than shipping
 quietly.
+
+## Website
+
+`docs/` is the GitHub Pages site — <https://alexandriax.github.io/pawvis/> —
+served straight from `main`'s `docs/` folder. Plain hand-written
+`index.html` + `site.css` + `site.js`, no build step, no framework. Preview
+with `python3 -m http.server` from `docs/` (or just open `index.html`).
+
+**The site restates the README; the README stays the source of truth.** When
+behavior changes — a gesture added or retired, a voice command, a permission,
+a privacy claim, the macOS floor — update the matching section of
+`docs/index.html` in the same PR. The gestures grid, the voice-command chips
+and mock transcript, and the permissions row are the places that go stale.
+
+Rules that keep the site honest:
+
+- **Zero third-party requests.** Fonts are self-hosted woff2 in
+  `docs/assets/fonts/`; there are no CDNs, no analytics, no badge images. The
+  privacy section explicitly promises this, so adding any external resource
+  makes the page lie. Don't.
+- **The photography and demo video are static, committed assets**
+  (`docs/assets/*.jpg`, `demo.mp4`), generated once with OpenAI's image/video
+  APIs using the git-ignored `.env` key. The site itself needs no key, ever —
+  the Secrets section above still holds. Regenerate only deliberately, keeping
+  the same filenames (`hero-office.jpg`, `gesture-closeup.jpg`,
+  `voice-command.jpg`, `demo.mp4`).
+- **The download button points at the permanent asset URL**
+  (`releases/latest/download/Pawvis.zip`) — same rule as the README button:
+  never version it, and it never needs editing per release.
+- **Icon art on the site derives from the committed sources** — regenerate
+  `docs/assets/icon-*.png` / `claw-*.png` with `sips` from `icon.png`,
+  `claw.png`, and `Resources/claw-closed.png` if those ever change.
+
+Site-only pull requests take the `no-release` label: publishing a web page is
+not shipping an app version.
