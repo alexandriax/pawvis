@@ -56,22 +56,24 @@ while the left button is held, blue for the right button, with a ring that
 tightens as your click gesture forms and a pulse confirming every click. Small
 dots mark each detected fingertip.
 
-## Voice control
+## Voice control (beta)
 
-Open the menu bar icon and press **Start** next to Voice control, then
-address Pawvis by its **wake word** (default `Pawvis`, configurable;
-mishearings are tolerated):
+Off by default while in beta — enable it in **Settings → Voice (Beta)**,
+then press **Start** next to Voice control in the menu bar. Address Pawvis
+by its **wake word** (default `Pawvis`, configurable; mishearings are
+tolerated). **Every command starts with the wake word** — speech without it
+is ignored and never typed or displayed:
 
 | Say | Pawvis does |
 |---|---|
 | "Pawvis, **go to** heresalexandria dot com" | Navigates the frontmost browser there (via the address bar); opens your default browser if you're not in one. Non-URL targets become a web search. |
-| "Pawvis, **type** good morning" | Types into the focused app and keeps typing what you say. A **pause** (default 2.5 s) or *"stop typing"* ends it; *"new line"* and *"press enter"* work mid-typing. |
+| "Pawvis, **type** good morning" | Types exactly that text into the focused app — one-shot, no lingering dictation mode. |
 | "Pawvis, **press** command shift T" | Presses any key or shortcut — enter, tab, escape, arrows, page up/down, F-keys, letters and digits with modifiers. |
 | "Pawvis, **open** Notes" | Launches (or brings forward) an app — fuzzy name matching. |
 | "Pawvis, **switch to** Chrome" | Brings a running app forward. |
 | "Pawvis, **click** / right click / double click" | Clicks at the pointer. |
 | "Pawvis, **scroll** down / up a page" | Scrolls at the pointer. |
-| "Pawvis, **click sign in**" (anything free-form) | On-device Apple Intelligence reads the screen **around your pointer** (accessibility elements + OCR) and works out the action — widening to the whole screen only if the target isn't nearby. |
+| "Pawvis, *anything else*" | On-device Apple Intelligence maps the spoken words to an intent (open app, go to URL, type text, press keys…) — absorbing speech-recognition garbling — and grounds screen commands ("click sign in") against the area **around your pointer**, widening to the whole screen only if the target isn't nearby. |
 | "Pawvis, **stop listening**" | Turns voice control off. |
 
 Speech recognition is **Apple's on-device engine** — private, free, no API

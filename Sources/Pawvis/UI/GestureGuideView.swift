@@ -97,7 +97,7 @@ struct GestureGuideView: View {
                 detail: "Click the claw in the menu bar and press Start next to Voice control. Address it by name: “\(wake) go to github.com”, “\(wake) open Safari”, “\(wake) switch to Notes”, “\(wake) press command T”, “\(wake) scroll down”."),
             Row(symbol: "keyboard.fill",
                 title: "Type by voice",
-                detail: "Say “\(wake) type …” and keep talking — everything is typed into the focused app. A pause (or “\(store.settings.voiceControl.stopPhrases.first ?? "stop typing")”) ends typing. While typing you can say “new line” or “press enter”."),
+                detail: "Say \u{201c}\(wake) type good morning\u{201d} and exactly that text is typed into the focused app. Every command starts with the wake word \u{2014} speech without it is ignored."),
             Row(symbol: "sparkles",
                 title: "Visual commands",
                 detail: "Anything else — “\(wake) click sign in” — is resolved against the screen near your pointer with on-device Apple Intelligence."),

@@ -43,6 +43,12 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "PawvisMigration.indexTapDefault")
         }
+        // v7: voice control entered beta — off until explicitly enabled,
+        // including for settings persisted by pre-beta builds.
+        if !defaults.bool(forKey: "PawvisMigration.voiceBetaOff") {
+            settings.voiceControl.enabled = false
+            defaults.set(true, forKey: "PawvisMigration.voiceBetaOff")
+        }
     }
 
     private func persist() {

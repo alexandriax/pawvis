@@ -101,8 +101,6 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
             // applies; wake words and engine choice are superseded.
             voiceControl.enabled = legacy.enabled ?? voiceControl.enabled
             voiceControl.language = legacy.language ?? voiceControl.language
-            voiceControl.typeDeltasImmediately =
-                legacy.typeDeltasImmediately ?? voiceControl.typeDeltasImmediately
             voiceControl.vadSilenceMs = legacy.vadSilenceMs ?? voiceControl.vadSilenceMs
         }
     }
@@ -112,6 +110,5 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
 private struct LegacyDictationConfig: Codable {
     var enabled: Bool?
     var language: String?
-    var typeDeltasImmediately: Bool?
     var vadSilenceMs: Int?
 }
