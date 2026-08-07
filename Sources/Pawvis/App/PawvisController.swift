@@ -155,11 +155,38 @@ final class PawvisController: ObservableObject {
             overlay: overlayState,
             dictation: dictation.hud,
             projector: projector,
-            accessibilityBlocked: !accessibilityGranted)
+            accessibilityBlocked: !accessibilityGranted,
+            diagnostics: diagnosticsLine(hands: hands, at: time))
 
         let count = overlayState.hands.count
         if count != handsDetected { handsDetected = count }
         if overlayState.grabbed != grabbing { grabbing = overlayState.grabbed }
+    }
+
+    // MARK: - Tracking diagnostics
+
+    private var frameTimes: [TimeInterval] = []
+
+    /// One compact line of live tracking numbers, for diagnosing flaky
+    /// detection: fps · hands · pinch ratio · thumb/index tip confidence.
+    private func diagnosticsLine(hands: [Hand], at time: TimeInterval) -> String? {
+        guard settingsStore.settings.general.showDiagnostics else { return nil }
+        frameTimes.append(time)
+        if frameTimes.count > 30 { frameTimes.removeFirst(frameTimes.count - 30) }
+        let fps: Double = frameTimes.count >= 2
+            ? Double(frameTimes.count - 1) / max(frameTimes.last! - frameTimes.first!, 0.001)
+            : 0
+
+        guard let hand = hands.max(by: { $0.confidence < $1.confidence }) else {
+            return String(format: "🐾 %.0f fps · no hands", fps)
+        }
+        let thumbConf = hand.confidence(for: .thumbTip)
+        let indexConf = hand.confidence(for: .indexTip)
+        let ratio = HandFeatures(hand: hand)?.pinchRatio(to: .index)
+        let ratioText = ratio.map { String(format: "%.2f", $0) } ?? "—"
+        return String(
+            format: "🐾 %.0f fps · %d hand%@ · pinch %@ · conf %.2f/%.2f",
+            fps, hands.count, hands.count == 1 ? "" : "s", ratioText, thumbConf, indexConf)
     }
 
     // MARK: - Settings propagation

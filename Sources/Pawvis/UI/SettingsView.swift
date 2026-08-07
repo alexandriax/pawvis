@@ -67,6 +67,14 @@ private struct GeneralSettingsTab: View {
             Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
             Text("Leave on for a normal user-facing webcam.")
                 .font(.caption).foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle("Show tracking diagnostics", isOn: $store.settings.general.showDiagnostics)
+            Text("Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
     }

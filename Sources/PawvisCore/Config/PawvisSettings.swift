@@ -36,8 +36,24 @@ public struct GeneralConfig: Codable, Equatable, Sendable {
     public var cameraDeviceID: String? = nil
     /// Map hand space across all displays instead of just the main one.
     public var controlAllDisplays: Bool = false
+    /// Live tracking numbers (fps, pinch ratio, tip confidences) in the
+    /// on-screen pill — for diagnosing flaky detection.
+    public var showDiagnostics: Bool = false
 
     public init() {}
+
+    enum CodingKeys: String, CodingKey {
+        case startTrackingOnLaunch, cameraDeviceID, controlAllDisplays, showDiagnostics
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .startTrackingOnLaunch) { startTrackingOnLaunch = v }
+        if let v = try? c.decodeIfPresent(String.self, forKey: .cameraDeviceID) { cameraDeviceID = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .controlAllDisplays) { controlAllDisplays = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .showDiagnostics) { showDiagnostics = v }
+    }
 }
 
 /// The complete persisted settings tree. Each section decodes independently

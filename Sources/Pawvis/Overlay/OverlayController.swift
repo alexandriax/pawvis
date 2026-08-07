@@ -60,7 +60,8 @@ final class OverlayController {
         overlay: OverlayState,
         dictation: DictationHUD,
         projector: ScreenProjector,
-        accessibilityBlocked: Bool = false
+        accessibilityBlocked: Bool = false,
+        diagnostics: String? = nil
     ) {
         guard visible else { return }
         let grabRose = overlay.grabbed && !prevGrabbed
@@ -125,6 +126,9 @@ final class OverlayController {
 
             if config.showStatusPill, window.isOnMainScreen {
                 model.pill = Self.pill(for: dictation, accessibilityBlocked: accessibilityBlocked)
+                    ?? diagnostics.map {
+                        .init(text: $0, background: NSColor.black.withAlphaComponent(0.75))
+                    }
             }
 
             window.contentOverlayView.render(model)
