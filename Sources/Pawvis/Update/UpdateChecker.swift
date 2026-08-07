@@ -36,6 +36,12 @@ final class UpdateChecker: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var lastChecked: Date?
 
+    /// Called when a *check* turns up a release worth offering — the hook the
+    /// system notification hangs off. Deliberately not fired by every
+    /// transition into `.available` (a cancelled download returns to that state
+    /// too, and re-announcing then would be noise).
+    var onUpdateFound: ((Release) -> Void)?
+
     /// True when an update is waiting — drives the menu bar badge.
     var updateAvailable: Bool {
         if case .available = state { return true }
@@ -95,6 +101,7 @@ final class UpdateChecker: ObservableObject {
             if UpdatePolicy.shouldOffer(
                 candidate: release.version, current: AppVersion.semantic, skipped: skipped) {
                 state = .available(release)
+                onUpdateFound?(release)
             } else {
                 state = .upToDate
             }

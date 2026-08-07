@@ -257,6 +257,27 @@ SHA-256 against the published checksum, checks the bundle identifier, and runs
 `codesign --verify` before staging. Version comparison and the check-scheduling
 rules live in `PawvisCore/Update` and are unit-tested.
 
+A discovered release also posts a **system notification** (`UpdateNotifier`),
+whose Install button opens Settings → About through `SettingsRouter`. Three
+constraints worth keeping:
+
+- **Once per version**, decided by `UpdatePolicy.shouldNotify` and remembered
+  in `Pawvis.update.lastNotifiedVersion`. Every launch re-offers the same
+  release until the user takes it; re-posting each time is nagging, and the
+  menu bar row already carries the offer in the meantime. The mark is only
+  written after the post actually succeeds.
+- **Authorization is requested lazily**, at the moment there is finally
+  something to announce. Asking at launch would put a permission prompt in
+  front of every user, including everyone already up to date, and a denial is
+  deliberately *not* recorded as "announced" so allowing it later still works.
+- **`UNUserNotificationCenter.current()` is bundle-only.** From a bare
+  `swift run` binary it traps on a nil bundle proxy, so `UpdateNotifier` gates
+  on the same `bundleIdentifier != nil && .app` check as `LoginItem`.
+
+`SettingsRouter` owns the `TabView` selection, which is also why the tab is
+persisted by hand: SwiftUI only restores the last-viewed tab
+(`com_apple_SwiftUI_Settings_selectedTabIndex`) while that selection is unbound.
+
 Signing and notarization come from repository secrets, set by running
 `scripts/setup_signing.sh` interactively (it never belongs in an automated
 session — it handles a private key and passwords):

@@ -101,4 +101,32 @@ final class UpdatePolicyTests: XCTestCase {
         XCTAssertTrue(UpdatePolicy.shouldOffer(
             candidate: SemanticVersion("1.2.0")!, current: current, skipped: skipped))
     }
+
+    func testFirstSightingOfAVersionNotifies() {
+        XCTAssertTrue(UpdatePolicy.shouldNotify(
+            candidate: SemanticVersion("1.1.0")!, lastNotified: nil))
+    }
+
+    func testTheSameVersionOnlyNotifiesOnce() {
+        // Every launch re-checks and re-offers the same release; only the first
+        // one is allowed to interrupt the user.
+        let offered = SemanticVersion("1.1.0")!
+        XCTAssertFalse(UpdatePolicy.shouldNotify(candidate: offered, lastNotified: offered))
+    }
+
+    func testANewerVersionNotifiesAgain() {
+        XCTAssertTrue(UpdatePolicy.shouldNotify(
+            candidate: SemanticVersion("1.2.0")!, lastNotified: SemanticVersion("1.1.0")!))
+    }
+
+    func testARepublishedLowerVersionStillNotifies() {
+        // A release yanked and re-cut lower is news too, and `>` would bury it.
+        XCTAssertTrue(UpdatePolicy.shouldNotify(
+            candidate: SemanticVersion("1.1.0")!, lastNotified: SemanticVersion("1.2.0")!))
+    }
+
+    func testPrereleaseAndReleaseAreDistinctAnnouncements() {
+        XCTAssertTrue(UpdatePolicy.shouldNotify(
+            candidate: SemanticVersion("1.2.0")!, lastNotified: SemanticVersion("1.2.0-beta.1")!))
+    }
 }

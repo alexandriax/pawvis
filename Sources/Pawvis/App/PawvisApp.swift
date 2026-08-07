@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     let controller: PawvisController
     let updater: UpdateChecker
     let loginItem: LoginItemController
+    private let updateNotifier: UpdateNotifier
     private var voiceObservation: AnyCancellable?
     private var updaterObservation: AnyCancellable?
 
@@ -77,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         updater = MainActor.assumeIsolated { UpdateChecker() }
         loginItem = MainActor.assumeIsolated { LoginItemController() }
+        updateNotifier = MainActor.assumeIsolated {
+            UpdateNotifier(showUpdateUI: { SettingsRouter.shared.open(.about) })
+        }
         super.init()
         // Forward nested state changes so the MenuBarExtra label (which only
         // observes the delegate) updates when voice control starts/stops.
@@ -84,6 +88,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
         updaterObservation = updater.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
+        MainActor.assumeIsolated {
+            updater.onUpdateFound = { [weak self] release in
+                self?.updateNotifier.announce(release)
+            }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -129,7 +138,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
-        // At most one automatic check per day (see UpdatePolicy).
+        // Claim the notification delegate before this method returns, or a
+        // banner the user clicked while Pawvis wasn't running is delivered to
+        // nobody and the Install button does nothing.
+        updateNotifier.start()
+
+        // At most one automatic check per day (see UpdatePolicy). A release
+        // worth offering posts the system notification via `onUpdateFound`.
         updater.checkIfDue()
 
     }

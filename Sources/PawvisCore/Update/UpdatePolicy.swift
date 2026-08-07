@@ -36,4 +36,25 @@ public enum UpdatePolicy {
         if let skipped, candidate <= skipped { return false }
         return true
     }
+
+    /// Whether a system notification should be posted for an offered release.
+    ///
+    /// Once per version, and never twice for the same one: the banner is an
+    /// interruption, and re-posting it on every launch until the user updates
+    /// turns a useful nudge into nagging. The menu bar item keeps carrying the
+    /// offer for as long as it stands, so nothing is lost by staying quiet.
+    ///
+    /// Note this deliberately ignores whether the user *dismissed* the banner —
+    /// macOS doesn't tell us, and it doesn't matter: either way they've been
+    /// told about this version once.
+    public static func shouldNotify(
+        candidate: SemanticVersion,
+        lastNotified: SemanticVersion?
+    ) -> Bool {
+        guard let lastNotified else { return true }
+        // Any *different* version, not just a newer one: a release pulled and
+        // republished at a lower number is still news, and comparing with `>`
+        // would leave that case permanently un-announced.
+        return candidate != lastNotified
+    }
 }
