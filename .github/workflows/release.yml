@@ -58,11 +58,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p dist
-          ZIP="dist/Pawvis-$VERSION.zip"
           # ditto --keepParent preserves the bundle structure and its signature.
-          ditto -c -k --keepParent build/Pawvis.app "$ZIP"
-          shasum -a 256 "$ZIP" | tee "dist/Pawvis-$VERSION.zip.sha256"
-          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          ditto -c -k --keepParent build/Pawvis.app "dist/Pawvis-$VERSION.zip"
+          # Checksum from inside dist/ so the file names the zip alone — a
+          # path prefix here would break `shasum -c` for anyone verifying.
+          (cd dist && shasum -a 256 "Pawvis-$VERSION.zip" | tee "Pawvis-$VERSION.zip.sha256")
+          echo "zip=dist/Pawvis-$VERSION.zip" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
