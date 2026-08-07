@@ -17,7 +17,12 @@ func runSelfTest() -> Int32 {
     }
 
     // Gesture engine processes frames without crashing and stays quiet on empties.
-    let engine = GestureEngine(config: .default)
+    // `.anyHand`: the partial synthetic hand below can't show the open-hand
+    // control trigger (it has no ring finger), and this test is about the
+    // pipeline, not the trigger.
+    var engineConfig = GestureConfig.default
+    engineConfig.controlTrigger = .anyHand
+    let engine = GestureEngine(config: engineConfig)
     var quiet = true
     for i in 0..<60 {
         let (events, _) = engine.process(HandFrame(time: Double(i) / 30, hands: []))

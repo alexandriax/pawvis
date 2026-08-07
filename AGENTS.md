@@ -91,6 +91,13 @@ Hard-won constraints, each of which broke something real:
 - **Don't gate clicks on hand "openness."** People pinch with their other
   fingers half-curled; an openness guard silently blocked nearly every real
   click.
+- **The open-hand control trigger gates *arming*, never clicks.** In
+  `.openHand` mode an open hand (all four fingers extended — pose bands, not
+  `openness()`) arms cursor control; a fist (3+ fingers curled) parks it.
+  Disarming is blocked while any button is engaged or held, because every
+  click gesture closes part of the hand. Note a fist physically *contains*
+  the pinch and thumb-curl click gestures, so in those modes it clicks and
+  holds instead of parking — the settings caption and gesture guide say so.
 - **Low-confidence frames hold state, never flap it.** A missing fingertip
   must not release a held button; only the tracking-loss grace window does.
 - **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted

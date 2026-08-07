@@ -206,7 +206,8 @@ struct MenuContentView: View {
     }
 
     private var modeText: String {
-        controller.grabbing ? "Clicking (pinched)" : "Pointing"
+        if controller.grabbing { return "Clicking (pinched)" }
+        return controller.controlArmed ? "Pointing" : "Show an open hand to control"
     }
 
     private var dictationStatusText: String {

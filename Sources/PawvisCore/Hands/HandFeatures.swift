@@ -186,6 +186,24 @@ public struct HandFeatures {
         return min(max((mean - lo) / (hi - lo), 0), 1)
     }
 
+    /// The control-trigger pose: every non-thumb finger extended. The thumb is
+    /// deliberately ignored — the thumb-curl click keeps all four fingers up
+    /// while the thumb tucks, and that must still read as "open". A finger
+    /// whose joints are missing counts as not extended, so a half-tracked
+    /// hand can't arm cursor control.
+    public func isOpenHand() -> Bool {
+        Finger.allCases.allSatisfy { isExtended($0) == true }
+    }
+
+    /// How many fingers are genuinely curled — the disarm side of the control
+    /// trigger reads 3+ as a deliberately closed hand. The neutral band
+    /// between curled and extended counts for neither pose, which gives the
+    /// trigger hysteresis for free: a relaxed half-curl neither arms nor
+    /// disarms.
+    public func curledFingerCount() -> Int {
+        Finger.allCases.filter { isCurled($0) == true }.count
+    }
+
     /// Mean gap between adjacent fingertips (index↔middle, middle↔ring,
     /// ring↔little), normalized by hand scale. High when fingers are splayed.
     public func splayAmount() -> Double? {

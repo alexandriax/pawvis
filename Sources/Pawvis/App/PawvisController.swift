@@ -14,6 +14,9 @@ final class PawvisController: ObservableObject {
     @Published private(set) var trackingActive = false
     @Published private(set) var handsDetected = 0
     @Published private(set) var grabbing = false
+    /// False while a tracked hand is waiting on the control trigger (the
+    /// open-hand gesture) before it may move the cursor.
+    @Published private(set) var controlArmed = true
     @Published private(set) var cameraPermission = Permissions.camera()
     @Published private(set) var accessibilityGranted = Permissions.accessibility() == .granted
     @Published private(set) var lastError: String?
@@ -124,6 +127,7 @@ final class PawvisController: ObservableObject {
         trackingActive = false
         handsDetected = 0
         grabbing = false
+        controlArmed = true
         permissionPollTimer?.invalidate()
         permissionPollTimer = nil
         Log.app.info("Tracking stopped")
@@ -162,6 +166,7 @@ final class PawvisController: ObservableObject {
         if count != handsDetected { handsDetected = count }
         let anyGrab = overlayState.grabbed || overlayState.rightGrabbed
         if anyGrab != grabbing { grabbing = anyGrab }
+        if overlayState.armed != controlArmed { controlArmed = overlayState.armed }
     }
 
     // MARK: - Tracking diagnostics

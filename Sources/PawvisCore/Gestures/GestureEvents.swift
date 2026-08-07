@@ -31,6 +31,10 @@ public struct OverlayState: Equatable, Sendable {
     public var hands: [OverlayHand] = []
     /// Clamped cursor position (screen-normalized); nil when no hands.
     public var cursor: Vec2?
+    /// False while the control trigger is still waiting for its gesture: the
+    /// hand is tracked (dots render) but the cursor is parked and clicks are
+    /// inert. Always true in `.anyHand` mode.
+    public var armed: Bool = true
     /// True while the click gesture is closed (left button down).
     public var grabbed: Bool = false
     /// True while the right-click finger is dipped (right button down). Kept

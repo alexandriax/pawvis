@@ -113,9 +113,12 @@ final class OverlayController {
             // ring tightens as the click gesture forms and fills while held.
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
                 model.clawCursor = .init(
-                    center: local, closed: anyGrab, right: overlay.rightGrabbed)
+                    center: local, closed: anyGrab, right: overlay.rightGrabbed,
+                    dimmed: !overlay.armed)
 
-                if config.showPinchRing {
+                // No ring while control is parked: it advertises a click that
+                // can't happen until the trigger arms.
+                if config.showPinchRing, overlay.armed {
                     let progress = overlay.closingProgress
                     let ringRadius: CGFloat = anyGrab
                         ? (overlay.isDragging ? 26 : 20)
@@ -220,6 +223,9 @@ struct OverlayRenderModel {
         /// for left and blue for right. Open = pointing: full claw, white.
         var closed: Bool
         var right: Bool = false
+        /// Faded: the hand is tracked but the control trigger hasn't armed,
+        /// so the claw is parked where control was last let go.
+        var dimmed: Bool = false
     }
 
     var dots: [Dot] = []
@@ -399,6 +405,8 @@ final class OverlayContentView: NSView {
             clawShadowLayer.isHidden = false
             clawFillLayer.isHidden = false
             clawFallbackDot.isHidden = true
+            clawShadowLayer.opacity = claw.dimmed ? 0.2 : 0.55
+            clawFillLayer.opacity = claw.dimmed ? 0.35 : 1
             clawShadowLayer.contents = tintedClaw("\(stateKey)-shadow", glyph: glyph, color: .black)
             clawFillLayer.contents = tintedClaw("\(stateKey)-fill", glyph: glyph, color: fillColor)
             // The closed paw reads slightly smaller — like a squeeze.
@@ -415,6 +423,7 @@ final class OverlayContentView: NSView {
             clawFallbackDot.path = CGPath(
                 ellipseIn: CGRect(x: claw.center.x - 4.5, y: claw.center.y - 4.5, width: 9, height: 9),
                 transform: nil)
+            clawFallbackDot.opacity = claw.dimmed ? 0.35 : 1
             clawFallbackDot.fillColor = (claw.closed
                 ? (claw.right ? PawvisTheme.blue : PawvisTheme.purple) : .white).cgColor
         }

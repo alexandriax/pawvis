@@ -53,7 +53,18 @@ struct GestureGuideView: View {
                 click: "Dip your index finger down, like tapping a mouse button (keep your other fingers up).",
                 letGo: "lift your index finger")
         }
-        var rows = [
+        var rows: [Row] = []
+        if store.settings.gestures.controlTrigger == .openHand {
+            let park = [ClickGesture.indexTap, .wholeHandPinch]
+                .contains(store.settings.gestures.clickGesture)
+                ? "Make a brief fist to park it again."
+                : "Move your hand out of view to park it again (with your click gesture, a fist reads as a click)."
+            rows.append(Row(
+                symbol: "hand.raised.fill",
+                title: "Take control",
+                detail: "Show the camera an open hand — all four fingers up — and the claw brightens: you have the cursor. Pawvis keeps watching while you type or rest, but the cursor stays parked until you show the trigger. \(park)"))
+        }
+        rows += [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move",
                 detail: clickDetail.move + " The ring around the claw tightens as the click gesture forms."),
