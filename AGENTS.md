@@ -273,8 +273,29 @@ constraints worth keeping:
   front of every user, including everyone already up to date, and a denial is
   deliberately *not* recorded as "announced" so allowing it later still works.
 - **`UNUserNotificationCenter.current()` is bundle-only.** From a bare
-  `swift run` binary it traps on a nil bundle proxy, so `UpdateNotifier` gates
-  on the same `bundleIdentifier != nil && .app` check as `LoginItem`.
+  `swift run` binary it traps on a nil bundle proxy (an ObjC exception no
+  Swift `catch` can stop), so `UpdateNotifier` gates on the same
+  `bundleIdentifier != nil && .app` check as `LoginItem`. The identifier
+  check alone is NOT enough: under `swift test`, `Bundle.main` is Xcode's
+  xctest tool — which *has* an identifier and still traps. Both halves are
+  measured, keep both.
+
+More measured notification behavior (macOS 26), for whoever touches this next:
+
+- The permission prompt is a hover-to-expand *banner* (Allow hides in its
+  "Options" dropdown), the `requestAuthorization` callback simply doesn't fire
+  until the user answers — minutes, sometimes — and **killing the app while
+  the prompt is pending records a denial**. That last one is easy to do from a
+  dev loop; the only way back is System Settings → Notifications.
+- `center.add` reports success even when denied (the item lands in the
+  delivered list, invisibly), so posting is gated on authorization status, not
+  on `add` failing.
+- Notification permission keys off the **bundle identifier**, not the code
+  signature — it survives re-signing, so `make_app.sh`'s ad-hoc warning about
+  Accessibility does not extend to notifications.
+- A bundle run from a temp directory gets `UNErrorDomain Code=1` with no
+  prompt at all; the repo's `build/Pawvis.app` is a location LaunchServices
+  accepts (verified).
 
 `SettingsRouter` owns the `TabView` selection, which is also why the tab is
 persisted by hand: SwiftUI only restores the last-viewed tab
