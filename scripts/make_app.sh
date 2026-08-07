@@ -24,8 +24,14 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Pawvis"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/icon_1024.png "$APP/Contents/Resources/icon_1024.png"
-[[ -f Resources/menubar-claw.png ]] && cp Resources/menubar-claw.png "$APP/Contents/Resources/"
-[[ -f Resources/claw-closed.png ]] && cp Resources/claw-closed.png "$APP/Contents/Resources/"
+# `cmd && cp` would abort the script under `set -e` whenever the test is
+# false, so guard these with explicit ifs.
+if [[ -f Resources/menubar-claw.png ]]; then
+    cp Resources/menubar-claw.png "$APP/Contents/Resources/"
+fi
+if [[ -f Resources/claw-closed.png ]]; then
+    cp Resources/claw-closed.png "$APP/Contents/Resources/"
+fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -58,8 +64,10 @@ PLIST
 # Prefer a real signing identity: ad-hoc signatures change every build, which
 # silently invalidates the Accessibility grant (while System Settings still
 # shows it enabled) — the classic "cursor moves but nothing clicks" trap.
+# `|| true`: with `set -euo pipefail`, grep finding no identity (every CI
+# machine) would otherwise abort the whole build.
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"')
+    | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"' || true)
 if [[ -n "$IDENTITY" ]]; then
     codesign --force --sign "$IDENTITY" "$APP"
     echo "Signed with '$IDENTITY' — stable identity, permissions survive rebuilds"
