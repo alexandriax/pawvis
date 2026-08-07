@@ -111,6 +111,11 @@ final class VoiceController: ObservableObject {
             self?.handle(event)
         }
         engine.start()
+        // Warm the on-device model now so the first visual command doesn't
+        // pay the ~5 s cold-start cost.
+        if config.visualContextEnabled, #available(macOS 26.0, *) {
+            VisualIntentResolver.prewarm()
+        }
     }
 
     private func handle(_ event: SpeechEvent) {
@@ -130,11 +135,13 @@ final class VoiceController: ObservableObject {
             let result = parser.handleCompleted(itemId: itemId, transcript: transcript)
             typer.perform(result.typing)
             lastTranscript = parser.state == .typing ? transcript : ""
+            syncStateFromParser()
+            armPauseTimer()
+            // Execute last: a .resolve command switches state to .resolving,
+            // which syncStateFromParser would otherwise stomp.
             if let command = result.command {
                 execute(command)
             }
-            syncStateFromParser()
-            armPauseTimer()
 
         case .failed(let message):
             engine?.stop()

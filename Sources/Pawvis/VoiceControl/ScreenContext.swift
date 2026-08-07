@@ -67,7 +67,15 @@ final class ScreenContextProvider {
     /// Node-visit budget for one AX traversal (IPC is ~0.1–0.2 ms per
     /// attribute read; the budget caps worst-case latency, not typical).
     private static let axNodeBudget = 2500
-    private static let maxTargets = 80
+    /// Raw collection cap during traversal, before curation.
+    private static let maxRawTargets = 120
+    /// Prompt-size caps. Prefill latency scales with prompt tokens (measured:
+    /// a 50-element list costs ~10× the probe's small-prompt latency), so the
+    /// first, near-the-pointer pass stays small; the full-screen escalation
+    /// pass may carry more. The model's window is 4096 tokens total.
+    private static func maxTargets(for scope: ScreenContextSnapshot.Scope) -> Int {
+        scope == .regionAroundPointer ? 30 : 50
+    }
 
     func snapshot(scope: ScreenContextSnapshot.Scope) async -> ScreenContextSnapshot {
         let pointer = CGEvent(source: nil)?.location ?? .zero
@@ -89,9 +97,7 @@ final class ScreenContextProvider {
         for target in ocr.targets where !axLabels.contains(target.label.lowercased()) {
             targets.append(target)
         }
-        if targets.count > Self.maxTargets {
-            targets = Array(targets.prefix(Self.maxTargets))
-        }
+        targets = Self.curate(targets, cap: Self.maxTargets(for: scope))
 
         return ScreenContextSnapshot(
             scope: scope,
@@ -105,27 +111,37 @@ final class ScreenContextProvider {
             ocrAvailable: ocr.available)
     }
 
-    /// The frontmost browser's current page URL, if any — read from the AX
-    /// tree (AXWebArea's AXURL), no scripting permission needed.
-    static func frontmostBrowserURL() -> String? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        guard let window = copyAttribute(appElement, kAXFocusedWindowAttribute) else { return nil }
-        var queue: [(AXUIElement, Int)] = [(window as! AXUIElement, 0)]
-        var visited = 0
-        while !queue.isEmpty, visited < 400 {
-            let (element, depth) = queue.removeFirst()
-            visited += 1
-            if role(of: element) == "AXWebArea",
-               let url = copyAttribute(element, "AXURL") as? URL {
-                return url.absoluteString
+    /// Every element in the prompt costs prefill latency, so spend the budget
+    /// well: drop junk labels, put actionable controls before passive text,
+    /// and collapse duplicate labels (web AX trees fragment one visual button
+    /// into many static-text shards).
+    private static let actionableRoles: Set<String> = [
+        "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXSearchField",
+        "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
+        "AXComboBox", "AXMenuItem", "AXTab", "AXSlider", "AXDisclosureTriangle",
+    ]
+
+    private static func curate(_ targets: [ScreenTarget], cap: Int) -> [ScreenTarget] {
+        var seenLabels = Set<String>()
+        var actionable: [ScreenTarget] = []
+        var passive: [ScreenTarget] = []
+        for target in targets {
+            let label = target.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard label.count >= 2, label.contains(where: { $0.isLetter || $0.isNumber }) else {
+                continue
             }
-            guard depth < 12 else { continue }
-            for child in children(of: element) {
-                queue.append((child, depth + 1))
+            let key = label.lowercased()
+            guard !seenLabels.contains(key) else { continue }
+            seenLabels.insert(key)
+            var cleaned = target
+            cleaned.label = label
+            if actionableRoles.contains(target.role) {
+                actionable.append(cleaned)
+            } else {
+                passive.append(cleaned)
             }
         }
-        return nil
+        return Array((actionable + passive).prefix(cap))
     }
 
     // MARK: - Region
@@ -219,7 +235,7 @@ final class ScreenContextProvider {
             // Bounded breadth-first traversal, pruned to the ROI.
             var queue: [AXUIElement] = [window]
             var visited = 0
-            while !queue.isEmpty, visited < axNodeBudget, result.targets.count < maxTargets {
+            while !queue.isEmpty, visited < axNodeBudget, result.targets.count < maxRawTargets {
                 let element = queue.removeFirst()
                 visited += 1
 

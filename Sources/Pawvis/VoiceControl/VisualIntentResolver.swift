@@ -6,9 +6,18 @@ import PawvisCore
 /// against what's actually on screen, using the on-device Apple Intelligence
 /// model with guided generation.
 ///
-/// Escalation: the first attempt sees only the region around the pointer
-/// (fast, small prompt). If the model says the target isn't in that context,
-/// one retry sees the whole screen.
+/// Live-probed design constraints (macOS 26.5):
+/// - The model is text-only — screen pixels are pre-digested into an AX/OCR
+///   element list. Context window is exactly 4096 tokens, so lists are capped
+///   (~50 elements) and the session is recycled before it fills.
+/// - One persistent, prewarmed session: guided responses drop from ~4–7 s
+///   (fresh session) to ~0.6–1.3 s (reused, KV-prefix cached).
+/// - Escalation (region → full screen) is driven HERE, not via model tool
+///   calls — tool calling composed with guided generation loops until the
+///   context overflows.
+/// - `targetNotInContext` is reliable only for far misses; semantically
+///   adjacent requests get force-matched ("click log out" → "Cancel"). A
+///   label-similarity gate escalates those too.
 @available(macOS 26.0, *)
 @MainActor
 enum VisualIntentResolver {
@@ -55,14 +64,46 @@ enum VisualIntentResolver {
         Rules:
         - Prefer clicking a listed element when the command refers to \
         something visible; pick the element whose label best matches the \
-        spoken words (labels may contain small recognition errors).
-        - Spoken URLs arrive as words ("alexandria dot com"); convert them to \
-        a real URL for goToURL.
+        spoken words (labels may contain small recognition errors). Always \
+        answer with the element's index number.
+        - Spoken URLs arrive as words; convert them to a real URL for \
+        goToURL. Examples: "git hub dot com slash anthropics" → \
+        "github.com/anthropics"; "here's alexandria dot com" → \
+        "heresalexandria.com"; "lobste dot rs" → "lobste.rs"; \
+        "localhost colon three thousand" → "localhost:3000".
         - If the command refers to something that is NOT in the list, set \
         targetNotInContext to true and action to none.
         - If the command is not an action on this screen at all, set action \
         to none and targetNotInContext to false.
         """
+
+    // MARK: - Session lifecycle
+
+    private static var session: LanguageModelSession?
+    private static var sessionUses = 0
+    /// Each request adds prompt + response to the session transcript; recycle
+    /// well before the 4096-token window fills.
+    private static let maxSessionUses = 6
+
+    /// Called when voice control starts: model warm-up happens in the
+    /// background so the first command doesn't pay the ~5 s cold cost.
+    static func prewarm() {
+        guard isSupported else { return }
+        _ = activeSession(forceFresh: false)
+    }
+
+    private static func activeSession(forceFresh: Bool) -> LanguageModelSession {
+        if !forceFresh, let session, sessionUses < maxSessionUses {
+            return session
+        }
+        let fresh = LanguageModelSession(instructions: instructions)
+        fresh.prewarm()
+        session = fresh
+        sessionUses = 0
+        return fresh
+    }
+
+    // MARK: - Resolution
 
     /// Resolve and perform. Returns a HUD-ready outcome.
     static func resolveAndExecute(
@@ -72,16 +113,25 @@ enum VisualIntentResolver {
     ) async -> ExecutionOutcome {
         let regional = await screenContext.snapshot(scope: .regionAroundPointer)
         do {
-            var intent = try await resolve(transcript: transcript, snapshot: regional)
             var snapshot = regional
-            if intent.targetNotInContext {
-                // The target isn't near the pointer — look at the whole screen.
+            var intent = try await resolve(transcript: transcript, snapshot: snapshot)
+
+            // Escalate to the whole screen when the model says the target
+            // isn't nearby — or when it "found" a click target whose label
+            // doesn't actually resemble the spoken words (the model
+            // force-matches semantically adjacent requests).
+            let suspicious = isClickish(intent.action)
+                && !labelResemblesTranscript(intent, snapshot: snapshot, transcript: transcript)
+            if intent.targetNotInContext || suspicious {
                 snapshot = await screenContext.snapshot(scope: .fullScreen)
                 intent = try await resolve(transcript: transcript, snapshot: snapshot)
             }
             return await perform(intent, snapshot: snapshot, transcript: transcript,
                                  executor: executor)
         } catch {
+            // Context overflow or transient model failure: drop the session
+            // (a fresh one is built lazily) and report.
+            session = nil
             Log.voice.error("Visual intent resolution failed: \(error.localizedDescription, privacy: .public)")
             return .failed("Couldn't work out “\(transcript)”")
         }
@@ -90,17 +140,70 @@ enum VisualIntentResolver {
     private static func resolve(
         transcript: String, snapshot: ScreenContextSnapshot
     ) async throws -> ResolvedIntent {
-        // A fresh session per request: no cross-command context to carry, and
-        // sessions accumulate transcript otherwise.
-        let session = LanguageModelSession(instructions: instructions)
         let prompt = """
             \(snapshot.promptDescription)
 
             Spoken command: “\(transcript)”
             """
-        let response = try await session.respond(to: prompt, generating: ResolvedIntent.self)
-        return response.content
+        do {
+            let session = activeSession(forceFresh: false)
+            sessionUses += 1
+            let response = try await session.respond(
+                to: prompt, generating: ResolvedIntent.self,
+                options: GenerationOptions(sampling: .greedy))
+            return response.content
+        } catch {
+            // One retry on a fresh session (covers a filled-up transcript
+            // window mid-session).
+            let fresh = activeSession(forceFresh: true)
+            sessionUses += 1
+            let response = try await fresh.respond(
+                to: prompt, generating: ResolvedIntent.self,
+                options: GenerationOptions(sampling: .greedy))
+            return response.content
+        }
     }
+
+    // MARK: - Guards
+
+    private static func isClickish(_ action: ResolvedAction) -> Bool {
+        action == .click || action == .doubleClick || action == .rightClick
+    }
+
+    /// True when at least one meaningful spoken word matches the chosen
+    /// element's label (prefix match either way, so "sign" ~ "signing" and
+    /// OCR misreads within reason still pass). Purely semantic matches
+    /// ("gear icon" → "Settings") fail this and trigger one full-screen
+    /// retry — which then resolves against the complete element list.
+    private static func labelResemblesTranscript(
+        _ intent: ResolvedIntent, snapshot: ScreenContextSnapshot, transcript: String
+    ) -> Bool {
+        guard let index = intent.elementIndex,
+              snapshot.targets.indices.contains(index) else { return false }
+        let stopWords: Set<String> = [
+            "click", "tap", "press", "the", "on", "button", "link", "that",
+            "this", "it", "a", "an", "to", "double", "right",
+        ]
+        let spoken = tokens(of: transcript).filter { $0.count >= 3 && !stopWords.contains($0) }
+        guard !spoken.isEmpty else { return true } // nothing to compare — trust the model
+        let label = tokens(of: snapshot.targets[index].label)
+        for s in spoken {
+            for l in label where l.hasPrefix(s) || s.hasPrefix(l) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func tokens(of s: String) -> [String] {
+        s.lowercased()
+            .map { $0.isLetter || $0.isNumber ? $0 : " " }
+            .reduce(into: "") { $0.append($1) }
+            .split(separator: " ")
+            .map(String.init)
+    }
+
+    // MARK: - Execution
 
     private static func perform(
         _ intent: ResolvedIntent,
