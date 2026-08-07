@@ -7,25 +7,31 @@ import Foundation
 ///
 /// Lifecycle: the text updates as an utterance streams in, then auto-hides a
 /// configurable few seconds after the utterance completes — or stays until
-/// clicked, in manual-dismiss mode. Clicking always dismisses.
+/// dismissed, in manual-dismiss mode. Clicking it (or its ✕) always dismisses.
 @MainActor
 final class TranscriptOverlay {
     /// Seconds to keep the text up after an utterance completes.
     var timeout: TimeInterval = 3.0
-    /// Keep the text up until it's clicked.
+    /// Keep the text up until it's dismissed.
     var manualDismiss = false
     /// Master switch (Settings → Voice).
     var enabled = true
 
-    private var panel: NSPanel?
-    private var background: NSView?
-    private var label: NSTextField?
+    private let capsule = CapsulePanel(
+        font: .systemFont(ofSize: 15, weight: .medium), topInset: 10)
     private var hideTimer: Timer?
 
     /// Include the capsule in screenshots/recordings (mirrors the gesture
     /// overlay's privacy default).
     var showInScreenCapture = false {
-        didSet { panel?.sharingType = showInScreenCapture ? .readOnly : .none }
+        didSet { capsule.showInScreenCapture = showInScreenCapture }
+    }
+
+    init() {
+        capsule.onDismiss = { [weak self] in
+            self?.hideTimer?.invalidate()
+            self?.hideTimer = nil
+        }
     }
 
     // MARK: - API
@@ -45,7 +51,7 @@ final class TranscriptOverlay {
         if let text, !text.isEmpty {
             display(text)
         }
-        guard panel?.isVisible == true else { return }
+        guard capsule.isVisible else { return }
         scheduleHide(after: timeout)
     }
 
@@ -63,15 +69,7 @@ final class TranscriptOverlay {
     func hide() {
         hideTimer?.invalidate()
         hideTimer = nil
-        guard let panel, panel.isVisible else { return }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.18
-            panel.animator().alphaValue = 0
-        }, completionHandler: {
-            Task { @MainActor [weak self] in
-                self?.panel?.orderOut(nil)
-            }
-        })
+        capsule.hide()
     }
 
     // MARK: - Internals
@@ -86,79 +84,6 @@ final class TranscriptOverlay {
     }
 
     private func display(_ text: String) {
-        let panel = ensurePanel()
-        guard let label, let background else { return }
-        label.stringValue = text
-        layout(panel: panel, label: label, background: background)
-        panel.alphaValue = 1
-        if !panel.isVisible {
-            panel.orderFrontRegardless()
-        }
-    }
-
-    private func ensurePanel() -> NSPanel {
-        if let panel { return panel }
-
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 44),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false)
-        panel.level = .statusBar
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.isMovable = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.sharingType = showInScreenCapture ? .readOnly : .none
-        // Receives clicks (dismissal) but never steals focus (.nonactivating).
-        panel.ignoresMouseEvents = false
-
-        let background = NSView()
-        background.wantsLayer = true
-        background.layer?.backgroundColor = PawvisTheme.purple.withAlphaComponent(0.94).cgColor
-        background.layer?.cornerRadius = 12
-
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 15, weight: .medium)
-        label.textColor = .white
-        label.alignment = .center
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 3
-        background.addSubview(label)
-
-        let click = NSClickGestureRecognizer(target: self, action: #selector(clicked))
-        background.addGestureRecognizer(click)
-
-        panel.contentView = background
-        self.panel = panel
-        self.background = background
-        self.label = label
-        return panel
-    }
-
-    @objc private func clicked() {
-        hide()
-    }
-
-    /// Size the capsule to its text and pin it top-center of the main screen,
-    /// just below the menu bar.
-    private func layout(panel: NSPanel, label: NSTextField, background: NSView) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let maxTextWidth = min(680, screen.visibleFrame.width * 0.7)
-        let textSize = label.cell?.cellSize(
-            forBounds: NSRect(x: 0, y: 0, width: maxTextWidth, height: 200))
-            ?? NSSize(width: 200, height: 20)
-
-        let hPad: CGFloat = 18, vPad: CGFloat = 10
-        let width = ceil(textSize.width) + hPad * 2
-        let height = ceil(textSize.height) + vPad * 2
-        label.frame = NSRect(x: hPad, y: vPad, width: ceil(textSize.width), height: ceil(textSize.height))
-
-        let x = screen.visibleFrame.midX - width / 2
-        let y = screen.visibleFrame.maxY - height - 10
-        panel.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
-        background.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        capsule.show(text, background: PawvisTheme.purple.withAlphaComponent(0.94))
     }
 }
