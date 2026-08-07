@@ -71,6 +71,33 @@ the right — both invisible in code review and obvious to the user.
    app. Run `make app`, open Pawvis, and check the tabs — paying attention to
    the longest strings (the OpenAI dictation section has them).
 
+## Launch at login
+
+On by default (`general.launchAtLogin`), registered through
+`SMAppService.mainApp` — no helper bundle, no `LSSharedFileList`. The decision
+rules are pure and unit-tested in `PawvisCore/Config/LaunchAtLoginPolicy.swift`;
+`Support/LoginItem.swift` only reads the real status and performs the action.
+
+Measured on macOS 26, and easy to get wrong:
+
+- **A never-registered app reports `.notFound`, not `.notRegistered`.**
+  `.notRegistered` is what you get *after* an unregister. Treating `.notFound`
+  as "unsupported" means the on-by-default first launch never registers
+  anything.
+- **`status` can't tell you whether registration is possible.** An unbundled
+  binary also reports `.notFound`, and `register()` on it fails with
+  `SMAppServiceErrorDomain 1` ("Operation not permitted"). The bundle check
+  (`bundleIdentifier != nil` and a `.app` path) is the real gate.
+- **Never re-register on every launch.** Once the default has been applied
+  once, a missing login item means the user removed it in System Settings →
+  General → Login Items; the app adopts that instead of putting it back, or it
+  becomes impossible to switch off. The one-shot flag is
+  `PawvisLoginItem.defaultApplied` in UserDefaults, and it is deliberately
+  *not* set when a registration attempt fails, so transient failures retry.
+- Register/unregister are idempotent — calling either twice succeeds.
+- `PAWVIS_NO_AUTOSTART=1` skips the reconcile as well as the camera, so
+  automated runs don't leave a login item behind pointing at a build directory.
+
 ## Gesture engine
 
 `PawvisCore` is pure logic — no AppKit, no AVFoundation, no clocks. All timing

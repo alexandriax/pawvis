@@ -37,6 +37,10 @@ public struct OverlayConfig: Codable, Equatable, Sendable {
 /// App-level behavior.
 public struct GeneralConfig: Codable, Equatable, Sendable {
     public var startTrackingOnLaunch: Bool = true
+    /// Register Pawvis as a login item so it's running after every restart.
+    /// On by default — a menu bar app you have to remember to launch is a
+    /// menu bar app you stop using. See `LaunchAtLoginPolicy`.
+    public var launchAtLogin: Bool = true
     /// AVCaptureDevice uniqueID; nil = system default camera.
     public var cameraDeviceID: String? = nil
     /// Map hand space across all displays instead of just the main one.
@@ -48,13 +52,15 @@ public struct GeneralConfig: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case startTrackingOnLaunch, cameraDeviceID, controlAllDisplays, showDiagnostics
+        case startTrackingOnLaunch, launchAtLogin, cameraDeviceID
+        case controlAllDisplays, showDiagnostics
     }
 
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .startTrackingOnLaunch) { startTrackingOnLaunch = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) { launchAtLogin = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .cameraDeviceID) { cameraDeviceID = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .controlAllDisplays) { controlAllDisplays = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showDiagnostics) { showDiagnostics = v }

@@ -6,8 +6,10 @@ import PawvisCore
 /// can verify the binary is sane without launching the UI.
 func runSelfTest() -> Int32 {
     var failures = 0
+    var checks = 0
 
     func check(_ name: String, _ condition: @autoclosure () -> Bool) {
+        checks += 1
         if condition() {
             print("PASS \(name)")
         } else {
@@ -55,6 +57,15 @@ func runSelfTest() -> Int32 {
         check("settings.roundtrip", false)
     }
 
+    // Launch-at-login: on by default, and the pure reconcile rules agree.
+    // (Deliberately no SMAppService call — a smoke test must not leave a login
+    // item registered on the machine that ran it.)
+    check("launchAtLogin.defaultsOn", PawvisSettings.default.general.launchAtLogin)
+    check("launchAtLogin.firstLaunchRegisters", LaunchAtLoginPolicy.reconcile(
+        desired: true, status: .notRegistered, defaultApplied: false) == .register)
+    check("launchAtLogin.respectsSystemSettingsRemoval", LaunchAtLoginPolicy.reconcile(
+        desired: true, status: .notRegistered, defaultApplied: true) == .adoptDisabled)
+
     // Voice parser: wake word → typing, commands, fuzzy wake matching.
     let parser = VoiceControlParser()
     parser.beginListening()
@@ -71,6 +82,6 @@ func runSelfTest() -> Int32 {
     let open = parser.handleCompleted(itemId: "e", transcript: "Pawvis open Safari")
     check("voice.openParses", open.command == .open(app: "Safari"))
 
-    print(failures == 0 ? "SELFTEST OK (9 checks)" : "SELFTEST FAILED (\(failures) failures)")
+    print(failures == 0 ? "SELFTEST OK (\(checks) checks)" : "SELFTEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
 }
