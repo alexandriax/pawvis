@@ -16,7 +16,7 @@ run: app
 	open build/Pawvis.app
 
 icon:
-	./scripts/generate_icon.sh
+	swift scripts/process_claw.swift
 
 clean:
 	rm -rf .build build

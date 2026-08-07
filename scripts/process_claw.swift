@@ -1,10 +1,12 @@
 #!/usr/bin/env swift
-// Derives Pawvis's icon assets from the hand-made claw mark (claw.png,
-// white-shape-on-black). Deterministic — no AI generation:
+// Derives every one of Pawvis's icon assets from the hand-made claw mark
+// (claw.png, white-shape-on-black). Deterministic — no AI generation:
 //   Resources/menubar-claw.png  128px  black glyph + alpha (menu bar template
 //                                      + overlay cursor), flipped horizontally
+//   Resources/claw-closed.png   128px  retracted claw (button-held cursor)
 //   Resources/icon_1024.png    1024px  app icon: sky→violet gradient + cream
 //                                      claw (same flipped orientation)
+//   Resources/AppIcon.icns             the bundle icon, built from icon_1024
 // Run: swift scripts/process_claw.swift   (from the repo root)
 
 import AppKit
@@ -26,14 +28,78 @@ func loadImage(_ path: String) -> CGImage {
     return image
 }
 
-func writePNG(_ image: CGImage, to path: String) {
+func writePNG(_ image: CGImage, to path: String, quiet: Bool = false) {
     let url = URL(fileURLWithPath: path)
     guard let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
         fail("cannot create \(path)")
     }
     CGImageDestinationAddImage(dest, image, nil)
     guard CGImageDestinationFinalize(dest) else { fail("cannot write \(path)") }
-    print("wrote \(path) (\(image.width)x\(image.height))")
+    if !quiet { print("wrote \(path) (\(image.width)x\(image.height))") }
+}
+
+/// Square downscale with high-quality resampling.
+func scaled(_ image: CGImage, to size: Int) -> CGImage {
+    guard let ctx = CGContext(
+        data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        fail("cannot create \(size)x\(size) context")
+    }
+    ctx.interpolationQuality = .high
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
+    guard let out = ctx.makeImage() else { fail("cannot scale to \(size)x\(size)") }
+    return out
+}
+
+/// Builds the .icns from the 1024px master via a temporary .iconset.
+///
+/// `iconutil` stays the producer on purpose: CGImageDestination can emit
+/// `com.apple.icns` directly, but it infers representation types from pixel
+/// dimensions, where iconutil takes them from Apple's `@2x` naming convention.
+/// The resizing is done here rather than by `sips` so the whole pipeline uses
+/// one resampler.
+func writeICNS(from master: CGImage, to path: String) {
+    let specs = [
+        ("icon_16x16", 16), ("icon_16x16@2x", 32),
+        ("icon_32x32", 32), ("icon_32x32@2x", 64),
+        ("icon_128x128", 128), ("icon_128x128@2x", 256),
+        ("icon_256x256", 256), ("icon_256x256@2x", 512),
+        ("icon_512x512", 512), ("icon_512x512@2x", 1024),
+    ]
+
+    let fm = FileManager.default
+    let iconset = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("Pawvis-\(ProcessInfo.processInfo.processIdentifier).iconset")
+    try? fm.removeItem(at: iconset)
+    do {
+        try fm.createDirectory(at: iconset, withIntermediateDirectories: true)
+    } catch {
+        fail("cannot create \(iconset.path): \(error)")
+    }
+    defer { try? fm.removeItem(at: iconset) }
+
+    for (name, px) in specs {
+        writePNG(scaled(master, to: px),
+                 to: iconset.appendingPathComponent("\(name).png").path,
+                 quiet: true)
+    }
+
+    let iconutil = Process()
+    iconutil.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+    iconutil.arguments = ["-c", "icns", iconset.path, "-o", path]
+    do {
+        try iconutil.run()
+    } catch {
+        fail("cannot run iconutil: \(error)")
+    }
+    iconutil.waitUntilExit()
+    guard iconutil.terminationStatus == 0 else {
+        fail("iconutil exited \(iconutil.terminationStatus)")
+    }
+
+    let bytes = (try? fm.attributesOfItem(atPath: path))?[.size] as? Int ?? 0
+    print("wrote \(path) (\(bytes) bytes, \(specs.count) representations)")
 }
 
 func rgbaPixels(of image: CGImage) -> (data: [UInt8], width: Int, height: Int) {
@@ -201,5 +267,8 @@ guard FileManager.default.fileExists(atPath: sourcePath) else {
 let glyph = makeGlyph(from: loadImage(sourcePath))
 writePNG(makeMenubarGlyph(glyph), to: repo + "/Resources/menubar-claw.png")
 writePNG(makeClosedGlyph(glyph), to: repo + "/Resources/claw-closed.png")
-writePNG(makeAppIcon(glyph), to: repo + "/Resources/icon_1024.png")
-print("done — rebuild AppIcon.icns with the iconset flow")
+
+let appIcon = makeAppIcon(glyph)
+writePNG(appIcon, to: repo + "/Resources/icon_1024.png")
+writeICNS(from: appIcon, to: repo + "/Resources/AppIcon.icns")
+print("done")

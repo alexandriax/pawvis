@@ -29,8 +29,17 @@ resolved by on-device Apple Intelligence. Nothing you do leaves your Mac.
 
 ## Gestures
 
-Your hand is the mouse: the cursor rides your palm, and your fingers are the
-buttons. Everything below is tunable in **Settings → Gestures**.
+Your hands are tracked whenever tracking is on, but the cursor only follows
+once you **show an open hand** — all four fingers up, thumb free. Close it
+into a fist for a moment, or take it out of view, to park the cursor again;
+the claw fades while it's parked. That keeps a hand that's merely visible —
+resting, typing, gesturing — from dragging the cursor around. **Settings →
+Tracking** switches back to "Any detected hand" if you'd rather have no
+trigger at all.
+
+Once you have it, your hand is the mouse: the cursor rides your palm, and your
+fingers are the buttons. Everything below is tunable in **Settings →
+Gestures**.
 
 - **Move** — hold your hand open, fingers up, and move it.
 - **Click** — dip your **index finger**, like tapping a mouse button.
@@ -52,8 +61,13 @@ buttons. Everything below is tunable in **Settings → Gestures**.
 
 The on-screen claw is your cursor: open while pointing, retracted and purple
 while the left button is held, blue for the right button, ringed in light blue
-while scrolling, with a ring that tightens as your click forms and a pulse
-confirming every click. Small dots mark each detected fingertip.
+while scrolling, faded while control is parked, with a ring that tightens as
+your click forms and a pulse confirming every click. Small dots mark each
+detected fingertip.
+
+The menu bar icon opens a live status panel — hands seen, whether control is
+armed, voice-control state — plus a **Gesture Guide** window that walks
+through every gesture.
 
 ## Voice control
 
@@ -118,9 +132,16 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 225 unit tests
+swift test          # 239 unit tests
 swift build         # debug build
-make icon           # regenerate icon art (needs OPENAI_API_KEY)
+```
+
+Every icon asset — app icon, `.icns`, menu bar glyph, claw cursor — is derived
+from the hand-drawn `claw.png` by one deterministic script. Re-running it on an
+unchanged `claw.png` reproduces the committed art byte for byte:
+
+```bash
+make icon           # == swift scripts/process_claw.swift
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture notes, the settings-UI rules, and
@@ -144,6 +165,7 @@ Sources/
     VoiceControl/      on-device speech engine · command executor ·
                        screen context (AX + OCR) · Apple Intelligence resolver
     Update/            update checking and self-update
+    Support/           permissions · logging · theme
     App/ UI/           menu bar, settings, gesture guide
 ```
 
