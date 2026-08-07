@@ -269,10 +269,19 @@
         <li>&ldquo;Pawvis, stop listening&rdquo; stays local, so you can always shut it off instantly.</li>
       </ul>
       <p class="agent-warn">
-        This one is genuinely powerful and genuinely sharp: the agent runs with
-        permission checks bypassed and can do anything you could do at the
-        keyboard. It ships off by default, and turning it on is a deliberate
-        choice. It is also the one mode that sends what you say beyond your Mac.
+        <strong>Read this part twice: the agent does not ask.</strong>
+        Claude&nbsp;Code and Codex are launched with their own permission
+        prompts turned off, so nothing pauses to confirm anything. Whatever the
+        agent was handed, it carries out, with your account, your files and
+        your logged-in sessions: deleting things, installing things, running
+        shell commands, sending things on your behalf. Speech recognition is
+        not perfect, and a misheard command is still executed. This is also the
+        one mode that sends what you say beyond your Mac. It ships off by
+        default, and Pawvis makes you accept a warning dialog before it will
+        turn on. If you want a confirmation step before actions run, stay on
+        the on-device handler. Turning it on is your call and your
+        responsibility: no liability is accepted for what an agent does with
+        your machine, however it was asked.
       </p>
     </article>
   </div>
@@ -377,6 +386,19 @@
       <a href="https://github.com/alexandriax/pawvis/releases/latest">Latest release</a>
       <a href="https://github.com/alexandriax/pawvis/blob/main/LICENSE">MIT license</a>
     </nav>
+    <p class="footer-disclaimer">
+      <strong>A note on what this app is.</strong> Pawvis operates your
+      computer. It moves the real cursor and posts real clicks, drags and
+      scrolls on your behalf, so a stray gesture can click whatever happens to
+      be under the pointer. With voice control switched on it can also open
+      apps, type, and press keys, and with the optional agent hand-off enabled
+      it can run whatever the agent decides to do, without asking first. Take a
+      few minutes to get the hang of it somewhere harmless, and keep the menu
+      bar toggle in reach. Pawvis is provided as is, without warranty of any
+      kind: its developer accepts no liability for any action taken with it,
+      intentional or not, or for any resulting loss or damage. You are
+      responsible for what happens on your machine. Please use it responsibly.
+    </p>
     <p class="footer-line">Made with opposable thumbs, so you can point without one.</p>
   </div>
 </footer>
