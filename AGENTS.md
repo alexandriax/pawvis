@@ -137,10 +137,34 @@ Xcode 26+.
 
 ## Releases
 
-Tag-driven and fully automated (`.github/workflows/release.yml`): push a `v*`
-tag (or run the workflow with a version) and CI tests, stamps the version into
+**Merging a labelled pull request is the whole release procedure.** Every PR
+carries exactly one of `major` / `minor` / `patch` saying how the version
+moves, or `no-release` to merge without shipping — `.github/workflows/pr.yml`
+fails the PR until it does, because the alternative is guessing, and a wrong
+guess here ships a version number that can never be taken back. The labels
+themselves come from `.github/workflows/labels.yml`, run once from the Actions
+tab.
+
+On merge, `.github/workflows/release.yml` tests, stamps the version into
 `Info.plist`, bundles, signs with Developer ID, notarizes, staples, zips, and
-publishes a GitHub Release with `Pawvis.zip` plus its `.sha256`.
+publishes a GitHub Release with `Pawvis.zip` plus its `.sha256`. Pushing a `v*`
+tag by hand still works, and so does running the workflow manually with a bump
+kind or an exact version.
+
+There is no version file. The newest `v*` tag *is* the current version:
+`scripts/next_version.sh` reads the tag list and does the arithmetic,
+`scripts/select_bump.sh` turns the labels into a bump kind, and the tag is
+created by the publish step at the very end — so a build that falls over leaves
+no tag pointing at a release that is not coming. Both scripts run by hand:
+
+```bash
+LABELS='["minor"]' ./scripts/select_bump.sh   # minor
+./scripts/next_version.sh minor               # 0.2.0
+```
+
+The merge path needs the PR to come from a branch in this repo: `GITHUB_TOKEN`
+is read-only on fork pull requests and cannot publish. Release a fork's work by
+pushing the tag once it has landed on main.
 
 **Keep the asset name fixed, not versioned.** It makes
 `https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip` a

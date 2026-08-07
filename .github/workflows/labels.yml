@@ -1,0 +1,33 @@
+name: Create release labels
+
+# Run once from the Actions tab. Creates the four labels the PR gate expects, so
+# a pull request is never blocked on labels that do not exist yet. Safe to
+# re-run: existing labels are updated, not duplicated.
+
+on: workflow_dispatch
+
+permissions:
+  issues: write
+
+jobs:
+  labels:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          make_label() {
+            name="$1"; color="$2"; desc="$3"
+            if gh label create "$name" --repo "$REPO" --color "$color" --description "$desc" 2>/dev/null; then
+              echo "created $name"
+            else
+              gh label edit "$name" --repo "$REPO" --color "$color" --description "$desc"
+              echo "updated $name"
+            fi
+          }
+          make_label major      "B60205" "Breaking change - bumps 1.2.3 to 2.0.0"
+          make_label minor      "0E8A16" "New feature - bumps 1.2.3 to 1.3.0"
+          make_label patch      "1D76DB" "Fix or small change - bumps 1.2.3 to 1.2.4"
+          make_label no-release "5B45A8" "Merge without cutting a release"

@@ -1,0 +1,32 @@
+name: PR
+
+# The one thing every pull request has to say is how the version should move.
+# That is what makes "merge the PR" the whole release procedure — see
+# .github/workflows/release.yml.
+#
+# Deliberately its own workflow rather than a job in ci.yml: this has to re-run
+# when a label changes, and ci.yml builds on macos-26. Relabelling a PR should
+# cost a few seconds on ubuntu, not a full app build.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  release-label:
+    name: release label
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exactly one of major / minor / patch
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: ./scripts/select_bump.sh
