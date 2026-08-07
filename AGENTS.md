@@ -65,11 +65,13 @@ the right — both invisible in code review and obvious to the user.
    multi-line growth instead of truncation. `CaptionText` does it for you.
 4. Pages are inside a `ScrollView`, so adding rows can't clip the bottom.
 5. After changing settings UI, actually open the window and look at every tab.
-   There is no headless shortcut: SwiftUI's `ImageRenderer` produces blank
-   output for these views without a running app, and the `Settings` scene
-   can't be opened programmatically from a launch hook in a menu-bar-only
-   app. Run `make app`, open Pawvis, and check the tabs — paying attention to
-   the longest strings (the Voice control and Tracking tabs have them).
+   There is no headless render: SwiftUI's `ImageRenderer` produces blank
+   output for these views without a running app. But the window *can* be
+   opened programmatically now — `PAWVIS_OPEN_SETTINGS=<tab>` (general,
+   tracking, gestures, voice, about) opens Settings on that tab right after
+   launch, so `make app` + launch + `screencapture` covers it without
+   hand-clicking. Pay attention to the longest strings (the Voice control and
+   Tracking tabs have them).
 
 ## Launch at login
 
@@ -277,6 +279,16 @@ constraints worth keeping:
 `SettingsRouter` owns the `TabView` selection, which is also why the tab is
 persisted by hand: SwiftUI only restores the last-viewed tab
 (`com_apple_SwiftUI_Settings_selectedTabIndex`) while that selection is unbound.
+
+Opening Settings from outside SwiftUI goes through `SettingsWindow`, and its
+two rules are measured, not guessed (macOS 26): the folkloric
+`NSApp.sendAction(Selector(("showSettingsWindow:")))` **returns true while
+opening nothing**, so the real openers are an `OpenSettingsAction` captured at
+launch from the `MenuBarExtra` label plus the app-menu "Settings…" item as
+fallback; and the Settings window is identified by
+`identifier == "com_apple_SwiftUI_Settings_window"`, never by title — macOS
+titles it after the selected tab ("About"), so a title match quietly never
+fronts anything.
 
 Signing and notarization come from repository secrets, set by running
 `scripts/setup_signing.sh` interactively (it never belongs in an automated

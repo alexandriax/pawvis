@@ -35,8 +35,16 @@ struct PawvisApp: App {
 /// The status item: the sloth-claw template glyph (adapts to menu bar
 /// light/dark), with a small dot while voice control is live. Falls back to
 /// an SF Symbol if the glyph asset is missing (e.g. running the bare binary).
+///
+/// Also the place `SettingsWindow` gets its `OpenSettingsAction`: this label
+/// is the one view a menu-bar app is guaranteed to instantiate at launch, so
+/// capturing here means the update notification can open Settings even when
+/// no other view of ours has ever existed. (The `showSettingsWindow:`
+/// selector is not an alternative — on macOS 26 it returns true and does
+/// nothing.)
 private struct MenuBarIcon: View {
     let voiceActive: Bool
+    @Environment(\.openSettings) private var openSettings
 
     private static let clawImage: NSImage? = {
         guard let url = Bundle.main.url(forResource: "menubar-claw", withExtension: "png"),
@@ -47,19 +55,22 @@ private struct MenuBarIcon: View {
     }()
 
     var body: some View {
-        if let claw = Self.clawImage {
-            ZStack(alignment: .topTrailing) {
-                Image(nsImage: claw)
-                if voiceActive {
-                    Circle()
-                        .fill(PawvisTheme.purpleUI)
-                        .frame(width: 5, height: 5)
-                        .offset(x: 2, y: -1)
+        Group {
+            if let claw = Self.clawImage {
+                ZStack(alignment: .topTrailing) {
+                    Image(nsImage: claw)
+                    if voiceActive {
+                        Circle()
+                            .fill(PawvisTheme.purpleUI)
+                            .frame(width: 5, height: 5)
+                            .offset(x: 2, y: -1)
+                    }
                 }
+            } else {
+                Image(systemName: voiceActive ? "pawprint.circle.fill" : "pawprint.fill")
             }
-        } else {
-            Image(systemName: voiceActive ? "pawprint.circle.fill" : "pawprint.fill")
         }
+        .onAppear { SettingsWindow.opener = openSettings }
     }
 }
 
@@ -142,6 +153,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // banner the user clicked while Pawvis wasn't running is delivered to
         // nobody and the Install button does nothing.
         updateNotifier.start()
+
+        // PAWVIS_OPEN_SETTINGS=<general|tracking|gestures|voice|about> opens
+        // Settings on that tab right after launch. This exists for eyes-on UI
+        // verification (AGENTS.md requires looking at the tabs after settings
+        // changes, and SwiftUI offers no headless render of them) and it
+        // exercises the exact cold-start path the update notification uses.
+        if let name = ProcessInfo.processInfo.environment["PAWVIS_OPEN_SETTINGS"],
+           let tab = SettingsTab(rawValue: name) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                SettingsRouter.shared.open(tab)
+            }
+        }
 
         // At most one automatic check per day (see UpdatePolicy). A release
         // worth offering posts the system notification via `onUpdateFound`.
