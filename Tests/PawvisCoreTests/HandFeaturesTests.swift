@@ -53,42 +53,6 @@ final class HandFeaturesTests: XCTestCase {
                              "index must read clearly open during a middle-finger pinch")
     }
 
-    // MARK: Whole-hand pinch
-
-    func testWholeHandPinchRatioIsMeanTipDistance() {
-        let gathered = features(SyntheticHand.wholeHandPinch(gap: 0.3))
-        XCTAssertEqual(gathered.wholeHandPinchRatio()!, 0.3, accuracy: 1e-9)
-        XCTAssertGreaterThan(features(SyntheticHand.openRelaxed()).wholeHandPinchRatio()!, 1.5)
-    }
-
-    func testThumbIndexPinchLeavesWholeHandMeanHigh() {
-        // The averaging is the whole point: the three idle fingers keep the mean
-        // far from the threshold even with the index tip touching the thumb.
-        let f = features(SyntheticHand.pinchIndex(gap: 0.1))
-        XCTAssertEqual(f.pinchRatio(to: .index)!, 0.1, accuracy: 1e-9)
-        XCTAssertGreaterThan(f.wholeHandPinchRatio()!, 0.7)
-    }
-
-    func testWholeHandPinchRatioAveragesOnlyVisibleTips() {
-        var hand = SyntheticHand.wholeHandPinch(gap: 0.3)
-        // Ring and little occluded: the mean is over index + middle, which sit
-        // at the same gap, so it still reads 0.3.
-        hand.setPoint(hand[.ringTip]!, for: .ringTip, confidence: 0.1)
-        hand.setPoint(hand[.littleTip]!, for: .littleTip, confidence: 0.1)
-        let f = HandFeatures(hand: hand, minJointConfidence: 0.25)!
-        XCTAssertEqual(f.wholeHandPinchRatio()!, 0.3, accuracy: 1e-9)
-
-        // Down to one visible tip it degenerates into a plain pinch — no answer.
-        hand.setPoint(hand[.middleTip]!, for: .middleTip, confidence: 0.1)
-        XCTAssertNil(HandFeatures(hand: hand, minJointConfidence: 0.25)!.wholeHandPinchRatio())
-    }
-
-    func testWholeHandPinchRatioNilWithoutThumb() {
-        var hand = SyntheticHand.wholeHandPinch(gap: 0.3)
-        hand.setPoint(hand[.thumbTip]!, for: .thumbTip, confidence: 0.1)
-        XCTAssertNil(HandFeatures(hand: hand, minJointConfidence: 0.25)!.wholeHandPinchRatio())
-    }
-
     // MARK: Thumb curl
 
     func testThumbCurlRatioDropsWhenTucked() {
@@ -234,7 +198,7 @@ final class HandFeaturesTests: XCTestCase {
     func testFistDetection() {
         XCTAssertTrue(features(SyntheticHand.fist()).isFist())
         XCTAssertFalse(features(SyntheticHand.openRelaxed()).isFist())
-        XCTAssertFalse(features(SyntheticHand.twoFingerPoint()).isFist())
+        XCTAssertFalse(features(SyntheticHand.scrollPose()).isFist())
     }
 
     func testShakaDetection() {
@@ -244,11 +208,25 @@ final class HandFeaturesTests: XCTestCase {
                        "fist has no extended thumb/little, must not read as shaka")
     }
 
-    func testTwoFingerPointDetection() {
-        XCTAssertTrue(features(SyntheticHand.twoFingerPoint()).isTwoFingerPoint())
-        XCTAssertFalse(features(SyntheticHand.openRelaxed()).isTwoFingerPoint())
-        XCTAssertFalse(features(SyntheticHand.fist()).isTwoFingerPoint())
-        XCTAssertFalse(features(SyntheticHand.shaka()).isTwoFingerPoint())
+    func testScrollPoseDetection() {
+        XCTAssertTrue(features(SyntheticHand.scrollPose()).isScrollPose())
+        XCTAssertFalse(features(SyntheticHand.openRelaxed()).isScrollPose())
+        XCTAssertFalse(features(SyntheticHand.fist()).isScrollPose())
+        XCTAssertFalse(features(SyntheticHand.shaka()).isScrollPose(),
+                       "a curled index is not the scroll pose")
+        XCTAssertFalse(features(SyntheticHand.mouseTap(indexDown: true)).isScrollPose())
+        XCTAssertFalse(features(SyntheticHand.scrollPoseHalf()).isScrollPose(),
+                       "half-bent fingers must not *start* a scroll")
+    }
+
+    func testScrollPoseHeldIsTheLooseBand() {
+        XCTAssertTrue(features(SyntheticHand.scrollPose()).isScrollPoseHeld())
+        XCTAssertTrue(features(SyntheticHand.scrollPoseHalf()).isScrollPoseHeld(),
+                      "the neutral band keeps a scroll alive — hysteresis for free")
+        XCTAssertFalse(features(SyntheticHand.openRelaxed()).isScrollPoseHeld(),
+                       "re-extending the folded fingers ends the pose")
+        XCTAssertFalse(features(SyntheticHand.fist()).isScrollPoseHeld(),
+                       "…and so does dropping the index and pinky")
     }
 
     func testCasualPinchHasLowOpennessButIsNotAFist() {
@@ -342,7 +320,7 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertFalse(features(SyntheticHand.halfClosed()).isOpenHand(),
                        "a relaxed half-curl is not the deliberate trigger")
         XCTAssertFalse(features(SyntheticHand.shaka()).isOpenHand())
-        XCTAssertFalse(features(SyntheticHand.twoFingerPoint()).isOpenHand())
+        XCTAssertFalse(features(SyntheticHand.scrollPose()).isOpenHand())
         XCTAssertFalse(features(SyntheticHand.mouseTap(indexDown: true)).isOpenHand(),
                        "a dipped finger leaves the pose")
     }

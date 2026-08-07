@@ -58,7 +58,29 @@ final class MouseController {
                      at: projector.toGlobal(at),
                      button: button == .left ? .left : .right,
                      clickCount: clickCount)
+            case .scroll(let deltaY):
+                postScroll(deltaY)
             }
+        }
+    }
+
+    /// Screen-heights of content scrolled per screen-height of hand travel.
+    /// >1 because a page-per-sweep felt sluggish next to a trackpad.
+    private static let scrollGain: Double = 2.2
+
+    /// Posts one continuous (trackpad-style) pixel scroll step. `deltaY` is
+    /// the engine's screen-normalized wheel delta, positive = scroll up —
+    /// already Quartz's positive axis-1 direction, so no flip here.
+    private func postScroll(_ deltaY: Double) {
+        let pixels = Int32((deltaY * projector.targetRect.height * Self.scrollGain).rounded())
+        guard pixels != 0,
+              let event = CGEvent(
+                scrollWheelEvent2Source: source, units: .pixel,
+                wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+        // Continuous = smooth pixel scrolling; apps animate it like a trackpad.
+        event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        postQueue.async {
+            self.paceAndPost(event)
         }
     }
 

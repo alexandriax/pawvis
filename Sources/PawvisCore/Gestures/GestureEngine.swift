@@ -7,15 +7,18 @@ import Foundation
 /// The gesture model is intentionally minimal:
 ///   open hand shown     → cursor control arms (see `config.controlTrigger`;
 ///                         `.anyHand` skips the ceremony, a fist parks it again)
-///   hand tracked        → the cursor follows the click gesture's pointer
-///   the gesture closes  → left button down (click; twice quickly = double-click)
-///   move while closed   → drag
-///   the gesture opens   → button up
+///   hand tracked        → the cursor rides the palm
+///   the index finger dips → left button down (click; twice quickly = double-click)
+///   move while dipped   → drag
+///   the finger lifts    → button up
 ///   a second finger dips → the same machinery, on the right button
+///   middle + ring fold in → scroll: the scroll pose parks the cursor and
+///                         turns vertical hand travel into wheel events
 ///
-/// Which shape clicks is `config.clickGesture`; every mode reduces to one
-/// scale-normalized ratio crossing a threshold, and each pairs with a pointer
-/// the gesture itself barely moves — so a click doesn't shift the cursor.
+/// The click reduces to one scale-normalized ratio crossing a threshold (the
+/// index tip's extent differenced against the middle finger's, so whole-hand
+/// tilt can't click), and the cursor rides the palm — a landmark the click
+/// motion itself barely moves, so a click doesn't shift the cursor.
 /// Only ever one button at a time: whichever engaged first owns the press.
 ///
 /// Input hands are in **camera space**: normalized [0,1], x right, y down,
@@ -30,15 +33,18 @@ public final class GestureEngine {
             if config.smoothing != oldValue.smoothing {
                 for i in slots.indices { slots[i].setFilterParams(config.smoothing) }
             }
-            if config.clickGesture != oldValue.clickGesture
-                || config.rightClickFinger != oldValue.rightClickFinger
+            if config.rightClickFinger != oldValue.rightClickFinger
                 || config.rightClickEnabled != oldValue.rightClickEnabled {
                 // The new setting's ratio says nothing about the old one's
                 // hold, so changing it mid-press would strand the button down —
-                // whether the mode moved out from under a pinch or the finger
-                // moved out from under a right-click. The up rides out with the
-                // next frame (or the next forceRelease).
+                // the finger moved out from under its right-click. The up
+                // rides out with the next frame (or the next forceRelease).
                 pendingEvents = forceRelease(at: lastHandTime)
+            }
+            if config.scrollEnabled != oldValue.scrollEnabled {
+                // Off mid-scroll: stop scrolling at once. On: the pose still
+                // has to engage from scratch.
+                scroll = ScrollState()
             }
             if config.controlTrigger != oldValue.controlTrigger {
                 armFrames = 0
@@ -103,15 +109,19 @@ public final class GestureEngine {
         var releaseFrames = 0
     }
 
-    private static let slotMatchMax = 0.25 // normalized palm travel to keep identity
+    /// The scroll pose's state: the same debounce-both-ways shape
+    /// as a button, plus the anchor the next scroll delta is measured from.
+    private struct ScrollState {
+        var active = false
+        var engageFrames = 0
+        var releaseFrames = 0
+        /// Unclamped pointer y the next delta is measured against; nil until
+        /// the first armed frame after activation seeds it. Unclamped so a
+        /// hand that sails past the interaction box keeps scrolling.
+        var anchorY: Double?
+    }
 
-    /// sporecaster's pinch-strength ramp for the overlay ring: 0 at a ratio of
-    /// `strengthCeiling`, 1 once the tips are `strengthSpan` closer.
-    private static let strengthCeiling = 0.9
-    private static let strengthSpan = 0.5
-    /// The other modes' ratios sit in a narrower band than the thumb–index gap,
-    /// so their ring ramps over this much above their own engage threshold.
-    private static let modeStrengthSpan = 0.45
+    private static let slotMatchMax = 0.25 // normalized palm travel to keep identity
 
     /// Joint confidence required to *engage*. Vision reports low confidence
     /// exactly when it is guessing at overlapping or foreshortened joints —
@@ -152,6 +162,7 @@ public final class GestureEngine {
     private var press: PressState?
     private var leftButton = ButtonState()
     private var rightButton = ButtonState()
+    private var scroll = ScrollState()
     /// EMA of the primary hand's raw camera-space scale; nil until a hand is
     /// seen (and again once one is truly gone).
     private(set) var smoothedHandScale: Double?
@@ -188,6 +199,7 @@ public final class GestureEngine {
 
     public func reset() {
         _ = forceRelease(at: 0)
+        scroll = ScrollState()
         for i in slots.indices { slots[i].reset() }
         primarySlotID = nil
         cursor = nil
@@ -242,11 +254,29 @@ public final class GestureEngine {
         // 3. The control trigger decides whether this hand gets the cursor.
         updateTrigger(features)
 
-        if armed, let pointer = pointerPoint(features, hand: primary.hand) {
-            // 4. Cursor follows the mode's pointer (chosen so closing the
-            // gesture barely moves it).
+        // 4. The scroll pose's own arm/park state machine. Before the cursor
+        // step because an active scroll parks the cursor.
+        updateScroll(features)
+
+        if armed, let pointer = pointerPoint(features) {
+            // 5. Cursor follows the palm (chosen so the click gesture barely
+            // moves it) — unless the scroll pose holds it parked, in which
+            // case vertical palm travel becomes wheel events instead.
             let clamped = pointer.clampedToUnit()
-            if var p = press {
+            if scroll.active {
+                if let anchor = scroll.anchorY {
+                    // Deadband against the anchor, like a drag's: shimmer
+                    // stays put, and slow travel accumulates until it counts.
+                    let travel = pointer.y - anchor
+                    if abs(travel) >= config.jitterDeadband {
+                        scroll.anchorY = pointer.y
+                        // Hand up (y shrinking) = scroll up (positive wheel).
+                        events.append(.scroll(deltaY: config.scrollInvert ? travel : -travel))
+                    }
+                } else {
+                    scroll.anchorY = pointer.y
+                }
+            } else if var p = press {
                 // Tap window then micro-movement suppression (see dragThreshold).
                 if p.dragging || clamped.distance(to: p.downAt) >= dragThreshold(for: p, at: frame.time) {
                     p.dragging = true
@@ -265,31 +295,35 @@ public final class GestureEngine {
             }
         }
 
-        // 5. Button state: each button's ratio with hysteresis + debounce.
+        // 6. Button state: each button's ratio with hysteresis + debounce.
         // Left runs first, so a frame where both fingers dip reads as a plain
-        // click; from then on whichever is held locks the other out. Disarmed,
-        // the buttons stay untouched (they are at rest — disarming resets
-        // them), so no press can ever begin on a parked cursor.
-        let ratio = armed ? modeRatio(features) : nil
+        // click; from then on whichever is held locks the other out — and an
+        // active scroll locks out both. Disarmed, the buttons stay untouched
+        // (they are at rest — disarming resets them), so no press can ever
+        // begin on a parked cursor.
+        let ratio = armed ? clickRatio(features) : nil
         if armed {
             let rightHeld = isHeld(.right)
             updateButton(.left, state: &leftButton, ratio: ratio,
                          engage: config.engageRatio, release: config.releaseRatio,
-                         confident: engageConfident(primary.hand), blocked: rightHeld,
+                         confident: engageConfident(primary.hand),
+                         blocked: rightHeld || scroll.active,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
-                         confident: rightEngageConfident(primary.hand), blocked: leftHeld,
+                         confident: rightEngageConfident(primary.hand),
+                         blocked: leftHeld || scroll.active
+                             || scrollPoseBlocksRightClick(features),
                          at: frame.time, events: &events)
         }
 
-        // 6. Fit the interaction box to the hand (auto reach). Last, so the
+        // 7. Fit the interaction box to the hand (auto reach). Last, so the
         // box that mapped this frame is the one the press — if any — began in.
         // Runs while disarmed too: the box is fitted by the time control arms.
         updateReach(rawHand: primary.raw)
 
-        // 7. Overlay state.
+        // 8. Overlay state.
         overlay.hands = tracked.map { th in
             var oh = OverlayHand()
             oh.isPrimary = th.slotID == primarySlotID
@@ -301,6 +335,7 @@ public final class GestureEngine {
         overlay.grabbed = leftButton.engaged
         overlay.rightGrabbed = rightButton.engaged
         overlay.isDragging = press?.dragging ?? false
+        overlay.isScrolling = scroll.active
         overlay.closingProgress = closingProgress(for: ratio)
 
         return (events, overlay)
@@ -363,77 +398,98 @@ public final class GestureEngine {
         }
     }
 
-    // MARK: - Click gesture modes
+    // MARK: - Click gesture
 
-    /// The scale-normalized quantity this mode thresholds. nil (a joint below
-    /// `minJointConfidence`) holds the current state, as it always has.
-    private func modeRatio(_ features: HandFeatures?) -> Double? {
-        guard let features else { return nil }
-        switch config.clickGesture {
-        case .pinch: return features.pinchRatio(to: .index)
-        case .wholeHandPinch: return features.wholeHandPinchRatio()
-        case .thumbCurl: return features.thumbCurlRatio()
-        case .indexTap: return features.indexTapRatio()
-        }
+    /// The scale-normalized quantity the left button thresholds: the index
+    /// finger's dip differential. nil (a joint below `minJointConfidence`)
+    /// holds the current state, as it always has.
+    private func clickRatio(_ features: HandFeatures?) -> Double? {
+        features?.indexTapRatio()
     }
 
-    /// The landmark that drives the cursor in this mode — always one the click
-    /// motion itself doesn't move.
-    private func pointerPoint(_ features: HandFeatures?, hand: Hand) -> Vec2? {
-        guard let features else { return nil }
-        switch config.clickGesture {
-        case .pinch:
-            return features.pointerPoint(.pinchMidpoint)
-        case .wholeHandPinch, .thumbCurl, .indexTap:
-            // Both gestures are all-finger motion; only the palm holds still
-            // through them. (A fingertip centroid shifts ~0.08 screen-normalized
-            // when the hand opens to release — enough to smear every click
-            // into a drag.)
-            return features.pointerPoint(.palmCenter)
-        }
+    /// The landmark that drives the cursor — the palm, the one part of the
+    /// hand no finger gesture moves. (A fingertip centroid shifts ~0.08
+    /// screen-normalized when the hand opens to release — enough to smear
+    /// every click into a drag.)
+    private func pointerPoint(_ features: HandFeatures?) -> Vec2? {
+        features?.pointerPoint(.palmCenter)
     }
 
-    /// Whether every joint this mode's ratio depends on is tracked confidently
+    /// Whether every joint the click ratio depends on is tracked confidently
     /// enough to *start* a press. Consulted only on the engage side.
     private func engageConfident(_ hand: Hand) -> Bool {
-        func confident(_ joint: HandJoint) -> Bool {
-            hand.confidence(for: joint) >= Self.engageConfidenceFloor
+        // The differential needs both fingers' tip and knuckle.
+        [HandJoint.indexTip, .indexMCP, .middleTip, .middleMCP].allSatisfy {
+            hand.confidence(for: $0) >= Self.engageConfidenceFloor
         }
-        switch config.clickGesture {
-        case .pinch:
-            return confident(.thumbTip) && confident(.indexTip)
-        case .wholeHandPinch:
-            guard confident(.thumbTip) else { return false }
-            // Only the tips that fed the mean this frame have to be trustworthy.
-            let used = Finger.allCases.filter {
-                hand.point(for: $0.tip, minConfidence: config.minJointConfidence) != nil
+    }
+
+    // MARK: - Scroll
+
+    /// The scroll pose's arm/park state machine: the strict pose held
+    /// for the debounce starts a scroll, drifting out of the loosened hold
+    /// pose for the debounce ends it. A press always wins — the pose cannot
+    /// engage while any button is down (physically it can't coexist with a
+    /// dip anyway: the scroll pose needs the index and little fingers up).
+    private func updateScroll(_ features: HandFeatures?) {
+        guard config.scrollEnabled, armed else {
+            scroll = ScrollState()
+            return
+        }
+        guard press == nil, !leftButton.engaged, !rightButton.engaged else {
+            scroll.engageFrames = 0
+            return
+        }
+        guard let features else {
+            // Missing joints hold the current state, exactly as the buttons'.
+            scroll.engageFrames = 0
+            scroll.releaseFrames = 0
+            return
+        }
+        if scroll.active {
+            scroll.engageFrames = 0
+            guard !features.isScrollPoseHeld() else {
+                scroll.releaseFrames = 0
+                return
             }
-            return !used.isEmpty && used.allSatisfy { confident($0.tip) }
-        case .thumbCurl:
-            return confident(.thumbTip) && confident(.indexMCP)
-        case .indexTap:
-            // The differential needs both fingers' tip and knuckle.
-            return confident(.indexTip) && confident(.indexMCP)
-                && confident(.middleTip) && confident(.middleMCP)
+            scroll.releaseFrames += 1
+            guard scroll.releaseFrames >= config.pinchDebounceFrames else { return }
+            scroll = ScrollState()
+        } else {
+            scroll.releaseFrames = 0
+            guard features.isScrollPose() else {
+                scroll.engageFrames = 0
+                return
+            }
+            scroll.engageFrames += 1
+            guard scroll.engageFrames >= config.pinchDebounceFrames else { return }
+            scroll = ScrollState(active: true) // anchor seeds from the next pointer
+        }
+    }
+
+    /// With scroll on, a right-click finger that is *half the scroll
+    /// pose* (middle or ring) gets one extra engage guard: the pose's other
+    /// folding finger must still be extended. Folding middle + ring together
+    /// into a scroll can transiently read as one of them dipping ahead of its
+    /// tap reference; a genuine dip keeps the rest of the hand up. Engage
+    /// only — a held right button still releases normally.
+    private func scrollPoseBlocksRightClick(_ features: HandFeatures?) -> Bool {
+        guard config.scrollEnabled, let features else { return false }
+        switch config.rightClickFinger {
+        case .middle: return features.isExtended(.ring) != true
+        case .ring: return features.isExtended(.middle) != true
+        case .index, .little: return false
         }
     }
 
     // MARK: - Right click
 
     /// The finger whose dip presses the right button, or nil when this
-    /// configuration has none: the gathering modes can't tell a dip from their
-    /// own click, and the finger already driving the left button can't drive
-    /// both.
+    /// configuration has none: the finger already driving the left button
+    /// can't drive both.
     private var activeRightClickFinger: Finger? {
         guard config.rightClickEnabled else { return nil }
-        switch config.clickGesture {
-        case .indexTap:
-            return config.rightClickFinger == .index ? nil : config.rightClickFinger
-        case .thumbCurl:
-            return config.rightClickFinger
-        case .wholeHandPinch, .pinch:
-            return nil
-        }
+        return config.rightClickFinger == .index ? nil : config.rightClickFinger
     }
 
     /// The dip differential the right button thresholds, in every mode that
@@ -513,21 +569,11 @@ public final class GestureEngine {
     private func closingProgress(for ratio: Double?) -> Double {
         if leftButton.engaged || rightButton.engaged { return 1 }
         guard let ratio else { return 0 }
-        let progress: Double
-        switch config.clickGesture {
-        case .pinch:
-            progress = (Self.strengthCeiling - ratio) / Self.strengthSpan
-        case .wholeHandPinch, .thumbCurl:
-            // Anchored on this mode's own engage threshold: their ratios never
-            // reach sporecaster's thumb–index range, so the fixed ramp would
-            // read full long before the click.
-            progress = ((config.engageRatio + Self.modeStrengthSpan) - ratio) / Self.modeStrengthSpan
-        case .indexTap:
-            // Idles near 1.0; a shorter ramp keeps the resting ring near zero
-            // instead of showing a quarter-closed ring at rest.
-            let span = 0.25
-            progress = ((config.releaseRatio + span) - ratio) / (config.releaseRatio + span - config.engageRatio)
-        }
+        // The tap differential idles near 1.0; a short ramp keeps the resting
+        // ring near zero instead of showing a quarter-closed ring at rest.
+        let span = 0.25
+        let progress = ((config.releaseRatio + span) - ratio)
+            / (config.releaseRatio + span - config.engageRatio)
         return min(max(progress, 0), 1)
     }
 
@@ -585,6 +631,7 @@ public final class GestureEngine {
         // not release a drag (sporecaster keeps slots alive 300 ms).
         if time - lastHandTime > config.trackingLossGrace {
             events.append(contentsOf: forceRelease(at: time))
+            scroll = ScrollState() // a returning hand re-anchors from scratch
             primarySlotID = nil
             // The hand is genuinely gone: the next one sizes the auto box from
             // its own scale rather than inheriting this one's.
@@ -600,6 +647,7 @@ public final class GestureEngine {
             overlay.grabbed = leftButton.engaged
             overlay.rightGrabbed = rightButton.engaged
             overlay.isDragging = press?.dragging ?? false
+            overlay.isScrolling = scroll.active
             overlay.closingProgress = held ? 1 : 0
         }
         overlay.armed = armed

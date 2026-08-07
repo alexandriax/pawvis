@@ -227,16 +227,7 @@ private struct TrackingSettingsTab: View {
     private var triggerCaption: String {
         switch store.settings.gestures.controlTrigger {
         case .openHand:
-            // A fist physically contains the pinch and thumb-curl click
-            // gestures, so in those modes it clicks rather than parks.
-            let park: String
-            switch store.settings.gestures.clickGesture {
-            case .indexTap, .wholeHandPinch:
-                park = "Close your hand into a fist for a moment — or take it out of view — to park the cursor again."
-            case .pinch, .thumbCurl:
-                park = "Take your hand out of view to park the cursor again (with your click gesture, a closing fist reads as a click and holds it instead)."
-            }
-            return "Your hands are tracked whenever tracking is on, but the cursor only follows after you show an open hand — all four fingers up, thumb free. \(park) A click or drag in progress never lets go, and the claw dims while control is parked."
+            return "Your hands are tracked whenever tracking is on, but the cursor only follows after you show an open hand — all four fingers up, thumb free. Close your hand into a fist for a moment — or take it out of view — to park the cursor again. A click or drag in progress never lets go, and the claw dims while control is parked."
         case .anyHand:
             return "Any hand the camera sees moves the cursor immediately — no trigger gesture."
         }
@@ -250,19 +241,15 @@ private struct GestureSettingsTab: View {
 
     var body: some View {
         SettingsPage {
-            SettingRow(title: "Click gesture", caption: clickGestureCaption) {
-                Picker("", selection: $store.settings.gestures.clickGesture) {
-                    ForEach(ClickGesture.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Click — mouse tap")
+                    .font(.callout)
+                CaptionText("Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your palm.")
             }
-
-            Divider()
 
             LabeledSlider(
                 label: "Sensitivity",
-                caption: "Right = a lighter gesture clicks. Left = it must close more fully.",
+                caption: "Right = a lighter dip clicks. Left = the finger must dip further.",
                 value: $store.settings.gestures.pinchEngageRatio,
                 range: 0.30...0.60)
 
@@ -274,28 +261,36 @@ private struct GestureSettingsTab: View {
                     set: { store.settings.gestures.dragStartDelay = $0 }),
                 range: 0...0.6)
 
-            if rightClickAvailable {
-                Divider()
+            Divider()
 
-                SettingToggle(
-                    title: "Right-click",
-                    isOn: $store.settings.gestures.rightClickEnabled)
+            SettingToggle(
+                title: "Right-click",
+                isOn: $store.settings.gestures.rightClickEnabled)
 
-                SettingRow(
-                    title: "Right-click finger",
-                    caption: "Dip that finger like a mouse button to right-click; hold it down to right-drag. Measured against its neighbor, so hand tilt can't trigger it."
-                ) {
-                    Picker("", selection: $store.settings.gestures.rightClickFinger) {
-                        Text("Pinky").tag(Finger.little)
-                        Text("Ring").tag(Finger.ring)
-                        Text("Middle").tag(Finger.middle)
-                        if store.settings.gestures.clickGesture == .thumbCurl {
-                            Text("Index").tag(Finger.index)
-                        }
-                    }
-                    .disabled(!store.settings.gestures.rightClickEnabled)
+            SettingRow(
+                title: "Right-click finger",
+                caption: "Dip that finger like a mouse button to right-click; hold it down to right-drag. Measured against its neighbor, so hand tilt can't trigger it."
+            ) {
+                Picker("", selection: $store.settings.gestures.rightClickFinger) {
+                    Text("Pinky").tag(Finger.little)
+                    Text("Ring").tag(Finger.ring)
+                    Text("Middle").tag(Finger.middle)
                 }
+                .disabled(!store.settings.gestures.rightClickEnabled)
             }
+
+            Divider()
+
+            SettingToggle(
+                title: "Scroll gesture",
+                caption: "Fold your middle and ring fingers in — index and pinky stay up — then move your hand up and down to scroll. The cursor parks while the pose is held.",
+                isOn: $store.settings.gestures.scrollEnabled)
+
+            SettingToggle(
+                title: "Invert scroll direction",
+                caption: "On: moving your hand up scrolls the page down.",
+                isOn: $store.settings.gestures.scrollInvert)
+                .disabled(!store.settings.gestures.scrollEnabled)
 
             Divider()
 
@@ -314,26 +309,8 @@ private struct GestureSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the click gesture, control trigger, sensitivity, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, smoothing, reach, and timing to the tuned defaults.")
             }
-        }
-    }
-
-    private var rightClickAvailable: Bool {
-        store.settings.gestures.clickGesture == .indexTap
-            || store.settings.gestures.clickGesture == .thumbCurl
-    }
-
-    private var clickGestureCaption: String {
-        switch store.settings.gestures.clickGesture {
-        case .pinch:
-            return "Touch your thumb and index fingertip together to click. The cursor rides their midpoint."
-        case .wholeHandPinch:
-            return "Gather all your fingertips onto your thumb to click — deliberate, and averaging four fingers makes phantom clicks much rarer. The cursor rides your palm."
-        case .thumbCurl:
-            return "Hold your hand open like a high-five and tuck your thumb across your palm to click. Your fingers stay visible to the camera, so tracking stays solid. The cursor rides your palm."
-        case .indexTap:
-            return "Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your palm."
         }
     }
 }

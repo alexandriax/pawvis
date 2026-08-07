@@ -94,10 +94,9 @@ Hard-won constraints, each of which broke something real:
 - **The open-hand control trigger gates *arming*, never clicks.** In
   `.openHand` mode an open hand (all four fingers extended — pose bands, not
   `openness()`) arms cursor control; a fist (3+ fingers curled) parks it.
-  Disarming is blocked while any button is engaged or held, because every
-  click gesture closes part of the hand. Note a fist physically *contains*
-  the pinch and thumb-curl click gestures, so in those modes it clicks and
-  holds instead of parking — the settings caption and gesture guide say so.
+  Disarming is blocked while any button is engaged or held, because a click
+  closes part of the hand. The scroll pose folds only two fingers, so it
+  never trips the three-finger disarm line.
 - **Low-confidence frames hold state, never flap it.** A missing fingertip
   must not release a held button; only the tracking-loss grace window does.
 - **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted
@@ -108,15 +107,46 @@ Hard-won constraints, each of which broke something real:
 - **The interaction box is a coordinate transform**, so it can never change
   mid-press (auto-reach freezes while a button is held).
 
-## Adding a click gesture mode
+## The gesture set (and how to grow it)
 
-`ClickGesture` in `GestureConfig.swift` is the switchboard: declaration order
-is picker order (best-performing first). A new mode needs a ratio in
-`HandFeatures` (low = engaged), an `engageFactor`, a pointer landmark and
-`closingProgress` branch in `GestureEngine`, engage-confidence joints, plus
-copy in `SettingsView.clickGestureCaption` and `GestureGuideView`. Add
-synthetic poses to `SyntheticHands.swift` and cover click, release, drag,
-hysteresis band and the confidence gate.
+The click is the **index tap**, full stop. Three alternative click modes
+(pinch, whole-hand pinch, thumb curl) shipped behind a picker through v6;
+real-world testing settled on the mouse tap — the hand stays open and visible,
+so tracking never guesses at overlapping fingers — and the picker was removed.
+Their code lives in git history; the tolerant config decoders simply ignore
+the retired `clickGesture` key, which is the whole retirement path (no
+migrations needed).
+
+**Scroll** is a fold-in pose: middle + ring folded in, index + little up
+(thumb ignored). Its constraints, each deliberate:
+
+- **Engage strict, hold loose.** Starting a scroll needs the folded fingers
+  genuinely *curled* (`isScrollPose`); staying in one only needs them *not
+  extended* (`isScrollPoseHeld`) — the neutral band between the pose bands is
+  free hysteresis, same trick as the control trigger. Both directions still
+  run the shared frame debounce.
+- **The cursor parks while scrolling.** Wheel events land wherever the
+  pointer already is; letting the cursor follow the scrolling hand would
+  drag the scroll target out from under it.
+- **Deltas are anchor-based with the drag jitter deadband**: shimmer emits
+  nothing, slow travel accumulates against the unmoved anchor. Positive
+  `.scroll` delta = scroll up (Quartz's positive axis-1); the invert setting
+  flips it in the engine, and `MouseController` posts continuous pixel
+  scroll events through the same pacing queue as everything else.
+- **A press always wins**: scroll can't engage while a button is down, and an
+  active scroll blocks both buttons' engage.
+- **Right-click on middle or ring gets one extra engage guard** while scroll
+  is on (`scrollPoseBlocksRightClick`): folding middle + ring together into
+  the pose transiently reads as one of them dipping ahead of its reference,
+  so that finger's dip only engages while the pose's *other* folding finger
+  is still extended. A genuine dip keeps the rest of the hand up.
+
+A new pose-triggered mode wants the same shape: a pose (or ratio) in
+`HandFeatures`, strict-engage/loose-hold hysteresis, debounce both ways, an
+explicit story for how it interacts with presses and the trigger, synthetic
+poses in `SyntheticHands.swift`, and tests covering engage, release, the
+band, tracking loss, and the guards. Copy lives in `SettingsView` and
+`GestureGuideView`.
 
 ## Secrets
 

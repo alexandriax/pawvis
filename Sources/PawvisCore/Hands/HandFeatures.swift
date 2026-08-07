@@ -82,18 +82,6 @@ public struct HandFeatures {
         return thumb.midpoint(with: tip)
     }
 
-    /// Mean thumb-tip→fingertip distance over the fingers currently visible,
-    /// normalized by hand scale: the whole-hand pinch measure. Averaging over
-    /// four fingers is what makes it robust — a single collapsed tip distance
-    /// (perspective, occlusion) can't drag the mean below the threshold on its
-    /// own. Needs at least two fingertips; one is just a plain pinch.
-    public func wholeHandPinchRatio() -> Double? {
-        guard let thumb = point(.thumbTip) else { return nil }
-        let tips = Finger.allCases.compactMap { point($0.tip) }
-        guard tips.count >= 2 else { return nil }
-        return tips.reduce(0.0) { $0 + thumb.distance(to: $1) } / Double(tips.count) / scale
-    }
-
     /// Thumb-tip→index-knuckle distance, normalized by hand scale: low means
     /// the thumb is tucked across the palm. `isThumbExtended()` thresholds this
     /// same quantity.
@@ -237,12 +225,28 @@ public struct HandFeatures {
         return true
     }
 
-    /// Index + middle extended, ring + little folded — the scroll pose.
-    public func isTwoFingerPoint() -> Bool {
+    /// Index + little extended, middle + ring folded in — the scroll pose.
+    /// Strict on purpose: the folded fingers must read genuinely curled, so
+    /// this is the *engage* check. The thumb is ignored — the pose is
+    /// comfortable with it out or tucked.
+    public func isScrollPose() -> Bool {
         guard isExtended(.index) == true,
-              isExtended(.middle) == true,
-              isExtended(.ring) == false,
-              isExtended(.little) == false else { return false }
+              isExtended(.little) == true,
+              isCurled(.middle) == true,
+              isCurled(.ring) == true else { return false }
+        return true
+    }
+
+    /// The loosened *hold* check for the scroll pose: the folded fingers may
+    /// drift into the neutral band between curled and extended without ending
+    /// the scroll — the same free hysteresis the control trigger gets from
+    /// the pose bands. (A folded finger whose joints go missing counts as
+    /// still folded; the extended fingers must stay positively extended.)
+    public func isScrollPoseHeld() -> Bool {
+        guard isExtended(.index) == true,
+              isExtended(.little) == true,
+              isExtended(.middle) != true,
+              isExtended(.ring) != true else { return false }
         return true
     }
 
