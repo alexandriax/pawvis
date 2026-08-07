@@ -77,6 +77,26 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertFalse(parser.hasWakePrefix(""))
     }
 
+    // The near tier nominates borderline mishearings for on-device AI
+    // confirmation on the agent path — it must be wider than the strict
+    // gate but still reject plainly unrelated speech.
+    func testNearWakeCatchesMishearingsTheStrictGateRejects() {
+        XCTAssertNil(parser.wakeRemainder("Paw this open Safari"))
+        XCTAssertEqual(parser.nearWakeRemainder("Paw this open Safari"), "open Safari")
+    }
+
+    func testNearWakeIncludesStrictMatches() {
+        XCTAssertEqual(parser.nearWakeRemainder("Pawvis open Safari"), "open Safari")
+        XCTAssertEqual(parser.nearWakeRemainder("Pavis type hi"), "type hi")
+    }
+
+    func testNearWakeStillRejectsUnrelatedSpeech() {
+        for heard in ["Practice typing now", "Pause the video", "open safari",
+                      "talking about something else", ""] {
+            XCTAssertNil(parser.nearWakeRemainder(heard), "'\(heard)' must not near-wake")
+        }
+    }
+
     // MARK: - Commands: go to / search
 
     func testGoToSpokenURL() {
@@ -229,6 +249,14 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertTrue(VoiceControlParser.editDistanceAtMostOne("pawbis", "pawvis"))
         XCTAssertFalse(VoiceControlParser.editDistanceAtMostOne("paws", "pawvis"))
         XCTAssertFalse(VoiceControlParser.editDistanceAtMostOne("practice", "pawvis"))
+    }
+
+    func testBoundedEditDistance() {
+        XCTAssertTrue(VoiceControlParser.editDistance("pawthis", "pawvis", isAtMost: 2))
+        XCTAssertTrue(VoiceControlParser.editDistance("paws", "pawvis", isAtMost: 2))
+        XCTAssertFalse(VoiceControlParser.editDistance("pause", "pawvis", isAtMost: 2))
+        XCTAssertFalse(VoiceControlParser.editDistance("practice", "pawvis", isAtMost: 2))
+        XCTAssertFalse(VoiceControlParser.editDistance("pawthis", "pawvis", isAtMost: 1))
     }
 }
 

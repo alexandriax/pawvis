@@ -96,12 +96,21 @@ else works without it.
 
 ### Agent hand-off (optional)
 
-Settings → Voice can route free-form commands to an installed agent CLI —
-**Claude Code** or **Codex** — instead of the on-device resolver. "Pawvis,
-*anything*" then becomes a headless, auto-approved agent run in the
-background, and the result (or error) flashes in the top-of-screen capsule.
-Strictly opt-in and off by default: the agent runs with permission checks
-bypassed and can do anything you could do at the keyboard.
+Settings → Voice can hand every command to an installed agent CLI —
+**Claude Code** or **Codex** — instead of the on-device brain. "Pawvis,
+*anything*" then pipes everything after the wake word to the agent, asked to
+perform it via computer use, as a headless auto-approved run in the
+background. While it runs, a panel at the bottom-right of the screen streams
+the agent's output live with a **Cancel** button (running sessions are also
+listed, and cancellable, under **Settings → Voice → Background agent
+sessions**), and the outcome — success or failure — always flashes in the
+top-of-screen capsule. Only "Pawvis, stop listening" stays local, so you can
+always shut it off instantly. Pausing after the wake word is fine: a bare
+"Pawvis" keeps listening a few seconds for the command, and if dictation
+mangles the wake word ("Paw this…"), the on-device model confirms it was
+meant for Pawvis and recovers the command before the hand-off. Strictly
+opt-in and off by default: the agent runs with permission checks bypassed and
+can do anything you could do at the keyboard.
 
 ## Install
 

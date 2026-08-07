@@ -4,8 +4,10 @@ import PawvisCore
 /// Orchestrates voice control (beta): the on-device speech engine feeds the
 /// wake-word parser; recognized commands run through the executor, and
 /// free-form ones go to the on-device intent mapper (or the opt-in agent
-/// CLI). Every command is one-shot — nothing keeps listening-side state
-/// between utterances, and speech without the wake word is ignored entirely.
+/// CLI). Speech without the wake word is ignored entirely — but a bare wake
+/// word opens a short capture window, because the speech engine's fast
+/// segmentation routinely splits "Pawvis … open Safari" into two finals
+/// (the original beta dropped both halves of that silently).
 @MainActor
 final class VoiceController: ObservableObject {
     enum State: Equatable {
@@ -31,16 +33,23 @@ final class VoiceController: ObservableObject {
     private let typer = TextTyper()
     private let executor = CommandExecutor()
     private let screenContext = ScreenContextProvider()
-    private let agent = AgentCLIExecutor()
+    private let agentSessions = AgentSessionManager.shared
     /// The top-of-screen capsule showing what's being heard.
     let transcriptOverlay = TranscriptOverlay()
     private var engine: SpeechEngine?
     private var config = VoiceControlConfig()
     private var noticeTimer: Timer?
+    /// Stitches a bare-wake-word final to the command final that follows it.
+    private var gate = UtteranceGate()
+    private var gateWindowTimer: Timer?
     /// The in-flight utterance (shown in the capsule only once it starts
-    /// with the wake word).
+    /// with the wake word, or while the capture window is open).
     private var liveItemId: String?
     private var liveText = ""
+    /// Whether the capsule showed this utterance live — if it did and the
+    /// final is then dropped, the user must be told why, never left staring
+    /// at a capsule that just vanished.
+    private var liveShown = false
 
     var hud: VoiceHUD {
         switch state {
@@ -108,8 +117,12 @@ final class VoiceController: ObservableObject {
         engine = nil
         clearNotice()
         transcriptOverlay.hide()
+        gate.disarm()
+        gateWindowTimer?.invalidate()
+        gateWindowTimer = nil
         liveItemId = nil
         liveText = ""
+        liveShown = false
         state = .off
     }
 
@@ -122,11 +135,18 @@ final class VoiceController: ObservableObject {
         engine.start()
         // Warm the on-device model now so the first mapped command doesn't
         // pay the ~5 s cold-start cost.
-        if config.visualContextEnabled, config.agentExecutor.isEmpty, #available(macOS 26.0, *) {
-            IntentMapper.prewarm()
-            VisualIntentResolver.prewarm()
+        if #available(macOS 26.0, *) {
+            if !config.agentExecutor.isEmpty {
+                // Agent mode uses the model only to rescue garbled wake words.
+                WakeRescuer.prewarm()
+            } else if config.visualContextEnabled {
+                IntentMapper.prewarm()
+                VisualIntentResolver.prewarm()
+            }
         }
     }
+
+    private var now: TimeInterval { Date().timeIntervalSinceReferenceDate }
 
     private func handle(_ event: SpeechEvent) {
         switch event {
@@ -137,30 +157,25 @@ final class VoiceController: ObservableObject {
             if itemId != liveItemId {
                 liveItemId = itemId
                 liveText = ""
+                liveShown = false
             }
             liveText += text
             // The capsule shows only speech addressed to Pawvis — ambient
-            // conversation is never displayed.
+            // conversation is never displayed. While the capture window is
+            // open the speech *is* addressed to Pawvis (the wake word was the
+            // previous final), so it shows too.
             let live = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if parser.hasWakePrefix(live) {
+            if parser.hasWakePrefix(live) || gate.isArmed(now: now) {
                 transcriptOverlay.showLive(live)
+                liveShown = true
             }
 
         case .completed(_, let transcript):
+            let showedLive = liveShown
             liveItemId = nil
             liveText = ""
-            guard parser.hasWakePrefix(transcript) else {
-                // A partial hypothesis may have matched and shown the
-                // capsule; the final says it wasn't for us.
-                transcriptOverlay.hide()
-                return
-            }
-            transcriptOverlay.complete(transcript)
-            let result = parser.parse(transcript)
-            typer.perform(result.typing)
-            if let command = result.command {
-                execute(command, fallbackTranscript: parser.wakeRemainder(transcript))
-            }
+            liveShown = false
+            handleFinal(transcript, showedLive: showedLive)
 
         case .failed(let message):
             engine?.stop()
@@ -169,7 +184,104 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    // MARK: - Commands
+    // MARK: - Finalized utterances
+
+    private func handleFinal(_ transcript: String, showedLive: Bool) {
+        let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor)
+        let remainder = parser.wakeRemainder(transcript)
+        let decision = gate.decide(remainder: remainder, transcript: transcript, now: now)
+        gateWindowTimer?.invalidate()
+        gateWindowTimer = nil
+
+        switch decision {
+        case .command(let command):
+            Log.voice.log("Final accepted (wake \(remainder == nil ? "stitched" : "matched", privacy: .public)): \(command, privacy: .private)")
+            transcriptOverlay.complete(transcript)
+            dispatch(command, tool: tool)
+
+        case .armed:
+            // Bare wake word: hold the capsule open and wait for the command
+            // (the engine loves to finalize on that pause).
+            Log.voice.log("Bare wake word — capture window open")
+            transcriptOverlay.showLive("\(config.wakeWord) — listening for your command…")
+            gateWindowTimer = Timer.scheduledTimer(
+                withTimeInterval: gate.windowSeconds + 0.1, repeats: false
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    // Every final invalidates this timer, so firing means the
+                    // window lapsed unused: tidy up. If the user is mid-speech
+                    // (capsule live), leave it — the final's own handling
+                    // will explain the expired window.
+                    guard let self else { return }
+                    self.gate.disarm()
+                    if !self.liveShown {
+                        self.transcriptOverlay.hide()
+                    }
+                }
+            }
+
+        case .ignored:
+            handleNoWake(transcript, tool: tool, showedLive: showedLive)
+        }
+    }
+
+    /// The final didn't start with the wake word and no capture window was
+    /// open. Agent mode gives garbled wake words one AI-confirmed rescue;
+    /// beyond that, an utterance the capsule already showed must end in a
+    /// visible explanation, never a silent vanish.
+    private func handleNoWake(_ transcript: String, tool: AgentCLIExecutor.Tool?,
+                              showedLive: Bool) {
+        if tool != nil, #available(macOS 26.0, *), WakeRescuer.isSupported,
+           let nearRemainder = parser.nearWakeRemainder(transcript)?
+               .trimmingCharacters(in: .whitespacesAndNewlines),
+           !nearRemainder.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                let confirmed = (try? await WakeRescuer.confirmsInstruction(nearRemainder)) ?? false
+                Log.voice.log("Near-wake rescue \(confirmed ? "confirmed" : "declined", privacy: .public)")
+                if confirmed {
+                    self.transcriptOverlay.complete(transcript)
+                    self.dispatch(nearRemainder, tool: tool)
+                } else {
+                    self.dropFinal(transcript, showedLive: showedLive)
+                }
+            }
+            return
+        }
+        dropFinal(transcript, showedLive: showedLive)
+    }
+
+    private func dropFinal(_ transcript: String, showedLive: Bool) {
+        Log.voice.log("Final dropped (no wake word; shown live: \(showedLive)): \(transcript, privacy: .private)")
+        if showedLive {
+            // A partial hypothesis matched the wake word but the final lost
+            // it — the user watched the capsule accept their words.
+            flashNotice("⚠️ Didn't catch “\(config.wakeWord)” — try again")
+        } else {
+            transcriptOverlay.hide()
+        }
+    }
+
+    /// Run one wake-stripped command: stop phrases always work locally and
+    /// instantly; agent mode pipes everything else to the chosen CLI; the
+    /// on-device path runs the grammar, then the intent mapper.
+    private func dispatch(_ command: String, tool: AgentCLIExecutor.Tool?) {
+        let result = parser.parseRemainder(command)
+        if case .stopVoiceControl? = result.command {
+            stop()
+            return
+        }
+        if let tool {
+            runAgent(command, tool: tool)
+            return
+        }
+        typer.perform(result.typing)
+        if let parsed = result.command {
+            execute(parsed, fallbackTranscript: command)
+        }
+    }
+
+    // MARK: - Commands (on-device path)
 
     private func execute(_ command: VoiceCommand, fallbackTranscript: String? = nil) {
         switch command {
@@ -205,15 +317,12 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// A command the deterministic grammar didn't recognize. The transcript
-    /// is already stripped of the wake word — clean for whichever brain
-    /// handles it: the opt-in agent CLI, or the on-device intent mapper
-    /// (with screen grounding for commands that refer to what's visible).
+    /// A command the deterministic grammar didn't recognize, on-device mode
+    /// only — agent mode never reaches the grammar (see `dispatch`). The
+    /// transcript is already stripped of the wake word — clean for the
+    /// intent mapper (with screen grounding for commands that refer to
+    /// what's visible).
     private func handleFreeForm(_ transcript: String) {
-        if let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor) {
-            runAgent(transcript, tool: tool)
-            return
-        }
         guard config.visualContextEnabled else {
             flashNotice("Didn't recognize a command: “\(transcript)”")
             return
@@ -311,18 +420,32 @@ final class VoiceController: ObservableObject {
         }
     }
 
+    // MARK: - Agent runs
+
     /// Background agent run: voice control stays fully responsive (the run
-    /// doesn't hold the parser or the HUD state); the capsule shows a
-    /// persistent "working" note until the outcome flash replaces it.
+    /// doesn't hold the parser or the HUD state). The bottom-right activity
+    /// panel streams the CLI's output live with a Cancel button, and the
+    /// outcome ALWAYS flashes in the capsule — success or failure.
     private func runAgent(_ transcript: String, tool: AgentCLIExecutor.Tool) {
         transcriptOverlay.showLive("🤖 \(tool.displayName): “\(transcript)”…")
         notice = "\(tool.displayName) is working…"
         let timeout = config.agentTimeoutSeconds
         Task { [weak self] in
             guard let self else { return }
-            let outcome = await self.agent.run(
+            let outcome = await self.agentSessions.run(
                 instruction: transcript, tool: tool, timeout: timeout)
-            self.show(outcome)
+            self.showAgentOutcome(outcome, tool: tool)
+        }
+    }
+
+    /// Unlike on-device actions (whose success is usually self-evident), a
+    /// background agent run must always report back — even a bare success.
+    private func showAgentOutcome(_ outcome: ExecutionOutcome, tool: AgentCLIExecutor.Tool) {
+        switch outcome {
+        case .done(let notice):
+            flashNotice(notice ?? "✅ Done (\(tool.displayName))")
+        case .failed(let message):
+            flashNotice("⚠️ \(message)")
         }
     }
 

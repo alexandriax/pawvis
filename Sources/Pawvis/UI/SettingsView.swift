@@ -426,7 +426,7 @@ private struct VoiceControlSettingsTab: View {
             Divider()
 
             SettingRow(
-                title: "Free-form commands (“\(wake) \(String(repeating: "_", count: 6))”) are handled by",
+                title: "Commands after “\(wake)” are handled by",
                 caption: agentPickerCaption
             ) {
                 Picker("", selection: $store.settings.voiceControl.agentExecutor) {
@@ -453,6 +453,8 @@ private struct VoiceControlSettingsTab: View {
                     caption: "Give up on a background run after \(Int(store.settings.voiceControl.agentTimeoutSeconds)) s.",
                     value: $store.settings.voiceControl.agentTimeoutSeconds,
                     range: 30...300)
+
+                AgentSessionsSection(tool: tool)
             }
 
             SettingToggle(
@@ -487,9 +489,9 @@ private struct VoiceControlSettingsTab: View {
 
     private var agentPickerCaption: String {
         if store.settings.voiceControl.agentExecutor.isEmpty {
-            return "On-device: Apple Intelligence maps the spoken words to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
+            return "On-device: the instant grammar runs first, then Apple Intelligence maps what it missed to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
         }
-        return "⚠️ The agent CLI runs in the background with ALL permission checks bypassed and can execute anything on this Mac that you could — a spoken command becomes an autonomous agent run. It's slower than on-device, far more capable, and reports back in the top-of-screen capsule."
+        return "⚠️ EVERYTHING after the wake word goes to the agent, asked to perform it via computer use — with ALL permission checks bypassed, it can do anything on this Mac that you could. Only “\(wake), stop listening” stays local. Slower than on-device, far more capable; results flash in the top-of-screen capsule."
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {
@@ -501,6 +503,73 @@ private struct VoiceControlSettingsTab: View {
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
             })
+    }
+}
+
+/// Live list of background agent CLI runs — the same sessions the corner
+/// activity panel shows, cancellable from here too.
+private struct AgentSessionsSection: View {
+    let tool: AgentCLIExecutor.Tool
+    @ObservedObject var manager = AgentSessionManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Background agent sessions")
+                .font(.callout)
+            if manager.sessions.isEmpty {
+                CaptionText("None right now. While \(tool.displayName) is working on a spoken command, the run shows here — and in the panel at the bottom-right of your screen — with its live output and a Cancel button.")
+            } else {
+                ForEach(manager.sessions) { session in
+                    HStack(alignment: .top, spacing: 10) {
+                        sessionIcon(session)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("“\(session.instruction)”")
+                                .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
+                            switch session.phase {
+                            case .running:
+                                HStack(spacing: 6) {
+                                    Text(session.tool.displayName)
+                                    ElapsedText(since: session.startedAt)
+                                    if let last = session.tail.last {
+                                        Text("· \(last)")
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            case .finished(_, let message):
+                                CaptionText(message)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        if session.phase.isRunning {
+                            Button("Cancel") { manager.cancel(session.id) }
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .quaternarySystemFill)))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func sessionIcon(_ session: AgentSessionSnapshot) -> some View {
+        switch session.phase {
+        case .running:
+            ProgressView()
+                .controlSize(.small)
+        case .finished(let success, _):
+            Image(systemName: success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(success ? .green : .yellow)
+        }
     }
 }
 

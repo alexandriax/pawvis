@@ -202,6 +202,7 @@ final class PawvisController: ObservableObject {
         overlay.setConfig(settings.overlay)
         voice.setConfig(settings.voiceControl)
         voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture
+        AgentSessionManager.shared.showInScreenCapture = settings.overlay.showInScreenCapture
         refreshProjector()
         camera.setDevice(deviceID: settings.general.cameraDeviceID)
     }
