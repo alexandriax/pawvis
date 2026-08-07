@@ -38,6 +38,17 @@ public final class VoiceControlParser {
         matchWakeWord(in: transcript.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// A looser gate for utterances the strict one rejects: the opening
+    /// chunks are a *plausible* mishearing of the wake word (edit distance
+    /// ≤ 2 where the strict gate stops at 1 — "Paw this open Safari").
+    /// Never act on this alone: it only nominates an utterance for on-device
+    /// AI confirmation on the agent path, so ambient speech that merely
+    /// resembles the wake word still can't trigger anything by itself.
+    public func nearWakeRemainder(_ transcript: String) -> String? {
+        matchWakeWord(
+            in: transcript.trimmingCharacters(in: .whitespacesAndNewlines), tolerance: 2)
+    }
+
     /// Interpret one finalized utterance.
     public func parse(_ transcript: String) -> VoiceParseResult {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -181,6 +192,10 @@ public final class VoiceControlParser {
     /// returns the remainder with original casing (may be empty).
     /// "Pawvis, go to github.com" → "go to github.com".
     private func matchWakeWord(in transcript: String) -> String? {
+        matchWakeWord(in: transcript, tolerance: 1)
+    }
+
+    private func matchWakeWord(in transcript: String, tolerance: Int) -> String? {
         let chunks = transcript.split(whereSeparator: { $0.isWhitespace })
         guard !chunks.isEmpty else { return nil }
 
@@ -201,8 +216,8 @@ public final class VoiceControlParser {
             guard joined.count >= 3 else { continue }
             let matched = candidates.contains(joined)
                 || candidates.contains { candidate in
-                    candidate.count >= 5 && abs(candidate.count - joined.count) <= 1
-                        && Self.editDistanceAtMostOne(joined, candidate)
+                    candidate.count >= 5 && abs(candidate.count - joined.count) <= tolerance
+                        && Self.editDistance(joined, candidate, isAtMost: tolerance)
                 }
             if matched {
                 if chunks.count > k {
@@ -223,33 +238,29 @@ public final class VoiceControlParser {
 
     /// True when Levenshtein distance ≤ 1 (covers "pavis", "pawbis"…).
     static func editDistanceAtMostOne(_ a: String, _ b: String) -> Bool {
+        editDistance(a, b, isAtMost: 1)
+    }
+
+    /// Bounded Levenshtein: true when distance ≤ `limit`. The strings here
+    /// are folded wake-word tokens — a handful of characters — so the full
+    /// DP table is nothing.
+    static func editDistance(_ a: String, _ b: String, isAtMost limit: Int) -> Bool {
         if a == b { return true }
         let aChars = Array(a), bChars = Array(b)
-        if abs(aChars.count - bChars.count) > 1 { return false }
+        if abs(aChars.count - bChars.count) > limit { return false }
 
-        if aChars.count == bChars.count {
-            // Exactly one substitution allowed.
-            var mismatches = 0
-            for i in 0..<aChars.count where aChars[i] != bChars[i] {
-                mismatches += 1
-                if mismatches > 1 { return false }
+        var previous = Array(0...bChars.count)
+        for (i, aChar) in aChars.enumerated() {
+            var current = [i + 1]
+            current.reserveCapacity(bChars.count + 1)
+            for (j, bChar) in bChars.enumerated() {
+                let substitution = previous[j] + (aChar == bChar ? 0 : 1)
+                current.append(min(previous[j + 1] + 1, current[j] + 1, substitution))
             }
-            return true
+            if current.min()! > limit { return false }
+            previous = current
         }
-
-        // Lengths differ by one: one insertion/deletion allowed.
-        let (longer, shorter) = aChars.count > bChars.count ? (aChars, bChars) : (bChars, aChars)
-        var li = 0, si = 0, skipped = false
-        while li < longer.count && si < shorter.count {
-            if longer[li] == shorter[si] {
-                li += 1; si += 1
-            } else {
-                if skipped { return false }
-                skipped = true
-                li += 1
-            }
-        }
-        return true
+        return previous[bChars.count] <= limit
     }
 
     // MARK: - Text helpers

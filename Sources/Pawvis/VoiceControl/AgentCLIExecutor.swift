@@ -64,12 +64,16 @@ final class AgentCLIExecutor {
 
     private static func prompt(for instruction: String) -> String {
         """
-        You are the voice-command agent for Pawvis on this Mac. The user spoke \
-        a command; fulfill it now, autonomously, using the simplest direct \
-        means available to you (shell commands, `open`, AppleScript via \
-        `osascript`, etc.). Do not ask questions.
+        You are the voice-command agent for Pawvis on this Mac, running \
+        headless with permission checks disabled. The user spoke a command; \
+        act now, autonomously, and do not ask questions.
 
-        Spoken command: "\(instruction)"
+        Perform the following action using computer use: "\(instruction)"
+
+        Drive the Mac directly — use your computer-use tools (screenshot, \
+        click, type) when you have them; otherwise fall back to shell \
+        commands, `open`, or AppleScript via `osascript`. The text comes \
+        from speech recognition, so read it charitably.
 
         End your reply with exactly one final line:
         DONE: <what you did, under 10 words>
