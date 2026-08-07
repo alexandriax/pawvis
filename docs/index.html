@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pawvis — hand &amp; voice control for your Mac</title>
+  <meta name="description" content="Pawvis turns your webcam into a pointing device and your voice into full control of your Mac. Open palm moves the cursor, a finger dip clicks, and it answers to its name — all processing 100% on-device.">
+  <link rel="canonical" href="https://alexandriax.github.io/pawvis/">
+  <meta name="theme-color" content="#0B0912">
+
+  <!-- Open Graph / Twitter -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Pawvis">
+  <meta property="og:title" content="Pawvis — hand &amp; voice control for your Mac">
+  <meta property="og:description" content="Your hand is the mouse. Your voice runs the Mac. Everything on-device — nothing you do leaves your machine.">
+  <meta property="og:url" content="https://alexandriax.github.io/pawvis/">
+  <meta property="og:image" content="https://alexandriax.github.io/pawvis/banner.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Pawvis — hand &amp; voice control for your Mac">
+  <meta name="twitter:description" content="Your hand is the mouse. Your voice runs the Mac. Everything on-device.">
+  <meta name="twitter:image" content="https://alexandriax.github.io/pawvis/banner.png">
+
+  <!-- Icons -->
+  <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+
+  <!-- Self-hosted fonts: preload the display face, declare the rest in CSS -->
+  <link rel="preload" href="assets/fonts/bricolage-grotesque-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="site.css">
+  <script>document.documentElement.classList.add('js');</script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- ============================================================ NAV -->
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="wordmark" href="#top" aria-label="Pawvis — back to top">
+      <img src="assets/icon-512.png" alt="" width="512" height="512" aria-hidden="true">
+      <span>Pawvis</span>
+    </a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#gestures">Gestures</a>
+      <a href="#voice">Voice</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#install">Install</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="icon-link" href="https://github.com/alexandriax/pawvis" aria-label="Pawvis on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      </a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============================================================ HERO -->
+<section class="hero" id="top" aria-labelledby="hero-h">
+  <div class="hero-glow" aria-hidden="true"></div>
+  <div class="container hero-inner">
+    <p class="eyebrow mono" data-reveal>Gesture &amp; voice control for macOS</p>
+    <h1 id="hero-h" data-reveal>
+      Your hand is the <em class="serif grad">mouse</em>.<br>
+      Your Mac answers to its <em class="serif grad">name</em>.
+    </h1>
+    <p class="hero-sub" data-reveal>
+      Pawvis turns your webcam into a pointing device and your voice into full
+      control of the machine — move your hand to move the cursor, dip a finger
+      to click, and say <span class="mono say">&ldquo;Pawvis, open Safari&rdquo;</span>.
+      Nothing you do leaves your Mac.
+    </p>
+    <div class="cta-row" data-reveal>
+      <a class="btn btn-primary" href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0 3.2-3.2M8 10 4.8 6.8M2.5 13.5h11"/></svg>
+        Download for macOS
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/alexandriax/pawvis">View on GitHub</a>
+    </div>
+    <p class="meta-line mono" data-reveal>Signed &amp; notarized&nbsp;&nbsp;·&nbsp;&nbsp;macOS 14+&nbsp;&nbsp;·&nbsp;&nbsp;Free &amp; open source (MIT)</p>
+
+    <figure class="hero-media" id="heroMedia" data-reveal>
+      <div class="screen-frame">
+        <video id="heroVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
+               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen claw cursor.">
+          <source src="assets/demo.mp4" type="video/mp4">
+        </video>
+      </div>
+      <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================================================ CLAW STRIP -->
+<section class="claw-strip" id="try" aria-labelledby="try-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>Try it here</p>
+    <h2 id="try-h" data-reveal>The claw is your <em class="serif grad">cursor</em></h2>
+    <p class="lede" data-reveal>
+      On your desktop, an on-screen claw rides your palm — open while pointing,
+      retracted while a button is held, faded while control is parked.
+      <span class="pen-invite">Move your mouse into the pen below and borrow it for a minute.</span><span class="pen-invite-touch">Here's how it moves.</span>
+    </p>
+  </div>
+
+  <div class="claw-demo" id="clawDemo" aria-hidden="true" data-reveal>
+    <div class="demo-grid" aria-hidden="true"></div>
+    <p class="demo-hint mono">move&nbsp;&nbsp;·&nbsp;&nbsp;hold&nbsp;&nbsp;·&nbsp;&nbsp;right-click&nbsp;&nbsp;·&nbsp;&nbsp;scroll</p>
+    <div class="claw-cursor" id="clawCursor">
+      <div class="scroll-ring" id="scrollRing"></div>
+      <img id="clawImg" src="assets/claw-open.png" alt="" width="256" height="256">
+    </div>
+  </div>
+
+  <!-- Touch devices get a looping vignette of the same states -->
+  <div class="claw-demo-touch" aria-hidden="true" data-reveal>
+    <div class="touch-stage">
+      <div class="touch-ring"></div>
+      <img class="touch-open" src="assets/claw-open.png" alt="" width="256" height="256">
+      <img class="touch-closed" src="assets/claw-closed.png" alt="" width="256" height="256">
+    </div>
+  </div>
+
+  <div class="container">
+    <p class="caption mono" data-reveal>
+      <span class="swatch swatch-purple" aria-hidden="true"></span> purple while the left button is held
+      &nbsp;·&nbsp; <span class="swatch swatch-blue" aria-hidden="true"></span> blue for the right
+      &nbsp;·&nbsp; <span class="swatch swatch-ring" aria-hidden="true"></span> ringed in light blue while scrolling
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ GESTURES -->
+<section class="gestures" id="gestures" aria-labelledby="gestures-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>Gestures</p>
+    <h2 id="gestures-h" data-reveal>Show an open hand.<br>The cursor is <em class="serif grad">yours</em>.</h2>
+    <p class="lede" data-reveal>
+      Your hands are tracked whenever tracking is on, but the cursor only follows
+      once you show an <strong>open hand</strong> — all four fingers up, thumb free.
+      Close a fist for a moment, or leave the frame, and it parks. A hand that's
+      merely visible — resting, typing, gesturing — never drags the cursor around.
+    </p>
+
+    <div class="card-grid">
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="3.5"/><path d="M24 15V8m0 32v-7m-9-9H8m32 0h-7"/><path d="M20.5 10.5 24 7l3.5 3.5M20.5 37.5 24 41l3.5-3.5M10.5 20.5 7 24l3.5 3.5M37.5 20.5 41 24l-3.5 3.5"/></svg>
+        <h3>Move</h3>
+        <p>Hold your hand open, fingers up, and move it. The cursor rides your palm.</p>
+      </article>
+
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8v18"/><path d="M18 14v10"/><path d="m14 27 4 4.5 4-4.5"/><path d="M13 38c3 4 19 4 22 0"/></svg>
+        <h3>Click</h3>
+        <p>Dip your index finger, like tapping a mouse button. A quick release is always a clean click.</p>
+        <p class="card-note mono">measured against your middle finger — tilting your hand can't click</p>
+      </article>
+
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M17 8v18"/><path class="accent" d="M30 15v9"/><path class="accent" d="m26 27 4 4.5 4-4.5"/><path d="M13 38c3 4 19 4 22 0"/></svg>
+        <h3>Right-click</h3>
+        <p>Dip a second finger. Hold it down to right-drag.</p>
+        <p class="card-note mono">pinky by default — configurable</p>
+      </article>
+
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M15 10v14"/><circle cx="15" cy="28" r="3" class="dot"/><path d="M15 36h18"/><path d="m29 31.5 4.5 4.5-4.5 4.5"/></svg>
+        <h3>Drag &amp; hold</h3>
+        <p>Keep the finger down and move. Deliberate movement starts a drag immediately; a short window protects quick clicks from becoming accidental drags.</p>
+        <p class="card-note mono">the window length is a slider</p>
+      </article>
+
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><circle cx="18" cy="30" r="3" class="dot"/><path d="M26 20a11 11 0 0 1 0 20" transform="translate(0,-10)"/><path d="M26 14a17 17 0 0 1 0 32" transform="translate(4,-10)"/></svg>
+        <h3>Double &amp; triple click</h3>
+        <p>Tap again quickly in the same spot. Chained clicks land where the first one did.</p>
+      </article>
+
+      <article class="card" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8v32"/><path d="m19.5 13 4.5-5 4.5 5M19.5 35l4.5 5 4.5-5"/><path d="M12 22h5M12 26h5M31 22h5M31 26h5"/></svg>
+        <h3>Scroll</h3>
+        <p>Fold your middle and ring fingers in — index and pinky up — then move your hand up and down. The cursor parks while the pose is held.</p>
+        <p class="card-note mono">toggle it, or invert the direction, in Settings</p>
+      </article>
+
+      <article class="card card-wide" data-reveal>
+        <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M12 17v-5h5M36 17v-5h-5M12 31v5h5M36 31v5h-5"/><circle cx="24" cy="24" r="4"/></svg>
+        <h3>Reach adapts to distance</h3>
+        <p>Auto mode sizes the tracking area from how big your hand looks, so the whole screen stays reachable up close <em>and</em> far away — with your fingers still inside the camera frame. Manual mode gives you a fixed area and a slider.</p>
+      </article>
+    </div>
+  </div>
+
+  <!-- Full-bleed interlude -->
+  <figure class="interlude" id="gestureInterlude" data-reveal>
+    <img src="assets/gesture-closeup.jpg" alt="Close-up of an open raised hand in front of a glowing laptop screen, lit in purple and blue." width="1536" height="1024" loading="lazy">
+    <figcaption>
+      <blockquote>&ldquo;Show an open hand — the cursor is yours.&rdquo;</blockquote>
+    </figcaption>
+  </figure>
+
+  <div class="container">
+    <p class="aside" data-reveal>
+      A ring tightens as your click forms, a pulse confirms every click, and small
+      dots mark each detected fingertip. The menu bar icon opens a live status
+      panel — hands seen, control armed, voice state — plus a Gesture Guide that
+      walks through every move. Everything above is tunable in
+      <strong>Settings&nbsp;→&nbsp;Gestures</strong>.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ VOICE -->
+<section class="voice" id="voice" aria-labelledby="voice-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>Voice</p>
+    <h2 id="voice-h" data-reveal>Talk to your Mac<br>by <em class="serif grad">name</em></h2>
+
+    <div class="voice-split">
+      <div class="voice-copy">
+        <p class="lede" data-reveal>
+          Press <strong>Start</strong> in the menu bar, then address Pawvis by its
+          wake word. Navigate, type, press any shortcut, launch apps, click what
+          you're pointing at — or just describe what you want clicked.
+        </p>
+        <ul class="chip-grid mono" data-reveal>
+          <li class="chip">&ldquo;go to github.com&rdquo;</li>
+          <li class="chip">&ldquo;type good morning&rdquo;</li>
+          <li class="chip">&ldquo;press ⌘⇧T&rdquo;</li>
+          <li class="chip">&ldquo;open Notes&rdquo;</li>
+          <li class="chip">&ldquo;switch to Chrome&rdquo;</li>
+          <li class="chip">&ldquo;click&rdquo; / &ldquo;scroll down&rdquo;</li>
+          <li class="chip chip-accent">&ldquo;click sign in&rdquo; — free-form</li>
+          <li class="chip">&ldquo;stop listening&rdquo;</li>
+        </ul>
+        <p class="fine" data-reveal>
+          The wake word is configurable (mishearings are tolerated). Speech
+          recognition is Apple's on-device engine — private, free, no API key,
+          no cloud. Free-form visual commands are resolved by on-device
+          Apple&nbsp;Intelligence on macOS&nbsp;26; everything else works without it.
+        </p>
+      </div>
+
+      <div class="voice-panel-col" data-reveal>
+        <div class="mac-window" id="transcript" aria-label="Example voice commands and Pawvis responses" role="log">
+          <div class="mac-titlebar" aria-hidden="true">
+            <span class="tl-dot"></span><span class="tl-dot"></span><span class="tl-dot"></span>
+            <span class="mac-title mono">Pawvis — listening</span>
+          </div>
+          <div class="mac-body mono" id="transcriptBody">
+            <p class="t-user">&ldquo;Pawvis, go to github.com&rdquo;</p>
+            <p class="t-resp">→ Navigating Safari — github.com</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <figure class="interlude interlude-voice" id="voiceInterlude" data-reveal>
+    <img src="assets/voice-command.jpg" alt="A woman leans back from her MacBook with a coffee in hand, speaking a command to it." width="1536" height="1024" loading="lazy">
+    <figcaption>
+      <blockquote>Lean back. Say the word.</blockquote>
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ============================================================ PRIVACY -->
+<section class="privacy" id="privacy" aria-labelledby="privacy-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>Privacy</p>
+    <h2 id="privacy-h" class="privacy-statement" data-reveal>
+      Nothing you do<br>leaves your <em class="serif grad">Mac</em>.
+    </h2>
+
+    <div class="pillar-grid">
+      <article class="pillar" data-reveal>
+        <p class="pillar-tag mono">on-device</p>
+        <h3>Hand tracking</h3>
+        <p>Apple's Vision framework, running entirely on your machine. Camera frames are processed in memory and discarded.</p>
+      </article>
+      <article class="pillar" data-reveal>
+        <p class="pillar-tag mono">on-device</p>
+        <h3>Speech recognition</h3>
+        <p>Apple's on-device engine — SpeechAnalyzer on macOS&nbsp;26+, SFSpeechRecognizer before that. Voice audio never leaves your Mac.</p>
+      </article>
+      <article class="pillar" data-reveal>
+        <p class="pillar-tag mono">on-device</p>
+        <h3>Visual commands</h3>
+        <p>On-device Apple&nbsp;Intelligence reads the screen around your pointer. Its snapshots stay in memory — never written to disk, never uploaded.</p>
+      </article>
+    </div>
+
+    <ul class="fact-list" data-reveal>
+      <li>The menu bar icon carries a dot for as long as the mic is live, and an on-screen pill announces listening — then fades, so it isn't sitting on your screen all day.</li>
+      <li>The claw overlay is excluded from screenshots and screen recordings by default. (There's a toggle if you want to record a demo.)</li>
+      <li>No API key. No account. No cloud.</li>
+    </ul>
+
+    <p class="page-brag" data-reveal>
+      Even this page phones no one — no trackers, no analytics, no CDNs.
+      The fonts are served from this repo. View source; it's three files.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ INSTALL -->
+<section class="install" id="install" aria-labelledby="install-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>Install</p>
+    <h2 id="install-h" data-reveal>Thirty seconds to <em class="serif grad">paws</em>-on</h2>
+
+    <ol class="steps">
+      <li class="step" data-reveal>
+        <span class="step-num mono" aria-hidden="true">01</span>
+        <h3>Download</h3>
+        <p><a href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">Pawvis.zip</a> — always the latest release.</p>
+      </li>
+      <li class="step" data-reveal>
+        <span class="step-num mono" aria-hidden="true">02</span>
+        <h3>Unzip</h3>
+        <p>Releases are signed with a Developer&nbsp;ID and notarized by Apple, so it opens normally — no right-click&nbsp;→&nbsp;Open.</p>
+      </li>
+      <li class="step" data-reveal>
+        <span class="step-num mono" aria-hidden="true">03</span>
+        <h3>Drag to Applications</h3>
+        <p>Pawvis lives in your menu bar and starts with you at login. (There's a toggle, and it won't put itself back.)</p>
+      </li>
+    </ol>
+
+    <div class="perm-row" data-reveal>
+      <h3 class="perm-title">On first run, it asks for</h3>
+      <ul class="perm-grid">
+        <li><strong>Camera</strong><span>Hand tracking. Frames are processed in memory and discarded.</span></li>
+        <li><strong>Accessibility</strong><span>Moving the cursor and clicking. Tracking runs without it, but clicks won't land until it's granted.</span></li>
+        <li><strong>Microphone</strong><span>Only when you first start voice control.</span></li>
+        <li><strong>Screen Recording <em>(optional)</em></strong><span>Lets visual voice commands OCR what accessibility can't describe. Everything else works without it.</span></li>
+      </ul>
+    </div>
+
+    <div class="cta-row cta-center" data-reveal>
+      <a class="btn btn-primary" href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0 3.2-3.2M8 10 4.8 6.8M2.5 13.5h11"/></svg>
+        Download for macOS
+      </a>
+    </div>
+    <p class="meta-line mono" data-reveal>Checks for updates once a day and can install them itself — Settings&nbsp;→&nbsp;About&nbsp;→&nbsp;Check&nbsp;Now.</p>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================================================ FOOTER -->
+<footer class="footer">
+  <div class="container footer-inner">
+    <a class="wordmark" href="#top" aria-label="Pawvis — back to top">
+      <img src="assets/icon-512.png" alt="" width="512" height="512" aria-hidden="true">
+      <span>Pawvis</span>
+    </a>
+    <nav class="footer-links" aria-label="Project links">
+      <a href="https://github.com/alexandriax/pawvis">View on GitHub</a>
+      <a href="https://github.com/alexandriax/pawvis/releases/latest">Latest release</a>
+      <a href="https://github.com/alexandriax/pawvis/blob/main/LICENSE">MIT license</a>
+    </nav>
+    <p class="footer-line">Made with opposable thumbs, so you can point without one.</p>
+  </div>
+</footer>
+
+<script src="site.js" defer></script>
+</body>
+</html>
