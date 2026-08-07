@@ -77,4 +77,13 @@ enum Permissions {
             NSWorkspace.shared.open(url)
         }
     }
+
+    /// System Settings → Notifications, where the update banner is switched on
+    /// and off. Not a Privacy & Security pane like the others, hence its own
+    /// extension identifier.
+    static func openNotificationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 }

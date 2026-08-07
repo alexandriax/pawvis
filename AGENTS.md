@@ -65,11 +65,13 @@ the right — both invisible in code review and obvious to the user.
    multi-line growth instead of truncation. `CaptionText` does it for you.
 4. Pages are inside a `ScrollView`, so adding rows can't clip the bottom.
 5. After changing settings UI, actually open the window and look at every tab.
-   There is no headless shortcut: SwiftUI's `ImageRenderer` produces blank
-   output for these views without a running app, and the `Settings` scene
-   can't be opened programmatically from a launch hook in a menu-bar-only
-   app. Run `make app`, open Pawvis, and check the tabs — paying attention to
-   the longest strings (the Voice control and Tracking tabs have them).
+   There is no headless render: SwiftUI's `ImageRenderer` produces blank
+   output for these views without a running app. But the window *can* be
+   opened programmatically now — `PAWVIS_OPEN_SETTINGS=<tab>` (general,
+   tracking, gestures, voice, about) opens Settings on that tab right after
+   launch, so `make app` + launch + `screencapture` covers it without
+   hand-clicking. Pay attention to the longest strings (the Voice control and
+   Tracking tabs have them).
 
 ## Launch at login
 
@@ -256,6 +258,58 @@ asset must stay attached and keep that name; it verifies the download's
 SHA-256 against the published checksum, checks the bundle identifier, and runs
 `codesign --verify` before staging. Version comparison and the check-scheduling
 rules live in `PawvisCore/Update` and are unit-tested.
+
+A discovered release also posts a **system notification** (`UpdateNotifier`),
+whose Install button opens Settings → About through `SettingsRouter`. Three
+constraints worth keeping:
+
+- **Once per version**, decided by `UpdatePolicy.shouldNotify` and remembered
+  in `Pawvis.update.lastNotifiedVersion`. Every launch re-offers the same
+  release until the user takes it; re-posting each time is nagging, and the
+  menu bar row already carries the offer in the meantime. The mark is only
+  written after the post actually succeeds.
+- **Authorization is requested lazily**, at the moment there is finally
+  something to announce. Asking at launch would put a permission prompt in
+  front of every user, including everyone already up to date, and a denial is
+  deliberately *not* recorded as "announced" so allowing it later still works.
+- **`UNUserNotificationCenter.current()` is bundle-only.** From a bare
+  `swift run` binary it traps on a nil bundle proxy (an ObjC exception no
+  Swift `catch` can stop), so `UpdateNotifier` gates on the same
+  `bundleIdentifier != nil && .app` check as `LoginItem`. The identifier
+  check alone is NOT enough: under `swift test`, `Bundle.main` is Xcode's
+  xctest tool — which *has* an identifier and still traps. Both halves are
+  measured, keep both.
+
+More measured notification behavior (macOS 26), for whoever touches this next:
+
+- The permission prompt is a hover-to-expand *banner* (Allow hides in its
+  "Options" dropdown), the `requestAuthorization` callback simply doesn't fire
+  until the user answers — minutes, sometimes — and **killing the app while
+  the prompt is pending records a denial**. That last one is easy to do from a
+  dev loop; the only way back is System Settings → Notifications.
+- `center.add` reports success even when denied (the item lands in the
+  delivered list, invisibly), so posting is gated on authorization status, not
+  on `add` failing.
+- Notification permission keys off the **bundle identifier**, not the code
+  signature — it survives re-signing, so `make_app.sh`'s ad-hoc warning about
+  Accessibility does not extend to notifications.
+- A bundle run from a temp directory gets `UNErrorDomain Code=1` with no
+  prompt at all; the repo's `build/Pawvis.app` is a location LaunchServices
+  accepts (verified).
+
+`SettingsRouter` owns the `TabView` selection, which is also why the tab is
+persisted by hand: SwiftUI only restores the last-viewed tab
+(`com_apple_SwiftUI_Settings_selectedTabIndex`) while that selection is unbound.
+
+Opening Settings from outside SwiftUI goes through `SettingsWindow`, and its
+two rules are measured, not guessed (macOS 26): the folkloric
+`NSApp.sendAction(Selector(("showSettingsWindow:")))` **returns true while
+opening nothing**, so the real openers are an `OpenSettingsAction` captured at
+launch from the `MenuBarExtra` label plus the app-menu "Settings…" item as
+fallback; and the Settings window is identified by
+`identifier == "com_apple_SwiftUI_Settings_window"`, never by title — macOS
+titles it after the selected tab ("About"), so a title match quietly never
+fronts anything.
 
 Signing and notarization come from repository secrets, set by running
 `scripts/setup_signing.sh` interactively (it never belongs in an automated

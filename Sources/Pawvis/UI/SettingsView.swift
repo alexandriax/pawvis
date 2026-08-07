@@ -105,19 +105,27 @@ struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var updater: UpdateChecker
     @ObservedObject var loginItem: LoginItemController
+    /// Lets the update notification (and the menu bar's update row) land the
+    /// user on About rather than wherever they last were.
+    @ObservedObject private var router = SettingsRouter.shared
 
     var body: some View {
-        TabView {
+        TabView(selection: $router.tab) {
             GeneralSettingsTab(store: store, loginItem: loginItem)
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             TrackingSettingsTab(store: store)
                 .tabItem { Label("Tracking", systemImage: "cursorarrow.motionlines") }
+                .tag(SettingsTab.tracking)
             GestureSettingsTab(store: store)
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
+                .tag(SettingsTab.gestures)
             VoiceControlSettingsTab(store: store)
                 .tabItem { Label("Voice (Beta)", systemImage: "mic") }
+                .tag(SettingsTab.voice)
             AboutTab(updater: updater)
                 .tabItem { Label("About", systemImage: "pawprint") }
+                .tag(SettingsTab.about)
         }
         .frame(width: 620, height: 580)
         .tint(PawvisTheme.purpleUI)

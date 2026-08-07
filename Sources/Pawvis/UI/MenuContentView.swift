@@ -130,7 +130,7 @@ struct MenuContentView: View {
             result.append(Warning(
                 text: "Pawvis \(release.version.description) is available.",
                 action: "Update…",
-                handler: { openSettingsInFront() }))
+                handler: { openSettingsInFront(tab: .about) }))
         }
         if voice.state.isActive,
            controller.settingsStore.settings.voiceControl.visualContextEnabled,
@@ -175,21 +175,19 @@ struct MenuContentView: View {
         .buttonStyle(PawvisButtonStyle())
     }
 
-    /// LSUIElement apps don't activate when a window opens, so the Settings
-    /// window appeared behind whatever the user was working in. Activate on
-    /// both sides of the open and front the window explicitly. Also dismiss
-    /// the menu bar popover first — it floats above regular windows and would
-    /// otherwise hover over Settings.
-    private func openSettingsInFront() {
+    /// Dismisses the menu bar popover first — it floats above regular windows
+    /// and would otherwise hover over Settings — then opens Settings and drags
+    /// it in front (see `SettingsWindow`, which owns the LSUIElement fix).
+    ///
+    /// `openSettings` is used here rather than `SettingsWindow.show()` because
+    /// a view has the real environment action available; the selector path is
+    /// for callers that don't.
+    private func openSettingsInFront(tab: SettingsTab? = nil) {
         dismiss()
+        if let tab { SettingsRouter.shared.tab = tab }
         NSApp.activate(ignoringOtherApps: true)
         openSettings()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows
-                .first { $0.title.hasSuffix("Settings") && $0.isVisible }?
-                .makeKeyAndOrderFront(nil)
-        }
+        SettingsWindow.bringToFront()
     }
 
     // MARK: - Status text

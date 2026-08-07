@@ -153,8 +153,10 @@ Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
 Settings → General → Login Items; Pawvis won't put itself back).
 
-Pawvis checks for updates once a day and can install them itself.
-**Settings → About → Check Now** runs the check on demand.
+Pawvis checks for updates once a day and can install them itself. A new version
+announces itself in a macOS notification, once per version, with an **Install…**
+button that opens **Settings → About** where the release notes and the one-click
+install live. **Check Now** on that page runs the check on demand.
 
 ### Permissions
 
@@ -168,6 +170,9 @@ On first run Pawvis asks for:
 - **Screen Recording** *(optional)*: lets visual voice commands OCR what
   accessibility can't describe (canvases, images). Everything else works
   without it.
+- **Notifications** *(optional)*: asked for the first time an update is
+  actually waiting, never at launch. Decline it and new versions still show up
+  in the menu bar and in Settings → About.
 
 Releases are signed with a Developer ID and notarized by Apple, so they open
 normally: no right-click → Open, and the Accessibility permission you grant
@@ -207,7 +212,7 @@ Sources/
     Hands/             21-landmark model · pinch/dip/curl metrics
     Gestures/          GestureEngine: frames → clicks, drags, scrolls, cursor moves
     VoiceControl/      wake-word + command parser · spoken URLs & key chords
-    Update/            semantic versions · update-check policy
+    Update/            semantic versions · check / offer / notify policy
     Config/            settings tree (field-tolerant decoding)
   Pawvis/              the menu bar app
     Camera/            AVCaptureSession · Vision hand pose
@@ -215,7 +220,7 @@ Sources/
     Overlay/           click-through claw cursor and indicators
     VoiceControl/      on-device speech engine · command executor ·
                        screen context (AX + OCR) · Apple Intelligence resolver
-    Update/            update checking and self-update
+    Update/            update checking · self-update · the "new version" banner
     Support/           permissions · logging · theme
     App/ UI/           menu bar, settings, gesture guide
 ```

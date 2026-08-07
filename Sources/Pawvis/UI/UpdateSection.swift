@@ -5,6 +5,8 @@ import SwiftUI
 /// install/relaunch flow.
 struct UpdateSection: View {
     @ObservedObject var updater: UpdateChecker
+    /// Only true once macOS confirms the user said no — see `isBlocked()`.
+    @State private var notificationsBlocked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -12,6 +14,26 @@ struct UpdateSection: View {
                 get: { updater.automaticChecksEnabled },
                 set: { updater.automaticChecksEnabled = $0 }))
                 .fixedSize(horizontal: false, vertical: true)
+
+            if updater.automaticChecksEnabled {
+                if notificationsBlocked {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "bell.slash")
+                            .foregroundStyle(.secondary)
+                        Text("Notifications are off for Pawvis, so new versions won't announce themselves — you'll still see them here and in the menu bar.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Open…") { Permissions.openNotificationSettings() }
+                            .controlSize(.small)
+                    }
+                } else {
+                    Text("A new version announces itself once, in a notification with a button back to this page.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             HStack(spacing: 10) {
                 Button("Check Now") { updater.checkNow() }
@@ -46,6 +68,7 @@ struct UpdateSection: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task { notificationsBlocked = await UpdateNotifier.isBlocked() }
     }
 
     @ViewBuilder
