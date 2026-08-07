@@ -31,12 +31,16 @@ public struct OverlayState: Equatable, Sendable {
     public var hands: [OverlayHand] = []
     /// Clamped cursor position (screen-normalized); nil when no hands.
     public var cursor: Vec2?
-    /// True while the pinch is closed (left button down).
+    /// True while the click gesture is closed (left button down).
     public var grabbed: Bool = false
-    /// True once a pinch has moved past the drag threshold.
+    /// True while the right-click finger is dipped (right button down). Kept
+    /// separate from `grabbed`, which stays left-only.
+    public var rightGrabbed: Bool = false
+    /// True once a press has moved past the drag threshold.
     public var isDragging: Bool = false
     /// Pinch strength ramp: 0 = tips comfortably apart, 1 = pinched. Drives the
-    /// closing-ring feedback around the cursor.
+    /// closing-ring feedback around the cursor. Pinned at 1 while *either*
+    /// button is down — the ring says "you are pressing", not which finger.
     public var closingProgress: Double = 0
 
     public init() {}

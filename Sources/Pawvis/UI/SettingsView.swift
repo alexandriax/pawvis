@@ -51,8 +51,19 @@ private struct GeneralSettingsTab: View {
                     set: { store.settings.gestures.smoothing.beta = $0 }),
                 range: 0.005...0.09)
 
+            Picker("Reach", selection: $store.settings.gestures.reachMode) {
+                Text("Auto (adapts to distance)").tag(ReachMode.auto)
+                Text("Manual").tag(ReachMode.manual)
+            }
+            Text(store.settings.gestures.reachMode == .auto
+                 ? "Sizes the tracking area from your hand's apparent size, so the whole screen stays reachable — near or far — with all fingers visible to the camera. Adjusts gently, never mid-click."
+                 : "Fixed tracking area, set with the slider below.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             LabeledSlider(
-                label: "Reach",
+                label: "Manual reach",
                 caption: "How much of the camera view maps to the whole screen. Higher = smaller hand movements.",
                 value: Binding(
                     get: { 0.5 - store.settings.gestures.interactionBox.xMin },
@@ -63,6 +74,7 @@ private struct GeneralSettingsTab: View {
                             xMin: mx, xMax: 1 - mx, yMin: my, yMax: 1 - my)
                     }),
                 range: 0.2...0.45)
+                .disabled(store.settings.gestures.reachMode == .auto)
 
             Toggle("Mirror camera", isOn: $store.settings.gestures.mirrorCamera)
             Text("Leave on for a normal user-facing webcam.")
@@ -113,6 +125,25 @@ private struct GestureSettingsTab: View {
                     set: { store.settings.gestures.dragStartDelay = $0 }),
                 range: 0...0.6)
 
+            if rightClickAvailable {
+                Divider()
+
+                Toggle("Right-click", isOn: $store.settings.gestures.rightClickEnabled)
+                Picker("Right-click finger", selection: $store.settings.gestures.rightClickFinger) {
+                    Text("Pinky").tag(Finger.little)
+                    Text("Ring").tag(Finger.ring)
+                    Text("Middle").tag(Finger.middle)
+                    if store.settings.gestures.clickGesture == .thumbCurl {
+                        Text("Index").tag(Finger.index)
+                    }
+                }
+                .disabled(!store.settings.gestures.rightClickEnabled)
+                Text("Dip that finger like a mouse button to right-click; hold it down to right-drag. Measured against its neighbor, so hand tilt can't trigger it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Divider()
 
             Toggle("Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
@@ -138,6 +169,11 @@ private struct GestureSettingsTab: View {
             }
         }
         .padding(20)
+    }
+
+    private var rightClickAvailable: Bool {
+        store.settings.gestures.clickGesture == .indexTap
+            || store.settings.gestures.clickGesture == .thumbCurl
     }
 
     private var clickGestureCaption: String {

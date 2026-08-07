@@ -67,6 +67,13 @@ final class SettingsStore: ObservableObject {
             }
             defaults.set(true, forKey: "PawvisMigration.wholeHandDefault")
         }
+        // v6: the mouse-tap mode superseded it as the preferred default.
+        if !defaults.bool(forKey: "PawvisMigration.indexTapDefault") {
+            if settings.gestures.clickGesture == .wholeHandPinch {
+                settings.gestures.clickGesture = .indexTap
+            }
+            defaults.set(true, forKey: "PawvisMigration.indexTapDefault")
+        }
     }
 
     private func persist() {

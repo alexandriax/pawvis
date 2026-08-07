@@ -53,7 +53,7 @@ struct GestureGuideView: View {
                 click: "Dip your index finger down, like tapping a mouse button (keep your other fingers up).",
                 letGo: "lift your index finger")
         }
-        return [
+        var rows = [
             Row(symbol: "hand.point.up.left.fill",
                 title: "Move",
                 detail: clickDetail.move + " The ring around the claw tightens as the click gesture forms."),
@@ -64,6 +64,18 @@ struct GestureGuideView: View {
                 title: "Drag / hold",
                 detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you \(clickDetail.letGo). (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
+
+        let gesture = store.settings.gestures.clickGesture
+        if store.settings.gestures.rightClickEnabled,
+           gesture == .indexTap || gesture == .thumbCurl {
+            let fingerName = store.settings.gestures.rightClickFinger == .little
+                ? "pinky" : store.settings.gestures.rightClickFinger.rawValue
+            rows.append(Row(
+                symbol: "hand.point.right.fill",
+                title: "Right-click",
+                detail: "Dip your \(fingerName) finger the same way — the claw turns blue while it's down. Hold it to right-drag."))
+        }
+        return rows
     }
 
     private var dictationRows: [Row] {

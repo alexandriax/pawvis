@@ -206,7 +206,9 @@ final class SettingsTests: XCTestCase {
 
     func testRetiredGestureKeysAreIgnored() throws {
         // Settings written by earlier gesture models (fist-grab/scroll/dictation
-        // gestures) must decode cleanly, with unknown keys simply dropped.
+        // gestures) must decode cleanly, with unknown keys simply dropped —
+        // except `rightClickFinger`, which is a live setting again, so an old
+        // file's choice is honored rather than thrown away.
         let jsonData = Data(#"""
         {"gestures":{"grabCloseThreshold":0.18,"grabOpenThreshold":0.38,"rightClickFinger":"ring",
          "dictationToggle":"shakaHold","scrollGainPixels":900,
@@ -215,5 +217,7 @@ final class SettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PawvisSettings.self, from: jsonData)
         XCTAssertEqual(decoded.gestures.pinchEngageRatio, 0.2)
         XCTAssertEqual(decoded.gestures.pinchReleaseHysteresis, 0.08)
+        XCTAssertEqual(decoded.gestures.rightClickFinger, .ring)
+        XCTAssertEqual(decoded.gestures.reachMode, .auto, "a file with no reach mode gets the default")
     }
 }

@@ -4,12 +4,14 @@ import XCTest
 final class GestureEngineTests: XCTestCase {
     var engine: GestureEngine!
 
-    /// Test config: identity mapping (no mirror, full box) and effectively
-    /// disabled smoothing, so positions are exact and assertions deterministic.
+    /// Test config: identity mapping (no mirror, full box, no auto-reach
+    /// drift) and effectively disabled smoothing, so positions are exact and
+    /// assertions deterministic. Auto reach gets its own tests, which opt in.
     static func testConfig(_ clickGesture: ClickGesture = .pinch) -> GestureConfig {
         var config = GestureConfig.default
         config.clickGesture = clickGesture
         config.interactionBox = InteractionBox(xMin: 0, xMax: 1, yMin: 0, yMax: 1)
+        config.reachMode = .manual
         config.mirrorCamera = false
         config.smoothing = OneEuroFilter.Params(minCutoff: 1e9, beta: 0, dCutoff: 1e9)
         return config
@@ -70,6 +72,27 @@ final class GestureEngineTests: XCTestCase {
         }
     }
 
+    private func rightDowns(_ events: [GestureEvent]) -> [(Vec2, Int)] {
+        events.compactMap {
+            if case .buttonDown(.right, let at, let cc) = $0 { return (at, cc) }
+            return nil
+        }
+    }
+
+    private func rightUps(_ events: [GestureEvent]) -> [(Vec2, Int)] {
+        events.compactMap {
+            if case .buttonUp(.right, let at, let cc) = $0 { return (at, cc) }
+            return nil
+        }
+    }
+
+    private func rightDrags(_ events: [GestureEvent]) -> [Vec2] {
+        events.compactMap {
+            if case .drag(.right, let to) = $0 { return to }
+            return nil
+        }
+    }
+
     private func moves(_ events: [GestureEvent]) -> [Vec2] {
         events.compactMap {
             if case .move(let to) = $0 { return to }
@@ -82,6 +105,23 @@ final class GestureEngineTests: XCTestCase {
     private func click(at wrist: Vec2, from: TimeInterval) -> [GestureEvent] {
         feedFrames([SyntheticHand.pinchIndex(gap: Self.tightGap, wrist: wrist)], from: from, count: 3)
             + feedFrames([SyntheticHand.openRelaxed(wrist: wrist)], from: from + 0.1, count: 3)
+    }
+
+    /// One left click in `.indexTap` mode: dip the index, then lift it.
+    @discardableResult
+    private func tapClick(at wrist: Vec2 = Vec2(0.5, 0.7), from: TimeInterval) -> [GestureEvent] {
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: wrist)], from: from, count: 3)
+            + feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: wrist)],
+                         from: from + 0.1, count: 3)
+    }
+
+    /// One right click: dip the right-click finger, then lift it.
+    @discardableResult
+    private func rightClick(_ finger: Finger = .little, at wrist: Vec2 = Vec2(0.5, 0.7),
+                            from: TimeInterval) -> [GestureEvent] {
+        feedFrames([SyntheticHand.fingerDip(finger, wrist: wrist)], from: from, count: 3)
+            + feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: wrist)],
+                         from: from + 0.1, count: 3)
     }
 
     /// Open frames, then a pinch held down. The button goes down on the second
@@ -113,13 +153,37 @@ final class GestureEngineTests: XCTestCase {
 
     func testTapWindowDefaults() {
         let c = GestureConfig.default
-        XCTAssertEqual(c.clickGesture, .wholeHandPinch,
-                       "whole-hand averaging proved the most reliable mode in real use")
-        XCTAssertEqual(ClickGesture.allCases.first, .wholeHandPinch,
+        XCTAssertEqual(c.clickGesture, .indexTap,
+                       "the mouse tap keeps the hand open, so tracking never guesses")
+        XCTAssertEqual(ClickGesture.allCases.first, .indexTap,
                        "picker order = declaration order = best modes first")
         XCTAssertEqual(c.dragStartDelay, 0.30, accuracy: 1e-9)
         XCTAssertEqual(c.dragIntentDistance, 0.030, accuracy: 1e-9)
         XCTAssertEqual(c.jitterDeadband, 0.004, accuracy: 1e-9)
+    }
+
+    func testRightClickAndReachDefaults() {
+        let c = GestureConfig.default
+        XCTAssertTrue(c.rightClickEnabled)
+        XCTAssertEqual(c.rightClickFinger, .little,
+                       "the one finger no click mode uses")
+        XCTAssertEqual(c.reachMode, .auto,
+                       "the box fits itself to the hand unless the user takes the slider")
+        XCTAssertEqual(Self.testConfig().reachMode, .manual,
+                       "…but the tests pin the box, so mapped positions stay exact")
+    }
+
+    func testRightThresholdsAlwaysUseTheDipFactor() {
+        var c = GestureConfig.default
+        for mode in ClickGesture.allCases {
+            c.clickGesture = mode
+            XCTAssertEqual(c.rightEngageRatio, 0.675, accuracy: 1e-9,
+                           "\(mode): right click is a dip whatever the left button does")
+            XCTAssertEqual(c.rightReleaseRatio, 0.755, accuracy: 1e-9)
+        }
+        c.pinchEngageRatio = 0.50
+        XCTAssertEqual(c.rightEngageRatio, 0.75, accuracy: 1e-9,
+                       "…and it rides the same sensitivity slider")
     }
 
     func testModeThresholdsScaleTheSameSlider() {
@@ -147,7 +211,7 @@ final class GestureEngineTests: XCTestCase {
     func testUnreadableClickGestureKeepsTheDefault() throws {
         let bogus = try JSONDecoder().decode(
             GestureConfig.self, from: Data(#"{"clickGesture":"telekinesis"}"#.utf8))
-        XCTAssertEqual(bogus.clickGesture, .wholeHandPinch,
+        XCTAssertEqual(bogus.clickGesture, .indexTap,
                        "an unknown mode must not fail the settings tree")
         let known = try JSONDecoder().decode(
             GestureConfig.self, from: Data(#"{"clickGesture":"thumbCurl"}"#.utf8))
@@ -776,5 +840,323 @@ final class GestureEngineTests: XCTestCase {
         let (_, tucking) = feed([halfway], at: 1 / 30.0)
         XCTAssertGreaterThan(tucking.closingProgress, out.closingProgress)
         XCTAssertLessThan(tucking.closingProgress, 1)
+    }
+
+    // MARK: - Right click
+
+    func testPinkyDipRightClicksInMouseTapMode() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+
+        let dipping = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.15, count: 3)
+        let d = rightDowns(dipping)
+        XCTAssertEqual(d.count, 1, "dipping the pinky presses the right button")
+        XCTAssertEqual(d[0].1, 1)
+        XCTAssertTrue(downs(dipping).isEmpty, "…and the left button stays out of it")
+
+        // The palm-anchored cursor never moved, so the up lands on the down.
+        let lifting = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.28, count: 3)
+        XCTAssertTrue(rightDrags(lifting).isEmpty)
+        let u = rightUps(lifting)
+        XCTAssertEqual(u.count, 1)
+        XCTAssertEqual(u[0].0.distance(to: d[0].0), 0, accuracy: 1e-9)
+        XCTAssertTrue(ups(lifting).isEmpty)
+    }
+
+    func testOnlyOneButtonIsEverPressed() {
+        useMode(.indexTap)
+        let bothDipped = SyntheticHand.build(
+            pose: .init(fingerDirs: SyntheticHand.relaxedDirs,
+                        curled: [.index, .little],
+                        thumbTipOffset: SyntheticHand.thumbExtendedOffset))
+
+        // Right first: dipping the index as well must not add a left press.
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                             from: 0.1, count: 3)).count, 1)
+        let whileRight = feedFrames([bothDipped], from: 0.25, count: 10)
+        XCTAssertTrue(downs(whileRight).isEmpty,
+                      "a held right button blocks the left engage outright — no frames accumulate")
+        XCTAssertTrue(rightUps(whileRight).isEmpty, "…and the right press is undisturbed")
+
+        let opened = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.6, count: 3)
+        XCTAssertEqual(rightUps(opened).count, 1)
+        XCTAssertTrue(ups(opened).isEmpty, "the blocked left button has nothing to release")
+
+        // Left first: the same pose must not add a right press.
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.mouseTap(indexDown: true)],
+                                        from: 0.8, count: 3)).count, 1)
+        let whileLeft = feedFrames([bothDipped], from: 0.95, count: 10)
+        XCTAssertTrue(rightDowns(whileLeft).isEmpty, "…and it holds symmetrically the other way")
+        XCTAssertTrue(ups(whileLeft).isEmpty)
+    }
+
+    func testRightDragWithThePalm() {
+        useMode(.indexTap)
+        let start = Vec2(0.4, 0.7)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: start)], from: 0, count: 4)
+        feedFrames([SyntheticHand.fingerDip(.little, wrist: start)], from: 0.15, count: 3)
+
+        // Hold the dip past the tap window, then move the hand.
+        feedFrames([SyntheticHand.fingerDip(.little, wrist: start)], from: 0.28, count: 8)
+        var dragged: [Vec2] = []
+        for i in 1...5 {
+            let e = feed([SyntheticHand.fingerDip(.little, wrist: Vec2(0.4 + Double(i) * 0.03, 0.7))],
+                         at: 0.56 + Double(i) / 30).events
+            dragged += rightDrags(e)
+            XCTAssertTrue(drags(e).isEmpty, "a right-button drag must not masquerade as a left one")
+        }
+        XCTAssertGreaterThanOrEqual(dragged.count, 4, "held dip + hand movement drags")
+        XCTAssertEqual(dragged, dragged.sorted { $0.x < $1.x }, "drag positions advance monotonically")
+
+        let opening = feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.55, 0.7))],
+                                 from: 0.8, count: 3)
+        XCTAssertEqual(rightUps(opening).count, 1)
+        XCTAssertEqual(rightUps(opening)[0].0.x, dragged.last!.x, accuracy: 1e-6,
+                       "up lands on the last emitted drag")
+    }
+
+    func testRightClicksNeverChain() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(rightDowns(rightClick(from: 0.10)).map(\.1), [1])
+        XCTAssertEqual(rightDowns(rightClick(from: 0.30)).map(\.1), [1],
+                       "a right click is always a single, however fast it repeats")
+    }
+
+    func testRightClickLeavesTheDoubleClickChainAlone() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(downs(tapClick(from: 0.10)).map(\.1), [1])
+        XCTAssertEqual(rightDowns(rightClick(from: 0.28)).map(\.1), [1])
+        XCTAssertEqual(downs(tapClick(from: 0.46)).map(\.1), [2],
+                       "the right click neither chained into the double nor broke it")
+    }
+
+    func testThumbCurlModeAlsoRightClicks() {
+        useMode(.thumbCurl)
+        feedFrames([SyntheticHand.highFive(thumbTucked: false)], from: 0, count: 3)
+
+        // The left button is unchanged: tuck the thumb.
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.highFive(thumbTucked: true)],
+                                        from: 0.1, count: 3)).map(\.1), [1])
+        XCTAssertEqual(ups(feedFrames([SyntheticHand.highFive(thumbTucked: false)],
+                                      from: 0.25, count: 3)).count, 1)
+
+        // The pinky dips for the right button, thumb still out.
+        let dipping = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.45, count: 3)
+        XCTAssertEqual(rightDowns(dipping).map(\.1), [1])
+        XCTAssertTrue(downs(dipping).isEmpty, "an extended thumb is not a click")
+        XCTAssertEqual(rightUps(feedFrames([SyntheticHand.highFive(thumbTucked: false)],
+                                           from: 0.6, count: 3)).count, 1)
+    }
+
+    func testGatheringModesHaveNoRightClick() {
+        for mode in [ClickGesture.wholeHandPinch, .pinch] {
+            useMode(mode)
+            feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+            let e = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.1, count: 10)
+            XCTAssertTrue(rightDowns(e).isEmpty,
+                          "\(mode): a mode that gathers the fingers can't read a dip apart from its own click")
+            XCTAssertTrue(downs(e).isEmpty)
+        }
+    }
+
+    func testRightClickCanBeTurnedOff() {
+        var config = Self.testConfig(.indexTap)
+        config.rightClickEnabled = false
+        engine = GestureEngine(config: config)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.1, count: 10)
+        XCTAssertTrue(rightDowns(e).isEmpty)
+        XCTAssertTrue(downs(e).isEmpty)
+    }
+
+    func testRightClickFingerCannotAlsoBeTheLeftClickFinger() {
+        var config = Self.testConfig(.indexTap)
+        config.rightClickFinger = .index
+        engine = GestureEngine(config: config)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.1, count: 3)
+        XCTAssertTrue(rightDowns(e).isEmpty, "the index already presses the left button")
+        XCTAssertEqual(downs(e).map(\.1), [1], "…and it still does")
+    }
+
+    func testRingFingerRightClickWhenConfigured() {
+        var config = Self.testConfig(.indexTap)
+        config.rightClickFinger = .ring
+        engine = GestureEngine(config: config)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(rightDowns(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                             from: 0.1, count: 3)).map(\.1), [1])
+        XCTAssertEqual(rightUps(feedFrames([SyntheticHand.mouseTap(indexDown: false)],
+                                           from: 0.3, count: 3)).count, 1)
+        // …and the pinky no longer does anything.
+        XCTAssertTrue(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                            from: 0.5, count: 10)).isEmpty)
+    }
+
+    func testFaintDipJointsNeverRightClick() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+
+        var faint = SyntheticHand.fingerDip(.little)
+        for joint in [HandJoint.littleTip, .littleMCP, .ringTip, .ringMCP] {
+            faint.setPoint(faint[joint]!, for: joint, confidence: 0.30)
+        }
+        // 0.30 clears minJointConfidence (0.25), so the differential exists and
+        // reads dipped — only the engage floor (0.40) holds the press back.
+        XCTAssertTrue(rightDowns(feedFrames([faint], from: 0.1, count: 20)).isEmpty,
+                      "the right button gets the same phantom-click gate as the left")
+
+        // Tracked confidently, the same pose clicks on the usual debounce.
+        XCTAssertEqual(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                             from: 0.9, count: 3)).map(\.1), [1])
+    }
+
+    func testOverlayReportsTheTwoButtonsSeparately() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        feedFrames([SyntheticHand.fingerDip(.little)], from: 0.1, count: 2)
+        let (_, held) = feed([SyntheticHand.fingerDip(.little)], at: 0.2)
+        XCTAssertTrue(held.rightGrabbed)
+        XCTAssertFalse(held.grabbed, "`grabbed` stays left-only")
+        XCTAssertEqual(held.closingProgress, 1, accuracy: 1e-9,
+                       "the ring fills for whichever button is down")
+
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.3, count: 2) // release debounce
+        let (_, lifted) = feed([SyntheticHand.mouseTap(indexDown: false)], at: 0.4)
+        XCTAssertFalse(lifted.rightGrabbed)
+        XCTAssertFalse(lifted.grabbed)
+        XCTAssertLessThan(lifted.closingProgress, 0.05, "…and the ring drops back to resting")
+    }
+
+    func testChangingTheRightClickFingerMidPressReleasesIt() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let down = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.1, count: 3)
+        XCTAssertEqual(rightDowns(down).count, 1)
+
+        engine.config.rightClickFinger = .ring
+
+        let (events, overlay) = feed([SyntheticHand.fingerDip(.little)], at: 0.25)
+        XCTAssertEqual(rightUps(events).count, 1, "the finger holding the button changed under it")
+        XCTAssertEqual(rightUps(events)[0].0, rightDowns(down)[0].0)
+        XCTAssertFalse(overlay.rightGrabbed)
+        XCTAssertTrue(rightUps(feedFrames([SyntheticHand.fingerDip(.little)],
+                                          from: 0.3, count: 3)).isEmpty, "…and only once")
+    }
+
+    func testDisablingRightClickMidPressReleasesIt() {
+        useMode(.indexTap)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                             from: 0.1, count: 3)).count, 1)
+
+        engine.config.rightClickEnabled = false
+
+        XCTAssertEqual(rightUps(feed([SyntheticHand.fingerDip(.little)], at: 0.25).events).count, 1)
+        XCTAssertTrue(rightDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                            from: 0.3, count: 6)).isEmpty)
+    }
+
+    // MARK: - Auto reach
+
+    /// The test config with auto reach turned back on (it starts from the
+    /// identity box, so every drift is visible).
+    private func useAutoReach(_ clickGesture: ClickGesture = .indexTap) {
+        var config = Self.testConfig(clickGesture)
+        config.reachMode = .auto
+        engine = GestureEngine(config: config)
+    }
+
+    func testAutoTargetMatchesTheTunedDefaultsAtATypicalHandSize() {
+        // Deliberate continuity: at the hand size a laptop webcam usually
+        // sees, fitting the box reproduces the hand-tuned margins.
+        let box = GestureEngine.targetBox(forHandScale: 0.15)
+        XCTAssertEqual(box.xMin, 0.14, accuracy: 1e-9)
+        XCTAssertEqual(box.xMax, 0.86, accuracy: 1e-9)
+        XCTAssertEqual(box.yMin, 0.2525, accuracy: 1e-9)
+        XCTAssertEqual(box.yMax, 0.875, accuracy: 1e-9)
+    }
+
+    func testAutoReachWidensForALargeHand() {
+        useAutoReach()
+        // Scale 0.28 with the wrist low enough that every joint stays in frame.
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.8), scale: 0.28)], from: 0, count: 150)
+        let box = engine.effectiveInteractionBox
+        XCTAssertEqual(box.yMin, 0.428, accuracy: 0.02, "1.35 hand scales of headroom for the fingers")
+        XCTAssertEqual(box.xMin, 0.218, accuracy: 0.02)
+        XCTAssertEqual(box.xMax, 1 - box.xMin, accuracy: 1e-9, "the box stays centred")
+        XCTAssertEqual(box.yMax, 0.81, accuracy: 0.02)
+    }
+
+    func testAutoReachTightensForASmallHand() {
+        useAutoReach()
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7), scale: 0.10)], from: 0, count: 150)
+        XCTAssertEqual(engine.effectiveInteractionBox.yMin, 0.185, accuracy: 0.02,
+                       "a distant hand needs the screen edges within reach")
+    }
+
+    func testLosingTheHandForgetsItsMeasuredSize() {
+        useAutoReach()
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.8), scale: 0.28)], from: 0, count: 20)
+        XCTAssertEqual(engine.smoothedHandScale!, 0.28, accuracy: 1e-6)
+
+        feed([], at: 1.0) // past the tracking-loss grace: the hand is really gone
+        XCTAssertNil(engine.smoothedHandScale)
+
+        // The next hand sizes the box from its own scale, not the old one's.
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7), scale: 0.10)], from: 1.1, count: 150)
+        XCTAssertEqual(engine.smoothedHandScale!, 0.10, accuracy: 1e-6)
+        XCTAssertEqual(engine.effectiveInteractionBox.yMin, 0.185, accuracy: 0.02)
+    }
+
+    func testAutoReachNeverMovesTheBoxMidPress() {
+        useAutoReach()
+        let wrist = Vec2(0.5, 0.8)
+        feedFrames([SyntheticHand.openRelaxed(wrist: wrist, scale: 0.28)], from: 0, count: 10)
+        let drifting = engine.effectiveInteractionBox
+        XCTAssertGreaterThan(drifting.yMin, 0, "the box has started drifting toward the hand")
+        XCTAssertLessThan(drifting.yMin, 0.40, "…and is nowhere near finished")
+
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: wrist, scale: 0.28)],
+                   from: 0.4, count: 3)
+        let pressed = engine.effectiveInteractionBox
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: wrist, scale: 0.28)],
+                   from: 0.6, count: 60)
+        XCTAssertEqual(engine.effectiveInteractionBox, pressed,
+                       "a box change remaps the cursor, so it must never move under a held button")
+
+        // Released, the drift picks up again.
+        feedFrames([SyntheticHand.openRelaxed(wrist: wrist, scale: 0.28)], from: 2.8, count: 10)
+        XCTAssertGreaterThan(engine.effectiveInteractionBox.yMin, pressed.yMin)
+    }
+
+    func testManualReachUsesTheConfiguredBoxVerbatim() {
+        var config = Self.testConfig(.indexTap)
+        config.interactionBox = InteractionBox(xMin: 0.2, xMax: 0.8, yMin: 0.25, yMax: 0.75)
+        engine = GestureEngine(config: config)
+        for i in 0..<30 {
+            feed([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.8), scale: 0.28)], at: Double(i) / 30)
+            XCTAssertEqual(engine.effectiveInteractionBox, config.interactionBox,
+                           "manual reach never drifts, however big the hand")
+        }
+    }
+
+    func testTheAdaptedBoxIsWhatMapsTheCursor() {
+        useAutoReach()
+        let scale = 0.28
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.72), scale: scale)], from: 0, count: 150)
+        let box = engine.effectiveInteractionBox
+        XCTAssertGreaterThan(box.yMin, 0.40, "the top edge really did move (the identity box starts at 0)")
+
+        // The palm pointer is the wrist↔middleMCP midpoint, half a hand scale
+        // above the wrist. Put it exactly on the fitted top edge and the cursor
+        // has to land at the very top of the screen.
+        let (_, overlay) = feed(
+            [SyntheticHand.openRelaxed(wrist: Vec2(0.5, box.yMin + scale / 2), scale: scale)], at: 5.0)
+        XCTAssertEqual(overlay.cursor!.y, 0, accuracy: 1e-6,
+                       "…which the unadapted identity box would have mapped to 0.43")
     }
 }

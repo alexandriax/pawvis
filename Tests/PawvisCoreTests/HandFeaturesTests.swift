@@ -154,6 +154,58 @@ final class HandFeaturesTests: XCTestCase {
         XCTAssertEqual(features(SyntheticHand.fist()).indexTapRatio()!, 1.0, accuracy: 0.1)
     }
 
+    func testTapReferencePairsArePinned() {
+        // Each finger measures against a neighbor that holds still while it
+        // dips — and the pairing is what keeps two dip-driven buttons apart.
+        XCTAssertEqual(HandFeatures.tapReference(for: .index), .middle)
+        XCTAssertEqual(HandFeatures.tapReference(for: .middle), .index)
+        XCTAssertEqual(HandFeatures.tapReference(for: .ring), .middle)
+        XCTAssertEqual(HandFeatures.tapReference(for: .little), .ring)
+    }
+
+    func testIndexTapRatioIsTheIndexFingerTapRatio() {
+        for hand in [SyntheticHand.mouseTap(indexDown: false),
+                     SyntheticHand.mouseTap(indexDown: true),
+                     SyntheticHand.fist()] {
+            let f = features(hand)
+            XCTAssertEqual(f.indexTapRatio()!, f.fingerTapRatio(.index)!, accuracy: 1e-12,
+                           "the index tap is just the general differential, pinned to index→middle")
+        }
+    }
+
+    func testFingerTapRatioReadsTheDippedFinger() {
+        let f = features(SyntheticHand.fingerDip(.little))
+        XCTAssertLessThan(f.fingerTapRatio(.little)!, 0.4, "a dipped pinky reads as a tap")
+        XCTAssertEqual(f.fingerTapRatio(.index)!, 1.0, accuracy: 1e-2,
+                       "…while the index finger idles")
+        XCTAssertLessThan(features(SyntheticHand.fingerDip(.ring)).fingerTapRatio(.ring)!, 0.4)
+    }
+
+    func testFingerTapRatiosAreIndependent() {
+        // The whole point of the pinned pairs (index→middle, little→ring): one
+        // finger's dip must never push another's ratio toward engagement, or
+        // left- and right-click would trip each other.
+        let indexDipped = features(SyntheticHand.fingerDip(.index))
+        XCTAssertLessThan(indexDipped.fingerTapRatio(.index)!, 0.4)
+        XCTAssertEqual(indexDipped.fingerTapRatio(.little)!, 1.0, accuracy: 1e-2,
+                       "the little finger references the ring, so an index dip leaves it flat")
+
+        let littleDipped = features(SyntheticHand.fingerDip(.little))
+        XCTAssertLessThan(littleDipped.fingerTapRatio(.little)!, 0.4)
+        XCTAssertEqual(littleDipped.fingerTapRatio(.index)!, 1.0, accuracy: 1e-2)
+    }
+
+    func testFingerTapRatioNilWithoutItsReference() {
+        var joints: [HandJoint: Vec2] = [:]
+        let full = SyntheticHand.fingerDip(.little)
+        for joint in HandJoint.allCases where joint != .ringTip {
+            if let p = full[joint] { joints[joint] = p }
+        }
+        let f = features(Hand(joints: joints))
+        XCTAssertNil(f.fingerTapRatio(.little), "the little finger needs the ring as its reference")
+        XCTAssertNotNil(f.fingerTapRatio(.index))
+    }
+
     func testIndexTapRatioNilWithoutMiddleFinger() {
         var joints: [HandJoint: Vec2] = [:]
         let full = SyntheticHand.mouseTap(indexDown: false)

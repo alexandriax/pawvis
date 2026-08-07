@@ -245,6 +245,17 @@ enum SyntheticHand {
               wrist: wrist, scale: scale)
     }
 
+    /// Open hand with one named finger dipped like a mouse button; every other
+    /// finger (and the thumb) stays extended. `fingerDip(.index)` is the
+    /// left-click pose; the right-click finger dips the same way.
+    static func fingerDip(_ finger: Finger, wrist: Vec2 = Vec2(0.5, 0.7),
+                          scale: Double = 0.15) -> Hand {
+        build(pose: Pose(fingerDirs: relaxedDirs,
+                         curled: [finger],
+                         thumbTipOffset: thumbExtendedOffset),
+              wrist: wrist, scale: scale)
+    }
+
     /// Index finger half-dipped — inside the index-tap hysteresis band.
     static func mouseTapHalf(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
         build(pose: Pose(fingerDirs: relaxedDirs,

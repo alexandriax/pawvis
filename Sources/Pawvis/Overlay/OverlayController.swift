@@ -76,8 +76,10 @@ final class OverlayController {
         diagnostics: String? = nil
     ) {
         guard visible else { return }
-        let grabRose = overlay.grabbed && !prevGrabbed
-        prevGrabbed = overlay.grabbed
+        let anyGrab = overlay.grabbed || overlay.rightGrabbed
+        let grabRose = anyGrab && !prevGrabbed
+        let grabTint = overlay.rightGrabbed ? PawvisTheme.blue : PawvisTheme.purple
+        prevGrabbed = anyGrab
 
         for window in windows {
             var model = OverlayRenderModel()
@@ -107,32 +109,32 @@ final class OverlayController {
             }
 
             // The claw IS the cursor: open paw while pointing, closed paw
-            // while the hand is closed (button down). The ring around it
-            // tightens as the hand closes and fills while grabbed.
+            // while a button is down — purple for left, blue for right. The
+            // ring tightens as the click gesture forms and fills while held.
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
-                model.clawCursor = .init(center: local, closed: overlay.grabbed)
+                model.clawCursor = .init(
+                    center: local, closed: anyGrab, right: overlay.rightGrabbed)
 
                 if config.showPinchRing {
                     let progress = overlay.closingProgress
-                    let ringRadius: CGFloat = overlay.grabbed
+                    let ringRadius: CGFloat = anyGrab
                         ? (overlay.isDragging ? 26 : 20)
                         : 30 - 12 * progress
-                    let ringColor = overlay.grabbed
-                        ? PawvisTheme.purple
+                    let ringColor = anyGrab
+                        ? grabTint
                         : (NSColor.white.blended(withFraction: progress, of: PawvisTheme.purple)
                             ?? PawvisTheme.purple)
                     model.rings.append(.init(
                         center: local,
                         radius: ringRadius,
-                        lineWidth: overlay.grabbed ? 3.5 : 2.5,
+                        lineWidth: anyGrab ? 3.5 : 2.5,
                         strokeColor: ringColor,
-                        fillColor: overlay.grabbed
-                            ? PawvisTheme.purple.withAlphaComponent(0.35) : nil,
-                        alpha: overlay.grabbed ? 1 : 0.5 + 0.5 * progress))
+                        fillColor: anyGrab ? grabTint.withAlphaComponent(0.35) : nil,
+                        alpha: anyGrab ? 1 : 0.5 + 0.5 * progress))
                 }
 
                 if grabRose {
-                    window.contentOverlayView.flash(at: local, color: PawvisTheme.purple)
+                    window.contentOverlayView.flash(at: local, color: grabTint)
                 }
             }
 
@@ -214,9 +216,10 @@ struct OverlayRenderModel {
 
     struct ClawCursor {
         var center: CGPoint
-        /// Closed = hand is gripping (button down): the retracted-claw glyph,
-        /// tinted purple. Open = pointing: full claw, white.
+        /// Closed = a button is down: the retracted-claw glyph, tinted purple
+        /// for left and blue for right. Open = pointing: full claw, white.
         var closed: Bool
+        var right: Bool = false
     }
 
     var dots: [Dot] = []
@@ -390,8 +393,9 @@ final class OverlayContentView: NSView {
 
         let glyph = claw.closed ? Self.clawClosedGlyph : Self.clawOpenGlyph
         if glyph != nil {
-            let stateKey = claw.closed ? "closed" : "open"
-            let fillColor: NSColor = claw.closed ? PawvisTheme.purple : .white
+            let stateKey = claw.closed ? (claw.right ? "closed-right" : "closed") : "open"
+            let fillColor: NSColor = claw.closed
+                ? (claw.right ? PawvisTheme.blue : PawvisTheme.purple) : .white
             clawShadowLayer.isHidden = false
             clawFillLayer.isHidden = false
             clawFallbackDot.isHidden = true
@@ -411,7 +415,8 @@ final class OverlayContentView: NSView {
             clawFallbackDot.path = CGPath(
                 ellipseIn: CGRect(x: claw.center.x - 4.5, y: claw.center.y - 4.5, width: 9, height: 9),
                 transform: nil)
-            clawFallbackDot.fillColor = (claw.closed ? PawvisTheme.purple : .white).cgColor
+            clawFallbackDot.fillColor = (claw.closed
+                ? (claw.right ? PawvisTheme.blue : PawvisTheme.purple) : .white).cgColor
         }
     }
 

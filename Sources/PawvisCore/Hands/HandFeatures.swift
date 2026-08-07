@@ -102,22 +102,42 @@ public struct HandFeatures {
         return thumbTip.distance(to: indexMCP) / scale
     }
 
-    /// The mouse-button measure: how far the index finger has dipped RELATIVE
-    /// to the middle finger, folded into a low-when-tapped ratio:
-    ///   1 + (indexExtent − middleExtent)
-    /// where extent = tip→knuckle distance / hand scale. Idles near 1.0 with
-    /// both fingers up; dips to ~0.5 when the index taps down (flexion
-    /// foreshortens its projected extent). Differencing against the middle
-    /// finger cancels whole-hand tilt — only the index moving *relative to its
+    /// The neighbor each finger's dip is measured against. Pinned pairs, and
+    /// the reason two fingers can drive two different buttons: a *reference*
+    /// finger dipping can only push the ratio up, away from engagement, and a
+    /// finger that is neither the subject nor its reference doesn't move it at
+    /// all. So no dip can ever trip another finger's button.
+    public static func tapReference(for finger: Finger) -> Finger {
+        switch finger {
+        case .index: return .middle
+        case .middle: return .index
+        case .ring: return .middle
+        case .little: return .ring
+        }
+    }
+
+    /// The mouse-button measure: how far a finger has dipped RELATIVE to its
+    /// reference neighbor, folded into a low-when-tapped ratio:
+    ///   1 + (fingerExtent − referenceExtent)
+    /// where extent = tip→own-knuckle distance / hand scale. Idles near 1.0
+    /// with both fingers up; dips to ~0.5 when the finger taps down (flexion
+    /// foreshortens its projected extent). Differencing against a neighbor
+    /// cancels whole-hand tilt — only the finger moving *relative to that
     /// neighbor* reads as a tap, like a finger on a physical mouse button.
-    public func indexTapRatio() -> Double? {
-        guard let indexTip = point(.indexTip), let indexMCP = point(.indexMCP),
-              let middleTip = point(.middleTip), let middleMCP = point(.middleMCP) else {
+    public func fingerTapRatio(_ finger: Finger) -> Double? {
+        let reference = Self.tapReference(for: finger)
+        guard let tip = point(finger.tip), let mcp = point(finger.mcp),
+              let referenceTip = point(reference.tip), let referenceMCP = point(reference.mcp) else {
             return nil
         }
-        let indexExtent = indexTip.distance(to: indexMCP) / scale
-        let middleExtent = middleTip.distance(to: middleMCP) / scale
-        return 1 + (indexExtent - middleExtent)
+        let extent = tip.distance(to: mcp) / scale
+        let referenceExtent = referenceTip.distance(to: referenceMCP) / scale
+        return 1 + (extent - referenceExtent)
+    }
+
+    /// The index finger's tap ratio — the left button in `.indexTap` mode.
+    public func indexTapRatio() -> Double? {
+        fingerTapRatio(.index)
     }
 
     // MARK: - Finger extension

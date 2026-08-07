@@ -9,15 +9,18 @@ import Foundation
 ///   the gesture closes  → left button down (click; twice quickly = double-click)
 ///   move while closed   → drag
 ///   the gesture opens   → button up
+///   a second finger dips → the same machinery, on the right button
 ///
 /// Which shape clicks is `config.clickGesture`; every mode reduces to one
 /// scale-normalized ratio crossing a threshold, and each pairs with a pointer
 /// the gesture itself barely moves — so a click doesn't shift the cursor.
+/// Only ever one button at a time: whichever engaged first owns the press.
 ///
 /// Input hands are in **camera space**: normalized [0,1], x right, y down,
-/// unmirrored. The engine mirrors, maps through the interaction box, and
-/// smooths (One Euro per joint, sporecaster-style slot tracking with stale
-/// reset) before running gesture logic in screen-normalized space.
+/// unmirrored. The engine mirrors, maps through the interaction box (sized to
+/// the hand itself when `reachMode` is `.auto`), and smooths (One Euro per
+/// joint, sporecaster-style slot tracking with stale reset) before running
+/// gesture logic in screen-normalized space.
 public final class GestureEngine {
 
     public var config: GestureConfig {
@@ -25,10 +28,14 @@ public final class GestureEngine {
             if config.smoothing != oldValue.smoothing {
                 for i in slots.indices { slots[i].setFilterParams(config.smoothing) }
             }
-            if config.clickGesture != oldValue.clickGesture {
-                // The new mode's ratio says nothing about the old mode's hold,
-                // so switching mid-pinch would strand the button down. The up
-                // rides out with the next frame (or the next forceRelease).
+            if config.clickGesture != oldValue.clickGesture
+                || config.rightClickFinger != oldValue.rightClickFinger
+                || config.rightClickEnabled != oldValue.rightClickEnabled {
+                // The new setting's ratio says nothing about the old one's
+                // hold, so changing it mid-press would strand the button down —
+                // whether the mode moved out from under a pinch or the finger
+                // moved out from under a right-click. The up rides out with the
+                // next frame (or the next forceRelease).
                 pendingEvents = forceRelease(at: lastHandTime)
             }
         }
@@ -38,6 +45,7 @@ public final class GestureEngine {
         self.config = config
         self.slots = [HandSlot(id: 0, params: config.smoothing),
                       HandSlot(id: 1, params: config.smoothing)]
+        self.effectiveInteractionBox = config.interactionBox
     }
 
     // MARK: - Internal state
@@ -65,10 +73,19 @@ public final class GestureEngine {
     }
 
     private struct PressState {
+        var button: MouseButton
         var downAt: Vec2
         var downTime: TimeInterval
         var clickCount: Int
         var dragging = false
+    }
+
+    /// One button's hysteresis + debounce state. Left and right run the same
+    /// machine over different metrics; only one of them may hold at a time.
+    private struct ButtonState {
+        var engaged = false
+        var engageFrames = 0
+        var releaseFrames = 0
     }
 
     private static let slotMatchMax = 0.25 // normalized palm travel to keep identity
@@ -87,17 +104,32 @@ public final class GestureEngine {
     /// shaky joint still holds and releases normally.
     private static let engageConfidenceFloor = 0.40
 
+    /// EMA weight on the measured hand size. Slow on purpose: the box it feeds
+    /// is a coordinate transform, so it must react to "the user leaned in",
+    /// never to per-frame landmark noise.
+    private static let handScaleAlpha = 0.1
+    /// Fraction of the remaining gap the auto box closes each frame. At 30 fps
+    /// a full refit takes about two seconds — slow enough that the drift never
+    /// reads as the cursor swimming under a still hand.
+    private static let reachLerp = 0.05
+
     private var slots: [HandSlot]
     private var primarySlotID: Int?
     private var lastHandTime: TimeInterval = -.infinity
 
     private var cursor: Vec2?
+    /// At most one press exists at a time, whichever button owns it.
     private var press: PressState?
-    private var pinched = false
-    private var engageFrames = 0
-    private var releaseFrames = 0
-    /// Events produced outside `process` (a mid-session mode switch), flushed
-    /// ahead of the next frame's.
+    private var leftButton = ButtonState()
+    private var rightButton = ButtonState()
+    /// EMA of the primary hand's raw camera-space scale; nil until a hand is
+    /// seen (and again once one is truly gone).
+    private(set) var smoothedHandScale: Double?
+    /// The box actually used for mapping: `config.interactionBox` in `.manual`,
+    /// a hand-sized box drifting toward its target in `.auto`.
+    private(set) var effectiveInteractionBox: InteractionBox
+    /// Events produced outside `process` (a mid-session settings change),
+    /// flushed ahead of the next frame's.
     private var pendingEvents: [GestureEvent] = []
 
     // Double-click chaining.
@@ -107,18 +139,17 @@ public final class GestureEngine {
 
     // MARK: - Public API
 
-    /// Release a held pinch (used on shutdown / tracking disable so the button
-    /// is never left stuck down).
+    /// Release a held press (used on shutdown / tracking disable so no button
+    /// is ever left stuck down).
     public func forceRelease(at time: TimeInterval) -> [GestureEvent] {
         var events = pendingEvents
         pendingEvents = []
         if let p = press {
-            events.append(.buttonUp(.left, at: cursor ?? p.downAt, clickCount: p.clickCount))
+            events.append(.buttonUp(p.button, at: cursor ?? p.downAt, clickCount: p.clickCount))
         }
         press = nil
-        pinched = false
-        engageFrames = 0
-        releaseFrames = 0
+        leftButton = ButtonState()
+        rightButton = ButtonState()
         // A forced release must not chain into a double-click.
         lastUpTime = -.infinity
         _ = time
@@ -131,6 +162,7 @@ public final class GestureEngine {
         primarySlotID = nil
         cursor = nil
         lastHandTime = -.infinity
+        smoothedHandScale = nil
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -177,7 +209,7 @@ public final class GestureEngine {
                     // last place we sent the pointer.
                     if clamped.distance(to: cursor ?? p.downAt) >= config.jitterDeadband {
                         cursor = clamped
-                        events.append(.drag(.left, to: clamped))
+                        events.append(.drag(p.button, to: clamped))
                     }
                 }
             } else if cursor.map({ clamped.distance(to: $0) >= config.jitterDeadband / 2 }) ?? true {
@@ -186,22 +218,26 @@ public final class GestureEngine {
             }
         }
 
-        // 4. Gesture state: the mode's ratio with hysteresis + debounce.
+        // 4. Button state: each button's ratio with hysteresis + debounce.
+        // Left runs first, so a frame where both fingers dip reads as a plain
+        // click; from then on whichever is held locks the other out.
         let ratio = modeRatio(features)
-        if let ratio {
-            updatePinch(ratio: ratio,
-                        confident: engageConfident(primary.hand),
-                        at: frame.time,
-                        events: &events)
-        } else {
-            // A tip below the confidence floor must never flap the state: hold
-            // it and restart both counters. Real dropouts go through the
-            // tracking-loss grace instead.
-            engageFrames = 0
-            releaseFrames = 0
-        }
+        let rightHeld = isHeld(.right)
+        updateButton(.left, state: &leftButton, ratio: ratio,
+                     engage: config.engageRatio, release: config.releaseRatio,
+                     confident: engageConfident(primary.hand), blocked: rightHeld,
+                     at: frame.time, events: &events)
+        let leftHeld = isHeld(.left)
+        updateButton(.right, state: &rightButton, ratio: rightRatio(features),
+                     engage: config.rightEngageRatio, release: config.rightReleaseRatio,
+                     confident: rightEngageConfident(primary.hand), blocked: leftHeld,
+                     at: frame.time, events: &events)
 
-        // 5. Overlay state.
+        // 5. Fit the interaction box to the hand (auto reach). Last, so the
+        // box that mapped this frame is the one the press — if any — began in.
+        updateReach(rawHand: primary.raw)
+
+        // 6. Overlay state.
         overlay.hands = tracked.map { th in
             var oh = OverlayHand()
             oh.isPrimary = th.slotID == primarySlotID
@@ -209,7 +245,8 @@ public final class GestureEngine {
             return oh
         }
         overlay.cursor = cursor
-        overlay.grabbed = pinched
+        overlay.grabbed = leftButton.engaged
+        overlay.rightGrabbed = rightButton.engaged
         overlay.isDragging = press?.dragging ?? false
         overlay.closingProgress = closingProgress(for: ratio)
 
@@ -271,44 +308,100 @@ public final class GestureEngine {
         }
     }
 
-    // MARK: - Pinch detection
+    // MARK: - Right click
 
-    private func updatePinch(ratio: Double, confident: Bool, at time: TimeInterval,
-                             events: inout [GestureEvent]) {
-        if !pinched {
-            releaseFrames = 0
-            guard confident else {
-                // Reset, not pause: a phantom needs *consecutive* confident
-                // frames, and low confidence is where phantoms live.
-                engageFrames = 0
-                return
-            }
-            guard ratio < config.engageRatio else {
-                engageFrames = 0 // includes the hysteresis band: no transition there
-                return
-            }
-            engageFrames += 1
-            guard engageFrames >= config.pinchDebounceFrames else { return }
-            engageFrames = 0
-            pinched = true
-            beginPress(at: time, events: &events)
-        } else {
-            engageFrames = 0
-            guard ratio > config.releaseRatio else {
-                releaseFrames = 0
-                return
-            }
-            releaseFrames += 1
-            guard releaseFrames >= config.pinchDebounceFrames else { return }
-            releaseFrames = 0
-            pinched = false
-            endPress(at: time, events: &events)
+    /// The finger whose dip presses the right button, or nil when this
+    /// configuration has none: the gathering modes can't tell a dip from their
+    /// own click, and the finger already driving the left button can't drive
+    /// both.
+    private var activeRightClickFinger: Finger? {
+        guard config.rightClickEnabled else { return nil }
+        switch config.clickGesture {
+        case .indexTap:
+            return config.rightClickFinger == .index ? nil : config.rightClickFinger
+        case .thumbCurl:
+            return config.rightClickFinger
+        case .wholeHandPinch, .pinch:
+            return nil
         }
     }
 
-    /// 0 when the hand sits comfortably open, 1 while pinched.
+    /// The dip differential the right button thresholds, in every mode that
+    /// has one. nil holds the current state, exactly as the left ratio does.
+    private func rightRatio(_ features: HandFeatures?) -> Double? {
+        guard let features, let finger = activeRightClickFinger else { return nil }
+        return features.fingerTapRatio(finger)
+    }
+
+    /// The right-click differential's own engage-side confidence gate: the
+    /// dipping finger's tip and knuckle plus its reference neighbor's.
+    private func rightEngageConfident(_ hand: Hand) -> Bool {
+        guard let finger = activeRightClickFinger else { return false }
+        let reference = HandFeatures.tapReference(for: finger)
+        return [finger.tip, finger.mcp, reference.tip, reference.mcp].allSatisfy {
+            hand.confidence(for: $0) >= Self.engageConfidenceFloor
+        }
+    }
+
+    /// Whether this button currently owns the press. One press at a time: the
+    /// other button's engage counter must not so much as accumulate meanwhile.
+    private func isHeld(_ button: MouseButton) -> Bool {
+        let state = button == .left ? leftButton : rightButton
+        return state.engaged || press?.button == button
+    }
+
+    // MARK: - Press detection
+
+    /// One button's state machine: hysteresis band, two-way debounce, and an
+    /// engage-only confidence gate. Both buttons share it — they differ only
+    /// in which ratio, thresholds, and gate they arrive with.
+    private func updateButton(_ button: MouseButton, state: inout ButtonState,
+                              ratio: Double?, engage: Double, release: Double,
+                              confident: Bool, blocked: Bool,
+                              at time: TimeInterval, events: inout [GestureEvent]) {
+        guard let ratio else {
+            // A joint below the confidence floor must never flap the state:
+            // hold it and restart both counters. Real dropouts go through the
+            // tracking-loss grace instead.
+            state.engageFrames = 0
+            state.releaseFrames = 0
+            return
+        }
+        if !state.engaged {
+            state.releaseFrames = 0
+            guard confident, !blocked else {
+                // Reset, not pause: a phantom needs *consecutive* confident
+                // frames, and low confidence is where phantoms live. The other
+                // button holding the press blocks this one just as hard.
+                state.engageFrames = 0
+                return
+            }
+            guard ratio < engage else {
+                state.engageFrames = 0 // includes the hysteresis band: no transition there
+                return
+            }
+            state.engageFrames += 1
+            guard state.engageFrames >= config.pinchDebounceFrames else { return }
+            state.engageFrames = 0
+            state.engaged = true
+            beginPress(button, at: time, events: &events)
+        } else {
+            state.engageFrames = 0
+            guard ratio > release else {
+                state.releaseFrames = 0
+                return
+            }
+            state.releaseFrames += 1
+            guard state.releaseFrames >= config.pinchDebounceFrames else { return }
+            state.releaseFrames = 0
+            state.engaged = false
+            endPress(button, at: time, events: &events)
+        }
+    }
+
+    /// 0 when the hand sits comfortably open, 1 while a button is down.
     private func closingProgress(for ratio: Double?) -> Double {
-        if pinched { return 1 }
+        if leftButton.engaged || rightButton.engaged { return 1 }
         guard let ratio else { return 0 }
         let progress: Double
         switch config.clickGesture {
@@ -340,25 +433,34 @@ public final class GestureEngine {
             : config.dragActivationDistance
     }
 
-    private func beginPress(at time: TimeInterval, events: inout [GestureEvent]) {
+    private func beginPress(_ button: MouseButton, at time: TimeInterval,
+                            events: inout [GestureEvent]) {
         guard press == nil, let pos = cursor else { return }
         var clickCount = 1
-        if time - lastUpTime <= config.doubleClickInterval,
+        // Only the left button chains: a right click is always a single, and
+        // never seeds a double-click.
+        if button == .left,
+           time - lastUpTime <= config.doubleClickInterval,
            pos.distance(to: lastUpPos) <= config.doubleClickSlop,
            lastUpClickCount < 3 { // after a triple, the chain restarts at 1
             clickCount = lastUpClickCount + 1
         }
-        press = PressState(downAt: pos, downTime: time, clickCount: clickCount)
-        events.append(.buttonDown(.left, at: pos, clickCount: clickCount))
+        press = PressState(button: button, downAt: pos, downTime: time, clickCount: clickCount)
+        events.append(.buttonDown(button, at: pos, clickCount: clickCount))
     }
 
-    private func endPress(at time: TimeInterval, events: inout [GestureEvent]) {
-        guard let p = press else { return }
+    private func endPress(_ button: MouseButton, at time: TimeInterval,
+                          events: inout [GestureEvent]) {
+        guard let p = press, p.button == button else { return }
         let pos = cursor ?? p.downAt
-        events.append(.buttonUp(.left, at: pos, clickCount: p.clickCount))
-        lastUpTime = time
-        lastUpPos = pos
-        lastUpClickCount = p.clickCount
+        events.append(.buttonUp(button, at: pos, clickCount: p.clickCount))
+        if button == .left {
+            // A right click in the middle of a double-click must neither chain
+            // nor break the chain, so it leaves these untouched.
+            lastUpTime = time
+            lastUpPos = pos
+            lastUpClickCount = p.clickCount
+        }
         press = nil
     }
 
@@ -374,12 +476,77 @@ public final class GestureEngine {
         if time - lastHandTime > config.trackingLossGrace {
             events.append(contentsOf: forceRelease(at: time))
             primarySlotID = nil
+            // The hand is genuinely gone: the next one sizes the auto box from
+            // its own scale rather than inheriting this one's.
+            smoothedHandScale = nil
         } else {
-            overlay.grabbed = pinched
+            let held = leftButton.engaged || rightButton.engaged
+            overlay.grabbed = leftButton.engaged
+            overlay.rightGrabbed = rightButton.engaged
             overlay.isDragging = press?.dragging ?? false
-            overlay.closingProgress = pinched ? 1 : 0
+            overlay.closingProgress = held ? 1 : 0
         }
         return (events, overlay)
+    }
+
+    // MARK: - Auto reach
+
+    /// Track the hand's real size and drift the interaction box toward the box
+    /// that size wants. `rawHand` is camera-space and unsmoothed — it has to
+    /// be, or the measurement would be scaled by the very box it feeds.
+    private func updateReach(rawHand: Hand) {
+        if let scale = rawScale(of: rawHand) {
+            smoothedHandScale = smoothedHandScale.map {
+                $0 + (scale - $0) * Self.handScaleAlpha
+            } ?? scale // seed on the first sight of a hand, don't ramp up from zero
+        }
+        guard config.reachMode == .auto else {
+            effectiveInteractionBox = config.interactionBox // manual: verbatim, at once
+            return
+        }
+        // Never mid-press: the box is a coordinate transform, so moving it
+        // under a held button would slide whatever is being dragged.
+        guard press == nil, let scale = smoothedHandScale else { return }
+        let target = Self.targetBox(forHandScale: scale)
+        func drift(_ edge: Double, toward goal: Double) -> Double {
+            edge + (goal - edge) * Self.reachLerp
+        }
+        effectiveInteractionBox = InteractionBox(
+            xMin: drift(effectiveInteractionBox.xMin, toward: target.xMin),
+            xMax: drift(effectiveInteractionBox.xMax, toward: target.xMax),
+            yMin: drift(effectiveInteractionBox.yMin, toward: target.yMin),
+            yMax: drift(effectiveInteractionBox.yMax, toward: target.yMax))
+    }
+
+    /// The box a hand of this raw camera-space scale wants. A close (big) hand
+    /// gets larger margins — a smaller active box pulled toward frame center —
+    /// because its fingers occupy so much of the frame that reaching a fixed
+    /// box's edges would push them out of view (the "can't click the top half
+    /// of the screen up close" failure). A distant (small) hand gets slim
+    /// margins and most of the frame. Every margin is measured in hand scales,
+    /// so the whole hand — not just the palm anchor the cursor rides — stays
+    /// inside the frame when the cursor is at a screen edge.
+    /// At scale 0.15 (a typical laptop-webcam hand) this reproduces the tuned
+    /// manual defaults exactly, so switching modes is not a jump.
+    static func targetBox(forHandScale scale: Double) -> InteractionBox {
+        func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(max(v, lo), hi) }
+        // Sideways: a little over half a hand width of air on each side.
+        let xMargin = clamp(0.60 * scale + 0.05, 0.08, 0.40)
+        // Up: the fingers reach ~1.3 scales above the palm anchor, and all of
+        // them have to stay in frame with the cursor at the top of the screen.
+        let yTop = clamp(1.35 * scale + 0.05, 0.10, 0.48)
+        // Down: only the wrist trails the anchor, so far less room is needed.
+        let yBottom = clamp(0.50 * scale + 0.05, 0.08, 0.30)
+        return InteractionBox(xMin: xMargin, xMax: 1 - xMargin,
+                              yMin: yTop, yMax: 1 - yBottom)
+    }
+
+    /// The hand's size in raw camera space, by exactly the rule HandFeatures
+    /// normalizes with (wrist→middle knuckle, else knuckle span / 0.7).
+    private func rawScale(of hand: Hand) -> Double? {
+        HandFeatures(hand: hand,
+                     thresholds: config.poseThresholds,
+                     minJointConfidence: config.minJointConfidence)?.scale
     }
 
     // MARK: - Slot tracking + smoothing
@@ -387,6 +554,7 @@ public final class GestureEngine {
     private struct TrackedHand {
         var slotID: Int
         var hand: Hand // screen-space, smoothed
+        var raw: Hand  // camera-space, exactly as tracked (auto reach measures this)
     }
 
     private func rawPalm(of hand: Hand) -> Vec2 {
@@ -399,7 +567,8 @@ public final class GestureEngine {
     }
 
     private func assignAndSmooth(hands: [Hand], at time: TimeInterval) -> [TrackedHand] {
-        let mapper = config.mapper
+        // The effective box, not the configured one: in `.auto` they differ.
+        let mapper = CoordinateMapper(box: effectiveInteractionBox, mirrored: config.mirrorCamera)
         let capped = Array(hands.prefix(slots.count))
         let palms = capped.map { rawPalm(of: $0) }
 
@@ -438,7 +607,7 @@ public final class GestureEngine {
                 let mapped = mapper.map(p, clamped: false)
                 return slots[s].filters[joint.rawValue].filter(mapped, at: time)
             }
-            result.append(TrackedHand(slotID: slots[s].id, hand: screenHand))
+            result.append(TrackedHand(slotID: slots[s].id, hand: screenHand, raw: capped[h]))
         }
         return result.sorted { $0.slotID < $1.slotID }
     }

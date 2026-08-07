@@ -160,7 +160,8 @@ final class PawvisController: ObservableObject {
 
         let count = overlayState.hands.count
         if count != handsDetected { handsDetected = count }
-        if overlayState.grabbed != grabbing { grabbing = overlayState.grabbed }
+        let anyGrab = overlayState.grabbed || overlayState.rightGrabbed
+        if anyGrab != grabbing { grabbing = anyGrab }
     }
 
     // MARK: - Tracking diagnostics
