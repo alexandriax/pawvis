@@ -1,27 +1,22 @@
 import PawvisCore
 import SwiftUI
 
-/// Readable buttons on the translucent menu material: white text on a solid
-/// tinted chip in dark mode, tinted text on a faint chip in light mode.
-/// (Plain purple text was illegible against the dark vibrancy background.)
-/// `solid` fills the chip in both schemes — the Settings and Quit buttons
-/// carry their own colors and should read the same either way.
+/// Readable buttons on the translucent menu material: always reverse type —
+/// white text on a solid tinted chip — in both color schemes. (Plain purple
+/// text was illegible on the dark vibrancy background, and the faint
+/// light-mode chip washed out against the light one.)
 struct PawvisButtonStyle: ButtonStyle {
     var color: Color = PawvisTheme.purpleUI
-    var solid = false
-
-    @Environment(\.colorScheme) private var scheme
 
     func makeBody(configuration: Configuration) -> some View {
-        let filled = solid || scheme == .dark
-        return configuration.label
+        configuration.label
             .font(.callout.weight(.medium))
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(filled ? color : color.opacity(0.14)))
-            .foregroundStyle(filled ? Color.white : color)
+                    .fill(color))
+            .foregroundStyle(Color.white)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -165,7 +160,7 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             Button("Settings…") { openSettingsInFront() }
-                .buttonStyle(PawvisButtonStyle(color: PawvisTheme.blueUI, solid: true))
+                .buttonStyle(PawvisButtonStyle(color: PawvisTheme.blueUI))
             Button("Gesture Guide") {
                 dismiss() // close the menu bar popover — it floats above windows
                 openWindow(id: "gesture-guide")
@@ -175,7 +170,7 @@ struct MenuContentView: View {
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(PawvisButtonStyle(color: .black, solid: true))
+            .buttonStyle(PawvisButtonStyle(color: .black))
         }
         .buttonStyle(PawvisButtonStyle())
     }
