@@ -11,11 +11,15 @@ public struct OverlayConfig: Codable, Equatable, Sendable {
     public var showStatusPill: Bool = true
     /// Dot diameter multiplier (1.0 = default sizes).
     public var dotScale: Double = 1.0
+    /// Include the overlay (claw, dots, ring, pill) in screenshots and screen
+    /// recordings. Off by default for privacy; turn on to demo Pawvis.
+    public var showInScreenCapture: Bool = false
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case showFingertipDots, showPinchRing, showCursorHalo, showStatusPill, dotScale
+        case showFingertipDots, showPinchRing, showCursorHalo, showStatusPill
+        case dotScale, showInScreenCapture
     }
 
     public init(from decoder: Decoder) throws {
@@ -26,6 +30,7 @@ public struct OverlayConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showCursorHalo) { showCursorHalo = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .showStatusPill) { showStatusPill = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .dotScale) { dotScale = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .showInScreenCapture) { showInScreenCapture = v }
     }
 }
 

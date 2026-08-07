@@ -17,9 +17,10 @@ final class GestureEngineTests: XCTestCase {
     /// Well inside the engage zone (0.45) and tight enough that the index tip
     /// alone stays within `dragActivationDistance` of the midpoint.
     static let tightGap = 0.10
-    /// Between the two thresholds — the hysteresis band.
-    static let bandGap = 0.55
-    /// Above the release threshold (0.68).
+    /// Between the two thresholds — the hysteresis band (engage 0.45, release
+    /// 0.45 + 0.08 = 0.53).
+    static let bandGap = 0.49
+    /// Above the release threshold (0.53).
     static let openGap = 0.90
 
     override func setUp() {
@@ -83,7 +84,15 @@ final class GestureEngineTests: XCTestCase {
         let c = GestureConfig.default
         XCTAssertEqual(c.smoothing, .landmark, "sporecaster smoothed every landmark at 1.4/0.014/1.0")
         XCTAssertEqual(c.pinchEngageRatio, 0.45)
-        XCTAssertEqual(c.pinchReleaseRatio, 0.68)
+        XCTAssertEqual(c.pinchReleaseRatio, 0.53, accuracy: 1e-9,
+                       "release tracks engage + hysteresis, so it follows the sensitivity slider")
+    }
+
+    func testReleaseThresholdTracksSensitivity() {
+        var c = GestureConfig.default
+        c.pinchEngageRatio = 0.55
+        XCTAssertEqual(c.pinchReleaseRatio, 0.63, accuracy: 1e-9,
+                       "a tighter or looser click setting moves the release point with it")
     }
 
     // MARK: - Cursor movement

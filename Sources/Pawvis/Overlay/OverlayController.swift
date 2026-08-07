@@ -31,7 +31,18 @@ final class OverlayController {
     }
 
     func setConfig(_ config: OverlayConfig) {
+        let captureChanged = config.showInScreenCapture != self.config.showInScreenCapture
         self.config = config
+        if captureChanged {
+            applySharing()
+        }
+    }
+
+    /// Overlay windows are excluded from screenshots/recordings by default
+    /// (privacy); the opt-in setting makes them capturable for demos.
+    private func applySharing() {
+        let sharing: NSWindow.SharingType = config.showInScreenCapture ? .readOnly : .none
+        windows.forEach { $0.sharingType = sharing }
     }
 
     func show() {
@@ -51,6 +62,7 @@ final class OverlayController {
         let wasVisible = visible
         windows.forEach { $0.orderOut(nil) }
         windows = NSScreen.screens.map { OverlayWindow(screen: $0) }
+        applySharing()
         if wasVisible { show() }
     }
 

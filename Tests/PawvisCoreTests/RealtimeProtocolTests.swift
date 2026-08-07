@@ -191,7 +191,9 @@ final class SettingsTests: XCTestCase {
         let jsonData = Data(#"{"gestures":{"pinchEngageRatio":0.25}}"#.utf8)
         let decoded = try JSONDecoder().decode(PawvisSettings.self, from: jsonData)
         XCTAssertEqual(decoded.gestures.pinchEngageRatio, 0.25)
-        XCTAssertEqual(decoded.gestures.pinchReleaseRatio, 0.68, "unspecified fields keep defaults")
+        XCTAssertEqual(decoded.gestures.pinchReleaseHysteresis, 0.08, "unspecified fields keep defaults")
+        XCTAssertEqual(decoded.gestures.pinchReleaseRatio, 0.33, accuracy: 1e-9,
+                       "release tracks the decoded engage ratio")
         XCTAssertEqual(decoded.dictation, DictationConfig())
     }
 
@@ -212,6 +214,6 @@ final class SettingsTests: XCTestCase {
         """#.utf8)
         let decoded = try JSONDecoder().decode(PawvisSettings.self, from: jsonData)
         XCTAssertEqual(decoded.gestures.pinchEngageRatio, 0.2)
-        XCTAssertEqual(decoded.gestures.pinchReleaseRatio, 0.68)
+        XCTAssertEqual(decoded.gestures.pinchReleaseHysteresis, 0.08)
     }
 }

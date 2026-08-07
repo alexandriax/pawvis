@@ -106,6 +106,11 @@ private struct GestureSettingsTab: View {
             Toggle("Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
             Toggle("Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
             Toggle("Status pill", isOn: $store.settings.overlay.showStatusPill)
+            Toggle("Show overlay in screen recordings", isOn: $store.settings.overlay.showInScreenCapture)
+            Text("Off keeps the claw and dots out of screenshots and captures (private by default). Turn on to record a demo of Pawvis.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 

@@ -8,9 +8,15 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// Pinch engages when distance(thumbTip, indexTip) / handScale drops below
     /// this. Lower = the tips must come closer before a click fires.
     public var pinchEngageRatio: Double = 0.45
-    /// Pinch releases above this ratio. The gap between the two is the
-    /// hysteresis band, and it is the primary anti-flutter mechanism.
-    public var pinchReleaseRatio: Double = 0.68
+    /// How much farther apart than the engage distance the tips must move to
+    /// release. Deliberately small so engaging and releasing feel like the
+    /// same distance — a fixed release ratio meant tight sensitivity settings
+    /// needed an absurdly wide splay to let go. Just enough band remains to
+    /// stop boundary chatter; smoothing and the debounce handle the rest.
+    public var pinchReleaseHysteresis: Double = 0.08
+    /// The release threshold tracks the engage threshold (and therefore the
+    /// sensitivity slider).
+    public var pinchReleaseRatio: Double { pinchEngageRatio + pinchReleaseHysteresis }
     /// Consecutive frames past a threshold before the transition fires, in
     /// *both* directions. sporecaster needed none on MediaPipe; Vision's
     /// landmarks spike often enough that single-frame noise must not click.
@@ -55,7 +61,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case pinchEngageRatio, pinchReleaseRatio, pinchDebounceFrames
+        case pinchEngageRatio, pinchReleaseHysteresis, pinchDebounceFrames
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case smoothing, poseThresholds
         case minHandConfidence, minJointConfidence, trackingLossGrace
@@ -68,7 +74,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) { pinchEngageRatio = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseRatio) { pinchReleaseRatio = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseHysteresis) { pinchReleaseHysteresis = v }
         if let v = try? c.decodeIfPresent(Int.self, forKey: .pinchDebounceFrames) { pinchDebounceFrames = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) { doubleClickSlop = v }
