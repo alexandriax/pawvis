@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pawvis — hand &amp; voice control for your Mac</title>
-  <meta name="description" content="Pawvis turns your webcam into a pointing device and your voice into full control of your Mac. Open palm moves the cursor, a finger dip clicks, and it answers to its name — all processing 100% on-device.">
+  <title>Pawvis: touch-free hand &amp; voice control for your Mac</title>
+  <meta name="description" content="Pawvis turns your webcam into a touch-free pointing device: raise your hand in the air and the cursor follows, dip a finger to click, and your voice runs the Mac. All processing 100% on-device.">
   <link rel="canonical" href="https://alexandriax.github.io/pawvis/">
   <meta name="theme-color" content="#0B0912">
 
   <!-- Open Graph / Twitter -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Pawvis">
-  <meta property="og:title" content="Pawvis — hand &amp; voice control for your Mac">
-  <meta property="og:description" content="Your hand is the mouse. Your voice runs the Mac. Everything on-device — nothing you do leaves your machine.">
+  <meta property="og:title" content="Pawvis: touch-free hand &amp; voice control for your Mac">
+  <meta property="og:description" content="A mouse made of thin air. A Mac that answers to its name. Hand tracking, speech and screen understanding all run on your own machine.">
   <meta property="og:url" content="https://alexandriax.github.io/pawvis/">
   <meta property="og:image" content="https://alexandriax.github.io/pawvis/banner.png">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Pawvis — hand &amp; voice control for your Mac">
-  <meta name="twitter:description" content="Your hand is the mouse. Your voice runs the Mac. Everything on-device.">
+  <meta name="twitter:title" content="Pawvis: touch-free hand &amp; voice control for your Mac">
+  <meta name="twitter:description" content="A mouse made of thin air. A Mac that answers to its name. Everything on-device.">
   <meta name="twitter:image" content="https://alexandriax.github.io/pawvis/banner.png">
 
   <!-- Icons -->
@@ -29,6 +29,16 @@
   <link rel="preload" href="assets/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="site.css">
   <script>document.documentElement.classList.add('js');</script>
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-FPVSRRZQTY"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-FPVSRRZQTY');
+  </script>
 </head>
 <body>
 
@@ -37,7 +47,7 @@
 <!-- ============================================================ NAV -->
 <header class="nav" id="nav">
   <div class="nav-inner">
-    <a class="wordmark" href="#top" aria-label="Pawvis — back to top">
+    <a class="wordmark" href="#top" aria-label="Pawvis, back to top">
       <img src="assets/icon-512.png" alt="" width="512" height="512" aria-hidden="true">
       <span>Pawvis</span>
     </a>
@@ -62,16 +72,17 @@
 <section class="hero" id="top" aria-labelledby="hero-h">
   <div class="hero-glow" aria-hidden="true"></div>
   <div class="container hero-inner">
-    <p class="eyebrow mono" data-reveal>Gesture &amp; voice control for macOS</p>
+    <p class="eyebrow mono" data-reveal>Touch-free gesture &amp; voice control for macOS</p>
     <h1 id="hero-h" data-reveal>
-      Your hand is the <em class="serif grad">mouse</em>.<br>
-      Your Mac answers to its <em class="serif grad">name</em>.
+      A mouse made of <em class="serif grad">thin air</em>.<br>
+      A Mac that answers to its <em class="serif grad">name</em>.
     </h1>
     <p class="hero-sub" data-reveal>
-      Pawvis turns your webcam into a pointing device and your voice into full
-      control of the machine — move your hand to move the cursor, dip a finger
-      to click, and say <span class="mono say">&ldquo;Pawvis, open Safari&rdquo;</span>.
-      Nothing you do leaves your Mac.
+      Pawvis reads your hand through the webcam. Raise it in the air and the
+      cursor follows, dip a finger to click, or say
+      <span class="mono say">&ldquo;Pawvis, open Safari&rdquo;</span> out loud.
+      No mouse under your palm, no trackpad, nothing to touch. Your camera
+      never sends a frame anywhere.
     </p>
     <div class="cta-row" data-reveal>
       <a class="btn btn-primary" href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">
@@ -84,52 +95,9 @@
 
     <figure class="hero-media" id="heroMedia" data-reveal>
       <div class="screen-frame">
-        <video id="heroVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
-               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen claw cursor.">
-          <source src="assets/demo.mp4" type="video/mp4">
-        </video>
+        <img src="assets/hero-office.jpg" alt="A woman directs her MacBook with a raised open hand, in a dark office lit purple and blue." width="1536" height="1024">
       </div>
-      <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
     </figure>
-  </div>
-</section>
-
-<!-- ============================================================ CLAW STRIP -->
-<section class="claw-strip" id="try" aria-labelledby="try-h">
-  <div class="container">
-    <p class="kicker mono" data-reveal>Try it here</p>
-    <h2 id="try-h" data-reveal>The claw is your <em class="serif grad">cursor</em></h2>
-    <p class="lede" data-reveal>
-      On your desktop, an on-screen claw rides your palm — open while pointing,
-      retracted while a button is held, faded while control is parked.
-      <span class="pen-invite">Move your mouse into the pen below and borrow it for a minute.</span><span class="pen-invite-touch">Here's how it moves.</span>
-    </p>
-  </div>
-
-  <div class="claw-demo" id="clawDemo" aria-hidden="true" data-reveal>
-    <div class="demo-grid" aria-hidden="true"></div>
-    <p class="demo-hint mono">move&nbsp;&nbsp;·&nbsp;&nbsp;hold&nbsp;&nbsp;·&nbsp;&nbsp;right-click&nbsp;&nbsp;·&nbsp;&nbsp;scroll</p>
-    <div class="claw-cursor" id="clawCursor">
-      <div class="scroll-ring" id="scrollRing"></div>
-      <img id="clawImg" src="assets/claw-open.png" alt="" width="256" height="256">
-    </div>
-  </div>
-
-  <!-- Touch devices get a looping vignette of the same states -->
-  <div class="claw-demo-touch" aria-hidden="true" data-reveal>
-    <div class="touch-stage">
-      <div class="touch-ring"></div>
-      <img class="touch-open" src="assets/claw-open.png" alt="" width="256" height="256">
-      <img class="touch-closed" src="assets/claw-closed.png" alt="" width="256" height="256">
-    </div>
-  </div>
-
-  <div class="container">
-    <p class="caption mono" data-reveal>
-      <span class="swatch swatch-purple" aria-hidden="true"></span> purple while the left button is held
-      &nbsp;·&nbsp; <span class="swatch swatch-blue" aria-hidden="true"></span> blue for the right
-      &nbsp;·&nbsp; <span class="swatch swatch-ring" aria-hidden="true"></span> ringed in light blue while scrolling
-    </p>
   </div>
 </section>
 
@@ -137,12 +105,18 @@
 <section class="gestures" id="gestures" aria-labelledby="gestures-h">
   <div class="container">
     <p class="kicker mono" data-reveal>Gestures</p>
-    <h2 id="gestures-h" data-reveal>Show an open hand.<br>The cursor is <em class="serif grad">yours</em>.</h2>
+    <h2 id="gestures-h" data-reveal>Your webcam is the <em class="serif grad">sensor</em>.</h2>
     <p class="lede" data-reveal>
-      Your hands are tracked whenever tracking is on, but the cursor only follows
-      once you show an <strong>open hand</strong> — all four fingers up, thumb free.
-      Close a fist for a moment, or leave the frame, and it parks. A hand that's
-      merely visible — resting, typing, gesturing — never drags the cursor around.
+      The camera already built into your Mac watches your hand and tracks its
+      21 joints many times a second, using Apple's Vision framework. Nothing to
+      wear, nothing to hold, no depth sensor, no hardware to buy. Sit down, hold
+      up a hand, and your Mac can already see it.
+    </p>
+    <p class="lede" data-reveal>
+      Tracking watches whenever it's on, but the cursor only follows once you
+      show an <strong>open hand</strong>: all four fingers up, thumb free. Close
+      a fist for a moment, or leave the frame, and it parks. A hand that's merely
+      visible, resting or typing or gesturing, never drags the cursor around.
     </p>
 
     <div class="card-grid">
@@ -156,14 +130,14 @@
         <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8v18"/><path d="M18 14v10"/><path d="m14 27 4 4.5 4-4.5"/><path d="M13 38c3 4 19 4 22 0"/></svg>
         <h3>Click</h3>
         <p>Dip your index finger, like tapping a mouse button. A quick release is always a clean click.</p>
-        <p class="card-note mono">measured against your middle finger — tilting your hand can't click</p>
+        <p class="card-note mono">measured against your middle finger, so tilting your hand can't click</p>
       </article>
 
       <article class="card" data-reveal>
         <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M17 8v18"/><path class="accent" d="M30 15v9"/><path class="accent" d="m26 27 4 4.5 4-4.5"/><path d="M13 38c3 4 19 4 22 0"/></svg>
         <h3>Right-click</h3>
         <p>Dip a second finger. Hold it down to right-drag.</p>
-        <p class="card-note mono">pinky by default — configurable</p>
+        <p class="card-note mono">pinky by default, configurable</p>
       </article>
 
       <article class="card" data-reveal>
@@ -182,14 +156,14 @@
       <article class="card" data-reveal>
         <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8v32"/><path d="m19.5 13 4.5-5 4.5 5M19.5 35l4.5 5 4.5-5"/><path d="M12 22h5M12 26h5M31 22h5M31 26h5"/></svg>
         <h3>Scroll</h3>
-        <p>Fold your middle and ring fingers in — index and pinky up — then move your hand up and down. The cursor parks while the pose is held.</p>
+        <p>Fold your middle and ring fingers in, index and pinky up, then move your hand up and down. The cursor parks while the pose is held.</p>
         <p class="card-note mono">toggle it, or invert the direction, in Settings</p>
       </article>
 
       <article class="card card-wide" data-reveal>
         <svg class="glyph" viewBox="0 0 48 48" aria-hidden="true"><path d="M12 17v-5h5M36 17v-5h-5M12 31v5h5M36 31v5h-5"/><circle cx="24" cy="24" r="4"/></svg>
         <h3>Reach adapts to distance</h3>
-        <p>Auto mode sizes the tracking area from how big your hand looks, so the whole screen stays reachable up close <em>and</em> far away — with your fingers still inside the camera frame. Manual mode gives you a fixed area and a slider.</p>
+        <p>Auto mode sizes the tracking area from how big your hand looks, so the whole screen stays reachable up close <em>and</em> far away, with your fingers still inside the camera frame. Manual mode gives you a fixed area and a slider.</p>
       </article>
     </div>
   </div>
@@ -198,65 +172,109 @@
   <figure class="interlude" id="gestureInterlude" data-reveal>
     <img src="assets/gesture-closeup.jpg" alt="Close-up of an open raised hand in front of a glowing laptop screen, lit in purple and blue." width="1536" height="1024" loading="lazy">
     <figcaption>
-      <blockquote>&ldquo;Show an open hand — the cursor is yours.&rdquo;</blockquote>
+      <blockquote>&ldquo;Show an open hand. The cursor is yours.&rdquo;</blockquote>
     </figcaption>
   </figure>
 
   <div class="container">
     <p class="aside" data-reveal>
-      A ring tightens as your click forms, a pulse confirms every click, and small
-      dots mark each detected fingertip. The menu bar icon opens a live status
-      panel — hands seen, control armed, voice state — plus a Gesture Guide that
-      walks through every move. Everything above is tunable in
+      On screen, a claw rides your palm: open while pointing, purple while the
+      left button is held, blue for the right, ringed in light blue while
+      scrolling, faded while control is parked. A ring tightens as your click
+      forms, a pulse confirms every click, and small dots mark each detected
+      fingertip. The menu bar icon opens a live status panel (hands seen,
+      control armed, voice state) plus a Gesture Guide that walks through every
+      move. Everything above is tunable in
       <strong>Settings&nbsp;→&nbsp;Gestures</strong>.
     </p>
+  </div>
+</section>
+
+<!-- ============================================================ DEMO FILM -->
+<section class="demo" id="demo" aria-labelledby="demo-h">
+  <div class="container">
+    <p class="kicker mono" data-reveal>In motion</p>
+    <h2 id="demo-h" data-reveal>Eight seconds, no <em class="serif grad">hardware</em>.</h2>
+    <p class="lede" data-reveal>
+      One hand, one built-in camera, and a cursor that goes where she points.
+    </p>
+
+    <figure class="demo-media" id="demoMedia" data-reveal>
+      <div class="screen-frame">
+        <video id="demoVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
+               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
+          <source src="assets/demo.mp4" type="video/mp4">
+        </video>
+      </div>
+      <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
+    </figure>
   </div>
 </section>
 
 <!-- ============================================================ VOICE -->
 <section class="voice" id="voice" aria-labelledby="voice-h">
   <div class="container">
-    <p class="kicker mono" data-reveal>Voice</p>
+    <p class="kicker mono" data-reveal>Voice <span class="beta-tag">beta</span></p>
     <h2 id="voice-h" data-reveal>Talk to your Mac<br>by <em class="serif grad">name</em></h2>
 
-    <div class="voice-split">
-      <div class="voice-copy">
-        <p class="lede" data-reveal>
-          Press <strong>Start</strong> in the menu bar, then address Pawvis by its
-          wake word. Navigate, type, press any shortcut, launch apps, click what
-          you're pointing at — or just describe what you want clicked.
-        </p>
-        <ul class="chip-grid mono" data-reveal>
-          <li class="chip">&ldquo;go to github.com&rdquo;</li>
-          <li class="chip">&ldquo;type good morning&rdquo;</li>
-          <li class="chip">&ldquo;press ⌘⇧T&rdquo;</li>
-          <li class="chip">&ldquo;open Notes&rdquo;</li>
-          <li class="chip">&ldquo;switch to Chrome&rdquo;</li>
-          <li class="chip">&ldquo;click&rdquo; / &ldquo;scroll down&rdquo;</li>
-          <li class="chip chip-accent">&ldquo;click sign in&rdquo; — free-form</li>
-          <li class="chip">&ldquo;stop listening&rdquo;</li>
-        </ul>
-        <p class="fine" data-reveal>
-          The wake word is configurable (mishearings are tolerated). Speech
-          recognition is Apple's on-device engine — private, free, no API key,
-          no cloud. Free-form visual commands are resolved by on-device
-          Apple&nbsp;Intelligence on macOS&nbsp;26; everything else works without it.
-        </p>
-      </div>
+    <p class="lede lede-wide" data-reveal>
+      Switch it on in <strong>Settings&nbsp;→&nbsp;Voice&nbsp;(Beta)</strong>, press
+      <strong>Start</strong> in the menu bar, and say the wake word. Every command
+      begins with it, so anything you say that isn't meant for Pawvis is ignored:
+      never acted on, never typed, never put on screen.
+    </p>
 
-      <div class="voice-panel-col" data-reveal>
-        <div class="mac-window" id="transcript" aria-label="Example voice commands and Pawvis responses" role="log">
-          <div class="mac-titlebar" aria-hidden="true">
-            <span class="tl-dot"></span><span class="tl-dot"></span><span class="tl-dot"></span>
-            <span class="mac-title mono">Pawvis — listening</span>
-          </div>
-          <div class="mac-body mono" id="transcriptBody">
-            <p class="t-user">&ldquo;Pawvis, go to github.com&rdquo;</p>
-            <p class="t-resp">→ Navigating Safari — github.com</p>
-          </div>
-        </div>
-      </div>
+    <div class="say-block" data-reveal>
+      <p class="say-label mono" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>
+        out loud
+      </p>
+      <ul class="chip-grid mono">
+        <li class="chip"><span class="wake">Pawvis,</span> go to github.com</li>
+        <li class="chip"><span class="wake">Pawvis,</span> type good morning</li>
+        <li class="chip"><span class="wake">Pawvis,</span> press command shift T</li>
+        <li class="chip"><span class="wake">Pawvis,</span> open Notes</li>
+        <li class="chip"><span class="wake">Pawvis,</span> switch to Chrome</li>
+        <li class="chip"><span class="wake">Pawvis,</span> scroll down a page</li>
+        <li class="chip chip-accent"><span class="wake">Pawvis,</span> click sign in</li>
+        <li class="chip"><span class="wake">Pawvis,</span> stop listening</li>
+      </ul>
     </div>
+
+    <p class="fine" data-reveal>
+      The wake word is configurable, and mishearings are tolerated. Speech
+      recognition is Apple's on-device engine: private, free, no API key, no
+      cloud. Anything that isn't a set phrase goes to on-device
+      Apple&nbsp;Intelligence, which maps your words to an intent and grounds
+      screen commands like &ldquo;click sign in&rdquo; against the area around
+      your pointer, widening to the whole screen only if the target isn't
+      nearby. That part needs macOS&nbsp;26; everything else works without it.
+    </p>
+
+    <article class="agent-card" data-reveal>
+      <p class="agent-tag mono">optional&nbsp;&nbsp;·&nbsp;&nbsp;off by default</p>
+      <h3>Or hand the whole command to an <em class="serif grad">agent</em></h3>
+      <p>
+        Point Pawvis at an agent CLI you already have installed,
+        <strong>Claude&nbsp;Code</strong> or <strong>Codex</strong>, and it stops
+        parsing your speech and starts delegating it. Say
+        <span class="mono say">&ldquo;Pawvis, clean up my downloads folder&rdquo;</span>
+        and everything after the wake word is piped to the agent to carry out
+        with computer use, running headless in the background.
+      </p>
+      <ul class="agent-points">
+        <li>A panel streams the agent's output live while it works, with a <strong>Cancel</strong> button.</li>
+        <li>Running sessions stay listed, and cancellable, under Settings&nbsp;→&nbsp;Voice.</li>
+        <li>The outcome, success or failure, always flashes in the on-screen capsule.</li>
+        <li>&ldquo;Pawvis, stop listening&rdquo; stays local, so you can always shut it off instantly.</li>
+      </ul>
+      <p class="agent-warn">
+        This one is genuinely powerful and genuinely sharp: the agent runs with
+        permission checks bypassed and can do anything you could do at the
+        keyboard. It ships off by default, and turning it on is a deliberate
+        choice. It is also the one mode that sends what you say beyond your Mac.
+      </p>
+    </article>
   </div>
 
   <figure class="interlude interlude-voice" id="voiceInterlude" data-reveal>
@@ -272,7 +290,7 @@
   <div class="container">
     <p class="kicker mono" data-reveal>Privacy</p>
     <h2 id="privacy-h" class="privacy-statement" data-reveal>
-      Nothing you do<br>leaves your <em class="serif grad">Mac</em>.
+      Nothing leaves your Mac<br>unless you <em class="serif grad">ask</em> it to.
     </h2>
 
     <div class="pillar-grid">
@@ -284,25 +302,20 @@
       <article class="pillar" data-reveal>
         <p class="pillar-tag mono">on-device</p>
         <h3>Speech recognition</h3>
-        <p>Apple's on-device engine — SpeechAnalyzer on macOS&nbsp;26+, SFSpeechRecognizer before that. Voice audio never leaves your Mac.</p>
+        <p>Apple's on-device engine: SpeechAnalyzer on macOS&nbsp;26+, SFSpeechRecognizer before that. Voice audio never leaves your Mac.</p>
       </article>
       <article class="pillar" data-reveal>
         <p class="pillar-tag mono">on-device</p>
         <h3>Visual commands</h3>
-        <p>On-device Apple&nbsp;Intelligence reads the screen around your pointer. Its snapshots stay in memory — never written to disk, never uploaded.</p>
+        <p>On-device Apple&nbsp;Intelligence reads the screen around your pointer. Its snapshots stay in memory, never written to disk, never uploaded.</p>
       </article>
     </div>
 
     <ul class="fact-list" data-reveal>
-      <li>The menu bar icon carries a dot for as long as the mic is live, and an on-screen pill announces listening — then fades, so it isn't sitting on your screen all day.</li>
+      <li>The menu bar icon carries a dot for as long as the mic is live, and an on-screen pill announces listening, then fades so it isn't sitting on your screen all day.</li>
       <li>The claw overlay is excluded from screenshots and screen recordings by default. (There's a toggle if you want to record a demo.)</li>
-      <li>No API key. No account. No cloud.</li>
+      <li>No API key, no account, no cloud service in the setup you get out of the box. The optional agent hand-off is the one exception, and it stays off until you switch it on.</li>
     </ul>
-
-    <p class="page-brag" data-reveal>
-      Even this page phones no one — no trackers, no analytics, no CDNs.
-      The fonts are served from this repo. View source; it's three files.
-    </p>
   </div>
 </section>
 
@@ -316,12 +329,12 @@
       <li class="step" data-reveal>
         <span class="step-num mono" aria-hidden="true">01</span>
         <h3>Download</h3>
-        <p><a href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">Pawvis.zip</a> — always the latest release.</p>
+        <p><a href="https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip">Pawvis.zip</a>, always the latest release.</p>
       </li>
       <li class="step" data-reveal>
         <span class="step-num mono" aria-hidden="true">02</span>
         <h3>Unzip</h3>
-        <p>Releases are signed with a Developer&nbsp;ID and notarized by Apple, so it opens normally — no right-click&nbsp;→&nbsp;Open.</p>
+        <p>Releases are signed with a Developer&nbsp;ID and notarized by Apple, so it opens normally, with no right-click&nbsp;→&nbsp;Open.</p>
       </li>
       <li class="step" data-reveal>
         <span class="step-num mono" aria-hidden="true">03</span>
@@ -346,7 +359,7 @@
         Download for macOS
       </a>
     </div>
-    <p class="meta-line mono" data-reveal>Checks for updates once a day and can install them itself — Settings&nbsp;→&nbsp;About&nbsp;→&nbsp;Check&nbsp;Now.</p>
+    <p class="meta-line mono" data-reveal>Checks for updates once a day and can install them itself, via Settings&nbsp;→&nbsp;About&nbsp;→&nbsp;Check&nbsp;Now.</p>
   </div>
 </section>
 
@@ -355,7 +368,7 @@
 <!-- ============================================================ FOOTER -->
 <footer class="footer">
   <div class="container footer-inner">
-    <a class="wordmark" href="#top" aria-label="Pawvis — back to top">
+    <a class="wordmark" href="#top" aria-label="Pawvis, back to top">
       <img src="assets/icon-512.png" alt="" width="512" height="512" aria-hidden="true">
       <span>Pawvis</span>
     </a>
