@@ -36,6 +36,14 @@ fi
 if [[ -f Resources/claw-closed.png ]]; then
     cp Resources/claw-closed.png "$APP/Contents/Resources/"
 fi
+# The Gesture Guide's posed hands, taken from the site's own copies so the
+# guide and the gestures grid can never show different poses. Flattened into
+# Resources/ with a prefix because the bundle has no subfolders; the app
+# tints them, so the site's colors inside them don't matter.
+for glyph in docs/assets/gestures/*.svg; do
+    [[ -f "$glyph" ]] || continue
+    cp "$glyph" "$APP/Contents/Resources/gesture-$(basename "$glyph")"
+done
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

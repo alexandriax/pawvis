@@ -432,6 +432,10 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   color: var(--ink-dim);
   letter-spacing: 0.03em;
 }
+/* Two kinds of glyph share this box. Inline SVGs take their color from here;
+   the posed hands in the gestures grid are <img> (the app bundles the same
+   files, see AGENTS.md), so only the size below reaches them and their colors
+   are baked in. Recolor those by regenerating, not by editing this rule. */
 .glyph {
   width: 44px; height: 44px;
   fill: none;
