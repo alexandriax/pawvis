@@ -19,6 +19,10 @@ Extras:
   (engine, settings round-trip, launch-at-login rules, voice parser).
 - `PAWVIS_NO_AUTOSTART=1` — launch without starting tracking, so automated
   runs don't trip the camera permission prompt.
+- `PAWVIS_OPEN_GUIDE=1` — open the Gesture Guide window at launch, the same
+  eyes-on hook as `PAWVIS_OPEN_SETTINGS` below. Its posed-hand art is
+  bundle-only, so a bare `swift run` shows the SF Symbol fallbacks instead:
+  look at the guide from `build/Pawvis.app`, not from the binary.
 - `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
   (CI does this from the release tag; local builds show `0.0.0-dev`).
 
@@ -237,7 +241,36 @@ A new pose-triggered mode wants the same shape: a pose (or ratio) in
 explicit story for how it interacts with presses and the trigger, synthetic
 poses in `SyntheticHands.swift`, and tests covering engage, release, the
 band, tracking loss, and the guards. Copy lives in `SettingsView` and
-`GestureGuideView`.
+`GestureGuideView` — and so does a picture: add the pose to
+`scripts/make_gesture_glyphs.py` (see [Gesture art](#gesture-art)) rather than
+reaching for an SF Symbol, because the symbols are what taught the wrong
+gesture last time.
+
+## Gesture art
+
+The posed hands in the Gesture Guide and the site's gestures grid are drawn by
+`scripts/make_gesture_glyphs.py` into `docs/assets/gestures/*.svg`. Run it by
+hand after changing a pose (like `make_banner.sh`), and commit the SVGs:
+
+```bash
+python3 scripts/make_gesture_glyphs.py
+```
+
+- **One file set, two consumers.** The site loads them as `<img class="glyph">`
+  and `make_app.sh` copies them into the bundle as `gesture-*.svg`, where
+  `PawvisGlyph.gesture` loads them. A pose can't disagree between the app and
+  the page because there is only one of it.
+- **The app tints them, so the colors inside don't matter to it.** They are
+  loaded as template images (`NSImage` renders SVG as a vector rep, and
+  template rendering keys off alpha alone), which is also why the hand and the
+  accent flatten into one color in the guide. The colors baked into the files
+  are the site's own `--purple-light` / `--blue-light`.
+- **Draw the gesture, not a metaphor.** Every glyph is the same hand with the
+  fingers the gesture actually moves folded, and an arrow through the column
+  they vacated. The SF Symbols this replaced were teaching poses the engine
+  does not implement: a *pinch* for the click, a pointing finger for move.
+- **Right-click follows its setting.** There is a glyph per finger the picker
+  offers, and the guide shows the configured one.
 
 ## Secrets
 
@@ -443,6 +476,11 @@ Rules that keep the site honest:
   never version it, and it never needs editing per release.
 - **Icon art on the site derives from the committed sources.** Regenerate
   `docs/assets/icon-*.png` with `sips` from `icon.png` if it ever changes.
+- **The gestures grid's hands are shared with the app.**
+  `docs/assets/gestures/*.svg` are generated (see [Gesture art](#gesture-art))
+  and copied into the app bundle at build time, so editing one by hand splits
+  the page from the guide. Their colors are baked in rather than inherited
+  from `.glyph`: if the palette moves, regenerate them.
 - **The share card is derived, not drawn.** `docs/banner.png` (the Open Graph
   / Twitter image) renders from `scripts/banner.html` via
   `./scripts/make_banner.sh`, reusing the site's own fonts, palette and claw

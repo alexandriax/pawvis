@@ -2,6 +2,14 @@ import PawvisCore
 import SwiftUI
 
 /// A reference card for the (deliberately small) gesture set.
+///
+/// Each pointing row is illustrated by a posed hand from
+/// `docs/assets/gestures` rather than an SF Symbol, because the symbols were
+/// quietly teaching the wrong gesture: the click wore `hand.pinch.fill` when
+/// the click is an index *tap*, move wore a pointing finger when the cursor
+/// rides an open palm, and right-click wore a sideways hand that said nothing
+/// about which finger dips. The drawings show the actual pose, down to which
+/// finger is folded — including the one the right-click setting picked.
 struct GestureGuideView: View {
     @ObservedObject var store: SettingsStore
 
@@ -25,8 +33,18 @@ struct GestureGuideView: View {
 
     private struct Row {
         let symbol: String
+        /// The posed-hand glyph, when the gesture has one. `symbol` is the
+        /// fallback: the bare binary has no bundle to load art from.
+        var glyph: String?
         let title: String
         let detail: String
+
+        init(symbol: String, glyph: String? = nil, title: String, detail: String) {
+            self.symbol = symbol
+            self.glyph = glyph
+            self.title = title
+            self.detail = detail
+        }
     }
 
     private var pointingRows: [Row] {
@@ -34,26 +52,31 @@ struct GestureGuideView: View {
         if store.settings.gestures.controlTrigger == .openHand {
             rows.append(Row(
                 symbol: "hand.raised.fill",
+                glyph: "take-control",
                 title: "Take control",
                 detail: "Show the camera an open hand — all four fingers up — and the claw brightens: you have the cursor. Pawvis keeps watching while you type or rest, but the cursor stays parked until you show the trigger. Make a brief fist to park it again."))
         }
         rows += [
-            Row(symbol: "hand.point.up.left.fill",
+            Row(symbol: "hand.raised.fill",
+                glyph: "move",
                 title: "Move",
                 detail: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm. The ring around the claw tightens as the click gesture forms."),
-            Row(symbol: "hand.pinch.fill",
+            Row(symbol: "hand.point.up.left.fill",
+                glyph: "click",
                 title: "Click",
                 detail: "Dip your index finger down, like tapping a mouse button (keep your other fingers up). Release quickly for a clean click — small wobbles are ignored. Twice quickly = double-click, three times = triple."),
             Row(symbol: "hand.draw.fill",
+                glyph: "drag",
                 title: "Drag / hold",
                 detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you lift your index finger. (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
 
         if store.settings.gestures.rightClickEnabled {
-            let fingerName = store.settings.gestures.rightClickFinger == .little
-                ? "pinky" : store.settings.gestures.rightClickFinger.rawValue
+            let finger = store.settings.gestures.rightClickFinger
+            let fingerName = finger == .little ? "pinky" : finger.rawValue
             rows.append(Row(
                 symbol: "hand.point.right.fill",
+                glyph: "right-click-\(finger.rawValue)",
                 title: "Right-click",
                 detail: "Dip your \(fingerName) finger the same way — the claw turns blue while it's down. Hold it to right-drag."))
         }
@@ -64,6 +87,7 @@ struct GestureGuideView: View {
                 : "Move your hand up to scroll up and down to scroll down."
             rows.append(Row(
                 symbol: "arrow.up.arrow.down.circle.fill",
+                glyph: "scroll",
                 title: "Scroll",
                 detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
         }
@@ -72,6 +96,7 @@ struct GestureGuideView: View {
             let crossings = store.settings.gestures.crissCrossDisableCrossings
             rows.append(Row(
                 symbol: "hand.raised.fingers.spread.fill",
+                glyph: "stop-tracking",
                 title: "Stop tracking",
                 detail: "Hold up both hands open with fingers spread wide — a double high-five — and wave them across each other. Once they've traded sides \(crossings == 2 ? "twice (over and back)" : "\(crossings) times"), tracking switches off entirely. Turn it back on from the menu bar."))
         }
@@ -98,10 +123,9 @@ struct GestureGuideView: View {
             Text(title).font(.title3.bold())
             ForEach(rows, id: \.title) { row in
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: row.symbol)
-                        .font(.title2)
+                    icon(for: row)
                         .foregroundStyle(.tint)
-                        .frame(width: 34)
+                        .frame(width: 44)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.title).font(.headline)
                         Text(row.detail)
@@ -114,5 +138,53 @@ struct GestureGuideView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
             }
         }
+    }
+
+    @ViewBuilder
+    private func icon(for row: Row) -> some View {
+        if let glyph = row.glyph, let art = GestureArt.image(glyph) {
+            Image(nsImage: art)
+                .renderingMode(.template)
+        } else {
+            Image(systemName: row.symbol)
+                .font(.title2)
+        }
+    }
+}
+
+/// Opening the guide from code with no SwiftUI environment. Same shape (and
+/// same reason) as `SettingsWindow`: the opener is captured at launch from the
+/// `MenuBarExtra` label, the one view a menu-bar app always instantiates.
+@MainActor
+enum GuideWindow {
+    static let id = "gesture-guide"
+
+    static var opener: OpenWindowAction?
+
+    static func show() {
+        opener?(id: id)
+        // LSUIElement, so opening a window doesn't bring the app forward on
+        // its own — see SettingsWindow for why activation happens twice.
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
+/// The posed hands, loaded once each. `PawvisGlyph` hands out fresh images on
+/// purpose (callers resize them), but every row here draws at one size, and
+/// the guide's body re-runs on each settings change — no reason to re-read
+/// the files every time a slider moves.
+@MainActor
+private enum GestureArt {
+    private static let size: CGFloat = 40
+    private static var cache: [String: NSImage?] = [:]
+
+    static func image(_ name: String) -> NSImage? {
+        if let cached = cache[name] { return cached }
+        let image = PawvisGlyph.gesture(name, size: size)
+        cache[name] = image
+        return image
     }
 }
