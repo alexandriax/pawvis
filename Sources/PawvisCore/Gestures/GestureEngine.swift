@@ -14,6 +14,8 @@ import Foundation
 ///   a second finger dips → the same machinery, on the right button
 ///   middle + ring fold in → scroll: the scroll pose parks the cursor and
 ///                         turns vertical hand travel into wheel events
+///   both hands splayed, traded sides → the criss-cross wave: hand tracking
+///                         switches off entirely (optional, on by default)
 ///
 /// The click reduces to one scale-normalized ratio crossing a threshold (the
 /// index tip's extent differenced against the middle finger's, so whole-hand
@@ -45,6 +47,11 @@ public final class GestureEngine {
                 // Off mid-scroll: stop scrolling at once. On: the pose still
                 // has to engage from scratch.
                 scroll = ScrollState()
+            }
+            if config.crissCrossDisableEnabled != oldValue.crissCrossDisableEnabled
+                || config.crissCrossDisableCrossings != oldValue.crissCrossDisableCrossings {
+                // Off (or retuned) mid-wave: the crossing count starts over.
+                crissCross = CrissCrossState()
             }
             if config.controlTrigger != oldValue.controlTrigger {
                 armFrames = 0
@@ -121,6 +128,31 @@ public final class GestureEngine {
         var anchorY: Double?
     }
 
+    /// The criss-cross tracking-off wave's state: both hands up, open and
+    /// splayed, then traded sides. Engages like every other pose (strict
+    /// pose + debounce), then counts debounced side swaps until the
+    /// configured number switches tracking off.
+    private struct CrissCrossState {
+        var engaged = false
+        var engageFrames = 0
+        /// Consecutive frames a hand showed a positively curled finger — the
+        /// deliberate exit.
+        var exitFrames = 0
+        /// Completed side trades so far.
+        var crossings = 0
+        /// Which side of each other the palms last confidently sat: +1 when
+        /// the right-chirality palm was right of the left-chirality one, -1
+        /// once they crossed. 0 = not yet seeded.
+        var sideSign = 0
+        /// Consecutive well-separated frames on the opposite side — a swap
+        /// only counts once it survives the debounce.
+        var sideCandidateFrames = 0
+        /// When the wave last advanced (engaged or crossed): the stall timeout.
+        var lastProgressTime: TimeInterval = -.infinity
+        /// When both hands were last tracked, for the mid-wave dropout grace.
+        var lastPairTime: TimeInterval = -.infinity
+    }
+
     private static let slotMatchMax = 0.25 // normalized palm travel to keep identity
 
     /// Joint confidence required to *engage*. Vision reports low confidence
@@ -147,6 +179,16 @@ public final class GestureEngine {
     /// closing the hand *into* a click can never drop control mid-gesture.
     private static let triggerDisarmFrames = 9
 
+    /// Palms must stand at least this far apart (screen-normalized x) to
+    /// count as being on distinct sides for the criss-cross wave. Inside the
+    /// band the hands are mid-crossing and their order is ambiguous — frames
+    /// there neither count nor reset.
+    private static let crissCrossMinSeparation = 0.10
+    /// The wave must keep making progress: engaged with no new crossing for
+    /// this long resets the gesture, so a static double high-five can't
+    /// park the cursor (or block the buttons) forever.
+    private static let crissCrossTimeout: TimeInterval = 2.0
+
     private var slots: [HandSlot]
     private var primarySlotID: Int?
     private var lastHandTime: TimeInterval = -.infinity
@@ -163,6 +205,7 @@ public final class GestureEngine {
     private var leftButton = ButtonState()
     private var rightButton = ButtonState()
     private var scroll = ScrollState()
+    private var crissCross = CrissCrossState()
     /// EMA of the primary hand's raw camera-space scale; nil until a hand is
     /// seen (and again once one is truly gone).
     private(set) var smoothedHandScale: Double?
@@ -200,6 +243,7 @@ public final class GestureEngine {
     public func reset() {
         _ = forceRelease(at: 0)
         scroll = ScrollState()
+        crissCross = CrissCrossState()
         for i in slots.indices { slots[i].reset() }
         primarySlotID = nil
         cursor = nil
@@ -258,6 +302,15 @@ public final class GestureEngine {
         // step because an active scroll parks the cursor.
         updateScroll(features)
 
+        // 4½. The criss-cross tracking-off wave watches every tracked hand,
+        // armed or not — stopping tracking must not require cursor control.
+        // The park flag is sampled *before* the update so the frame that
+        // completes the wave doesn't emit one last cursor jump on its way out.
+        let crissCrossParked = crissCross.engaged && crissCross.crossings > 0
+        if updateCrissCross(tracked, at: frame.time) {
+            events.append(.disableTracking)
+        }
+
         if armed, let pointer = pointerPoint(features) {
             // 5. Cursor follows the palm (chosen so the click gesture barely
             // moves it) — unless the scroll pose holds it parked, in which
@@ -276,6 +329,11 @@ public final class GestureEngine {
                 } else {
                     scroll.anchorY = pointer.y
                 }
+            } else if crissCrossParked {
+                // The wave is in progress: the cursor parks so hands trading
+                // sides don't fling it across the screen (the scroll park's
+                // idea). No press can exist here — engaging required none,
+                // and both buttons are blocked while the wave is engaged.
             } else if var p = press {
                 // Tap window then micro-movement suppression (see dragThreshold).
                 if p.dragging || clamped.distance(to: p.downAt) >= dragThreshold(for: p, at: frame.time) {
@@ -307,13 +365,13 @@ public final class GestureEngine {
             updateButton(.left, state: &leftButton, ratio: ratio,
                          engage: config.engageRatio, release: config.releaseRatio,
                          confident: engageConfident(primary.hand),
-                         blocked: rightHeld || scroll.active,
+                         blocked: rightHeld || scroll.active || crissCross.engaged,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
                          confident: rightEngageConfident(primary.hand),
-                         blocked: leftHeld || scroll.active
+                         blocked: leftHeld || scroll.active || crissCross.engaged
                              || scrollPoseBlocksRightClick(features),
                          at: frame.time, events: &events)
         }
@@ -490,6 +548,121 @@ public final class GestureEngine {
         }
     }
 
+    // MARK: - Criss-cross tracking-off wave
+
+    /// Pose features at the permissive joint-confidence floor for any tracked
+    /// hand (the primary's are built inline in `process`).
+    private func looseFeatures(of hand: Hand) -> HandFeatures? {
+        HandFeatures(hand: hand,
+                     thresholds: config.poseThresholds,
+                     minJointConfidence: config.minJointConfidence)
+    }
+
+    /// The criss-cross state machine: both hands open and splayed (a double
+    /// high-five), then crossed over each other and back. Each debounced
+    /// trade of sides counts one crossing; reaching
+    /// `config.crissCrossDisableCrossings` returns true, and the caller
+    /// emits `.disableTracking`.
+    ///
+    /// Chirality — Vision's left/right label — orders the palms, never slot
+    /// identity: greedy slot matching swaps identities at exactly the moment
+    /// the hands overlap, which is the moment this gesture is about. Frames
+    /// whose chirality is unknown or duplicated hold state, like any other
+    /// low-confidence signal. The usual shape otherwise: strict engage
+    /// (splayed pose at engage-grade confidence, no press in flight), loose
+    /// hold (only a positively curled finger, held for the debounce, is a
+    /// deliberate exit — splay wobbles and low confidence mid-wave hold),
+    /// debounce in both directions, and two escape hatches: the tracking-loss
+    /// grace for a partner hand Vision drops mid-crossing, and a stall
+    /// timeout so an idle double high-five never parks the cursor for good.
+    private func updateCrissCross(_ tracked: [TrackedHand], at time: TimeInterval) -> Bool {
+        guard config.crissCrossDisableEnabled else {
+            crissCross = CrissCrossState()
+            return false
+        }
+
+        if !crissCross.engaged {
+            guard tracked.count == 2, press == nil,
+                  !leftButton.engaged, !rightButton.engaged,
+                  tracked.allSatisfy({ armFeatures(of: $0.hand)?.isOpenPalmSplayed() == true })
+            else {
+                crissCross.engageFrames = 0
+                return false
+            }
+            crissCross.engageFrames += 1
+            guard crissCross.engageFrames >= config.pinchDebounceFrames else { return false }
+            crissCross = CrissCrossState()
+            crissCross.engaged = true
+            crissCross.lastProgressTime = time
+            crissCross.lastPairTime = time
+            return false
+        }
+
+        // Stalled: an idle double high-five is not the wave.
+        if time - crissCross.lastProgressTime > Self.crissCrossTimeout {
+            crissCross = CrissCrossState()
+            return false
+        }
+
+        guard tracked.count == 2 else {
+            // Vision drops a hand exactly when the two overlap mid-crossing,
+            // so a missing partner gets the tracking-loss grace, not a reset.
+            if time - crissCross.lastPairTime > config.trackingLossGrace {
+                crissCross = CrissCrossState()
+            }
+            return false
+        }
+        crissCross.lastPairTime = time
+
+        // The deliberate exit: a genuinely curled finger on either hand,
+        // held for the debounce. (Splay and extension drifting neutral, or
+        // joints going low-confidence, hold — a fast wave blurs fingers.)
+        let closing = tracked.contains { th in
+            guard let f = looseFeatures(of: th.hand) else { return false }
+            return Finger.allCases.contains { f.isCurled($0) == true }
+        }
+        if closing {
+            crissCross.exitFrames += 1
+            if crissCross.exitFrames >= config.pinchDebounceFrames {
+                crissCross = CrissCrossState()
+            }
+            return false
+        }
+        crissCross.exitFrames = 0
+
+        // Order the palms by chirality; unknown or doubled labels hold.
+        let lefts = tracked.filter { $0.hand.chirality == .left }
+        let rights = tracked.filter { $0.hand.chirality == .right }
+        guard lefts.count == 1, rights.count == 1,
+              let leftPalm = looseFeatures(of: lefts[0].hand)?.pointerPoint(.palmCenter),
+              let rightPalm = looseFeatures(of: rights[0].hand)?.pointerPoint(.palmCenter)
+        else { return false }
+
+        let delta = rightPalm.x - leftPalm.x
+        // Inside the separation band the crossing is in progress and the
+        // ordering ambiguous: neither count nor reset.
+        guard abs(delta) >= Self.crissCrossMinSeparation else { return false }
+        let sign = delta > 0 ? 1 : -1
+
+        if crissCross.sideSign == 0 {
+            crissCross.sideSign = sign
+            return false
+        }
+        if sign == crissCross.sideSign {
+            crissCross.sideCandidateFrames = 0
+            return false
+        }
+        crissCross.sideCandidateFrames += 1
+        guard crissCross.sideCandidateFrames >= config.pinchDebounceFrames else { return false }
+        crissCross.sideSign = sign
+        crissCross.sideCandidateFrames = 0
+        crissCross.crossings += 1
+        crissCross.lastProgressTime = time
+        guard crissCross.crossings >= max(config.crissCrossDisableCrossings, 1) else { return false }
+        crissCross = CrissCrossState()
+        return true
+    }
+
     // MARK: - Right click
 
     /// The finger whose dip presses the right button, or nil when this
@@ -640,6 +813,7 @@ public final class GestureEngine {
         if time - lastHandTime > config.trackingLossGrace {
             events.append(contentsOf: forceRelease(at: time))
             scroll = ScrollState() // a returning hand re-anchors from scratch
+            crissCross = CrissCrossState() // hands truly gone: the wave restarts
             primarySlotID = nil
             // The hand is genuinely gone: the next one sizes the auto box from
             // its own scale rather than inheriting this one's.
