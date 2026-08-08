@@ -16,7 +16,8 @@ final class ParseRemainderTests: XCTestCase {
         for utterance in [
             "type hello world", "open safari", "scroll down",
             "go to github.com", "press enter", "stop listening",
-            "do something freeform",
+            "do something freeform", "close the window", "quit safari",
+            "copy", "stop",
         ] {
             XCTAssertEqual(
                 parser.parseRemainder(utterance),

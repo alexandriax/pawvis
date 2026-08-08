@@ -3,7 +3,7 @@ import PawvisCore
 
 /// Orchestrates voice control (beta): the on-device speech engine feeds the
 /// wake-word parser; recognized commands run through the executor, and
-/// free-form ones go to the on-device intent mapper (or the opt-in agent
+/// free-form ones go to the on-device autopilot loop (or the opt-in agent
 /// CLI). Speech without the wake word is ignored entirely — but a bare wake
 /// word opens a short capture window, because the speech engine's fast
 /// segmentation routinely splits "Pawvis … open Safari" into two finals
@@ -14,7 +14,8 @@ final class VoiceController: ObservableObject {
         case off
         case connecting
         case listening   // armed; every command starts with the wake word
-        case resolving   // consulting the on-device model / screen context
+        case resolving   // the autopilot is taking its first look
+        case working(String)  // mid-run: the latest completed step
         case error(String)
 
         var isActive: Bool {
@@ -32,10 +33,22 @@ final class VoiceController: ObservableObject {
     private let parser = VoiceControlParser()
     private let typer = TextTyper()
     private let executor = CommandExecutor()
-    private let screenContext = ScreenContextProvider()
     private let agentSessions = AgentSessionManager.shared
     /// The top-of-screen capsule showing what's being heard.
     let transcriptOverlay = TranscriptOverlay()
+    /// The bottom-right card streaming autopilot steps, with Cancel.
+    let autopilotPanel = AutopilotPanel()
+    /// The running autopilot loop, if any — cancelled by "Pawvis stop", by
+    /// any new command, and by voice control stopping.
+    private var autopilotTask: Task<Void, Never>?
+    /// Guards the loop's completion handling against staleness: a cancelled
+    /// run resumes from its await one MainActor job AFTER a successor run
+    /// has already been installed, and must not clobber the successor's
+    /// task handle, panel, or state. Bumped by every new run and by stop().
+    private var autopilotGeneration = 0
+    /// AutopilotEngine is macOS 26-only; the untyped slot lets this
+    /// controller keep a deployment floor below that.
+    private var autopilotStorage: Any?
     private var engine: SpeechEngine?
     private var config = VoiceControlConfig()
     private var noticeTimer: Timer?
@@ -59,8 +72,17 @@ final class VoiceController: ObservableObject {
             if let notice { return .notice(notice) }
             return .listening(wakeWord: config.wakeWord)
         case .resolving: return .resolving
+        case .working(let line): return .working(line)
         case .error(let message): return .error(message)
         }
+    }
+
+    @available(macOS 26.0, *)
+    private var autopilot: AutopilotEngine {
+        if let engine = autopilotStorage as? AutopilotEngine { return engine }
+        let engine = AutopilotEngine()
+        autopilotStorage = engine
+        return engine
     }
 
     func setConfig(_ config: VoiceControlConfig) {
@@ -113,6 +135,10 @@ final class VoiceController: ObservableObject {
     }
 
     func stop() {
+        autopilotGeneration += 1
+        autopilotTask?.cancel()
+        autopilotTask = nil
+        autopilotPanel.hide()
         engine?.stop()
         engine = nil
         clearNotice()
@@ -126,6 +152,12 @@ final class VoiceController: ObservableObject {
         state = .off
     }
 
+    /// Cancels a running autopilot loop without touching the engine — voice
+    /// stays listening. The task's own outcome handling flashes "Stopped".
+    func cancelAutopilot() {
+        autopilotTask?.cancel()
+    }
+
     private func launchEngine() {
         let engine = SpeechEngine(config: config)
         self.engine = engine
@@ -133,15 +165,14 @@ final class VoiceController: ObservableObject {
             self?.handle(event)
         }
         engine.start()
-        // Warm the on-device model now so the first mapped command doesn't
-        // pay the ~5 s cold-start cost.
+        // Warm the on-device model now so the first free-form command
+        // doesn't pay the ~5 s cold-start cost.
         if #available(macOS 26.0, *) {
             if !config.agentExecutor.isEmpty {
                 // Agent mode uses the model only to rescue garbled wake words.
                 WakeRescuer.prewarm()
             } else if config.visualContextEnabled {
-                IntentMapper.prewarm()
-                VisualIntentResolver.prewarm()
+                autopilot.prewarm()
             }
         }
     }
@@ -262,15 +293,28 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    /// Run one wake-stripped command: stop phrases always work locally and
-    /// instantly; agent mode pipes everything else to the chosen CLI; the
-    /// on-device path runs the grammar, then the intent mapper.
+    /// Run one wake-stripped command: stop and cancel phrases always work
+    /// locally and instantly; agent mode pipes everything else to the chosen
+    /// CLI; the on-device path runs the grammar, then the autopilot loop.
     private func dispatch(_ command: String, tool: AgentCLIExecutor.Tool?) {
         let result = parser.parseRemainder(command)
         if case .stopVoiceControl? = result.command {
             stop()
             return
         }
+        if case .cancelActivity? = result.command {
+            // "Pawvis stop": brake whatever is running; with nothing in
+            // flight it keeps its original meaning and turns voice off.
+            if autopilotTask != nil {
+                cancelAutopilot()
+            } else {
+                stop()
+            }
+            return
+        }
+        // Any new command interrupts a running loop — "Pawvis click cancel"
+        // during a runaway autopilot means both things the user said.
+        cancelAutopilot()
         if let tool {
             runAgent(command, tool: tool)
             return
@@ -285,22 +329,22 @@ final class VoiceController: ObservableObject {
 
     private func execute(_ command: VoiceCommand, fallbackTranscript: String? = nil) {
         switch command {
-        case .stopVoiceControl:
+        case .stopVoiceControl, .cancelActivity:
             stop()
         case .resolve(let transcript):
-            handleFreeForm(transcript)
+            runAutopilot(transcript)
         default:
             Task { [weak self] in
                 guard let self else { return }
                 let outcome = await self.executor.execute(command)
                 // The grammar can mis-slice a garbled utterance ("open up
                 // safari please" → app "up safari please"). When an app
-                // command fails to resolve, give the intent mapper the whole
+                // command fails to resolve, give the autopilot the whole
                 // phrase for a second opinion instead of surfacing the error.
                 if case .failed = outcome,
                    let fallback = fallbackTranscript,
-                   Self.mapperCanRescue(command) {
-                    self.handleFreeForm(fallback)
+                   Self.autopilotCanRescue(command) {
+                    self.runAutopilot(fallback)
                 } else {
                     self.show(outcome)
                 }
@@ -310,112 +354,63 @@ final class VoiceController: ObservableObject {
 
     /// Commands whose failures are usually a mis-sliced argument (worth an
     /// AI retry) rather than a true "can't do that".
-    private static func mapperCanRescue(_ command: VoiceCommand) -> Bool {
+    private static func autopilotCanRescue(_ command: VoiceCommand) -> Bool {
         switch command {
-        case .open, .switchTo: return true
+        case .open, .switchTo, .quit: return true
         default: return false
         }
     }
 
     /// A command the deterministic grammar didn't recognize, on-device mode
     /// only — agent mode never reaches the grammar (see `dispatch`). The
-    /// transcript is already stripped of the wake word — clean for the
-    /// intent mapper (with screen grounding for commands that refer to
-    /// what's visible).
-    private func handleFreeForm(_ transcript: String) {
+    /// transcript is already wake-stripped and becomes the autopilot's goal:
+    /// look at the screen, act, look again, until done or out of budget.
+    private func runAutopilot(_ goal: String) {
         guard config.visualContextEnabled else {
-            flashNotice("Didn't recognize a command: “\(transcript)”")
+            flashNotice("Didn't recognize a command: “\(goal)”")
             return
         }
-        guard #available(macOS 26.0, *), IntentMapper.isSupported else {
-            flashNotice("“\(transcript)” needs Apple Intelligence (macOS 26)")
+        guard #available(macOS 26.0, *), AutopilotEngine.isSupported else {
+            flashNotice("“\(goal)” needs Apple Intelligence (macOS 26)")
             return
         }
+        autopilotTask?.cancel()
+        autopilotGeneration += 1
+        let generation = autopilotGeneration
         state = .resolving
-        Task { [weak self] in
+        autopilotPanel.begin(goal: goal) { [weak self] in
+            self?.cancelAutopilot()
+        }
+        autopilotTask = Task { [weak self] in
             guard let self else { return }
-            if Self.isTargetedClick(transcript) {
-                // "click <target>" is screen grounding by definition — skip
-                // the intent-mapping round trip.
-                let outcome = await VisualIntentResolver.resolveAndExecute(
-                    transcript: transcript,
-                    screenContext: self.screenContext,
-                    executor: self.executor)
-                self.show(outcome)
-            } else {
-                do {
-                    let intent = try await IntentMapper.map(transcript)
-                    await self.perform(intent, transcript: transcript)
-                } catch {
-                    Log.voice.error("Intent mapping failed: \(error.localizedDescription, privacy: .public)")
-                    self.flashNotice("⚠️ Couldn't work out “\(transcript)”")
-                }
+            let outcome = await self.autopilot.run(
+                goal: goal, executor: self.executor
+            ) { [weak self] _, line in
+                guard let self, self.autopilotGeneration == generation,
+                      self.state.isActive else { return }
+                self.state = .working(line)
+                self.autopilotPanel.append(line: line)
             }
-            if self.state == .resolving {
+            // A superseded or shut-down run must vanish silently — its
+            // successor owns the panel, the notice, and the state now.
+            guard self.autopilotGeneration == generation else { return }
+            self.autopilotTask = nil
+            switch outcome {
+            case .finished(let notice):
+                self.autopilotPanel.finish(success: true)
+                if let notice { self.flashNotice(notice) }
+            case .failed(let message):
+                self.autopilotPanel.finish(success: false)
+                self.flashNotice("⚠️ \(message)")
+            case .cancelled:
+                self.autopilotPanel.hide()
+                self.flashNotice("Stopped")
+            }
+            switch self.state {
+            case .resolving, .working:
                 self.state = .listening
-            }
-        }
-    }
-
-    /// "click …" / "tap …" with any target words after the verb.
-    private static func isTargetedClick(_ transcript: String) -> Bool {
-        let tokens = VoiceControlParser.normalize(transcript)
-            .split(separator: " ").map(String.init)
-        guard let first = tokens.first else { return false }
-        var rest = tokens.dropFirst()
-        if first == "right" || first == "double", rest.first == "click" || rest.first == "tap" {
-            rest = rest.dropFirst()
-        } else if first != "click" && first != "tap" {
-            return false
-        }
-        return !rest.isEmpty
-    }
-
-    @available(macOS 26.0, *)
-    private func perform(_ intent: IntentMapper.MappedIntent, transcript: String) async {
-        // The model labels targeted clicks as pointer clicks but still
-        // extracts the target — that's a screen action.
-        let clickish = intent.action == .clickAtPointer
-            || intent.action == .rightClickAtPointer
-            || intent.action == .doubleClickAtPointer
-        if clickish, let target = intent.argument,
-           !target.trimmingCharacters(in: .whitespaces).isEmpty {
-            let outcome = await VisualIntentResolver.resolveAndExecute(
-                transcript: transcript,
-                screenContext: screenContext,
-                executor: executor)
-            show(outcome)
-            return
-        }
-
-        switch intent.action {
-        case .typeText:
-            guard let text = intent.argument, !text.isEmpty else {
-                flashNotice("Nothing to type")
-                return
-            }
-            typer.perform([.type(text)])
-
-        case .stopListening:
-            stop()
-
-        case .screenAction:
-            // Refers to something visible: ground it against the screen
-            // around the pointer (escalating to the whole screen if needed).
-            let outcome = await VisualIntentResolver.resolveAndExecute(
-                transcript: transcript,
-                screenContext: screenContext,
-                executor: executor)
-            show(outcome)
-
-        case .none:
-            flashNotice("Didn't understand: “\(transcript)”")
-
-        default:
-            if let command = IntentMapper.command(for: intent) {
-                show(await executor.execute(command))
-            } else {
-                flashNotice("Didn't understand: “\(transcript)”")
+            default:
+                break
             }
         }
     }

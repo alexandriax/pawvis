@@ -81,6 +81,32 @@ func runSelfTest() -> Int32 {
     check("voice.openParses", open.command == .open(app: "Safari"))
     check("voice.wakePrefixGate",
           parser.hasWakePrefix("Pawvis do the thing") && !parser.hasWakePrefix("random speech"))
+    check("voice.bareStopCancels", parser.parse("Pawvis stop").command == .cancelActivity)
+    check("voice.stopListeningStillStops",
+          parser.parse("Pawvis stop listening").command == .stopVoiceControl)
+    check("voice.closeWindowChord", parser.parse("Pawvis close the window").command
+          == .press(KeyChord(key: "w", modifiers: [.command])))
+    check("voice.multiClauseFallsToResolve",
+          parser.parse("Pawvis close the window and open Safari").command
+          == .resolve(transcript: "close the window and open Safari"))
+
+    // Autopilot policy: the pure loop rules the engine runs on.
+    check("autopilot.multiClauseStartsFullScreen",
+          AutopilotPolicy.initialScope(goal: "open notes and start a new note") == .fullScreen)
+    check("autopilot.simpleGoalStartsNearPointer",
+          AutopilotPolicy.initialScope(goal: "click sign in") == .nearPointer)
+    let prompt = AutopilotPolicy.buildPrompt(
+        goal: "click sign in", history: [],
+        screen: AutopilotScreen(elements: [
+            AutopilotElement(label: "Sign in", kind: "button", actionable: true,
+                             x: 10, y: 10, width: 80, height: 24),
+        ]),
+        tokenBudget: 2000)
+    check("autopilot.promptGoalLast", prompt.hasSuffix("Goal: “click sign in”"))
+    let stuck = AutopilotPolicy.ProposedRecord(
+        signature: 1, step: AutopilotStep(action: .click, elementIndex: 0))
+    check("autopilot.noProgressAborts",
+          AutopilotPolicy.shouldAbortNoProgress([stuck, stuck, stuck]))
 
     // Menu chips stay readable in both appearances. These sit on translucent
     // menu material where a too-light fill has washed out before, so the

@@ -108,13 +108,15 @@ is ignored and never typed or displayed:
 | "Pawvis, **switch to** Chrome" | Brings a running app forward. |
 | "Pawvis, **click** / right click / double click" | Clicks at the pointer. |
 | "Pawvis, **scroll** down / up a page" | Scrolls at the pointer. |
-| "Pawvis, *anything else*" | On-device Apple Intelligence maps the spoken words to an intent (open app, go to URL, type text, press keys…), absorbing speech-recognition garbling, and grounds screen commands ("click sign in") against the area **around your pointer**, widening to the whole screen only if the target isn't nearby. |
+| "Pawvis, **close the window** / minimize / new tab / copy / paste / undo / save / select all / quit Safari" | Instant window and edit commands, no AI round-trip. |
+| "Pawvis, *anything else*" | On-device Apple Intelligence carries it out **step by step**: it reads the screen (accessibility + OCR, menus included), does the next action, looks again, and repeats until the request is done, up to 8 steps. Multi-step commands work: "open Notes and start a new note", "select the pawvis project and start a new conversation". A bottom-right panel streams each step with a **Cancel** button. |
+| "Pawvis, **stop**" | Cancels a running multi-step command. With nothing running, turns voice control off. |
 | "Pawvis, **stop listening**" | Turns voice control off. |
 
 Speech recognition is **Apple's on-device engine**: private, free, no API
 key, no cloud (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
-Visual commands need macOS 26 with Apple Intelligence enabled; everything
-else works without it.
+The step-by-step autopilot needs macOS 26 with Apple Intelligence enabled;
+everything else works without it.
 
 ### Agent hand-off (optional)
 

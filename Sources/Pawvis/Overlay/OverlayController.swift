@@ -7,7 +7,8 @@ enum VoiceHUD: Equatable {
     case hidden
     case connecting
     case listening(wakeWord: String) // armed, waiting for the wake word
-    case resolving                   // consulting on-screen context for a command
+    case resolving                   // the autopilot is taking its first look
+    case working(String)             // mid-run: the latest completed step
     case notice(String)              // transient confirmation ("Opening Safari")
     case error(String)
 }
@@ -212,6 +213,9 @@ final class OverlayController {
                          background: PawvisTheme.blue.withAlphaComponent(0.88))
         case .resolving:
             return .init(text: "✨ Looking at your screen…",
+                         background: PawvisTheme.purple.withAlphaComponent(0.9))
+        case .working(let line):
+            return .init(text: "✨ \(line)",
                          background: PawvisTheme.purple.withAlphaComponent(0.9))
         case .notice(let message):
             return .init(text: message, background: PawvisTheme.blue.withAlphaComponent(0.88))

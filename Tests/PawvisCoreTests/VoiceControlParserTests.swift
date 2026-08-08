@@ -200,9 +200,86 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertEqual(parse("Pawvis go to sleep").command, .stopVoiceControl)
     }
 
+    func testBareStopIsCancelNotStopListening() {
+        // "stop" brakes whatever is running; only the explicit sleep
+        // phrases turn voice control off.
+        for phrase in ["stop", "stop it", "cancel", "cancel that", "never mind", "nevermind"] {
+            XCTAssertEqual(parse("Pawvis \(phrase)").command, .cancelActivity,
+                           "'\(phrase)' must cancel")
+        }
+    }
+
+    func testPaddedStopPhrasesStillBrake() {
+        // Politeness padding must never turn a safety phrase into an
+        // autopilot goal.
+        XCTAssertEqual(parse("Pawvis please stop listening").command, .stopVoiceControl)
+        XCTAssertEqual(parse("Pawvis ok stop now").command, .cancelActivity)
+        XCTAssertEqual(parse("Pawvis hey stop").command, .cancelActivity)
+        XCTAssertEqual(parse("Pawvis go to sleep now").command, .stopVoiceControl)
+        // But padding words inside a real request stay a request.
+        XCTAssertEqual(parse("Pawvis stop the music").command,
+                       .resolve(transcript: "stop the music"))
+    }
+
     func testUnknownCommandFallsBackToResolve() {
-        XCTAssertEqual(parse("Pawvis close this window").command,
-                       .resolve(transcript: "close this window"))
+        XCTAssertEqual(parse("Pawvis make it bigger").command,
+                       .resolve(transcript: "make it bigger"))
+    }
+
+    // MARK: - Commands: window / edit chords + quit
+
+    func testWholePhraseWindowAndEditChords() {
+        let cases: [(String, KeyChord)] = [
+            ("close window", KeyChord(key: "w", modifiers: [.command])),
+            ("close the window", KeyChord(key: "w", modifiers: [.command])),
+            ("close this tab", KeyChord(key: "w", modifiers: [.command])),
+            ("minimize", KeyChord(key: "m", modifiers: [.command])),
+            ("hide", KeyChord(key: "h", modifiers: [.command])),
+            ("new tab", KeyChord(key: "t", modifiers: [.command])),
+            ("new window", KeyChord(key: "n", modifiers: [.command])),
+            ("copy", KeyChord(key: "c", modifiers: [.command])),
+            ("paste", KeyChord(key: "v", modifiers: [.command])),
+            ("cut", KeyChord(key: "x", modifiers: [.command])),
+            ("undo", KeyChord(key: "z", modifiers: [.command])),
+            ("redo", KeyChord(key: "z", modifiers: [.command, .shift])),
+            ("save", KeyChord(key: "s", modifiers: [.command])),
+            ("select all", KeyChord(key: "a", modifiers: [.command])),
+            ("full screen", KeyChord(key: "f", modifiers: [.control, .command])),
+        ]
+        for (phrase, chord) in cases {
+            XCTAssertEqual(parse("Pawvis \(phrase)").command, .press(chord),
+                           "'\(phrase)' must press \(chord.key)")
+        }
+    }
+
+    func testChordPhrasesWithTrailingWordsFallToResolve() {
+        // Whole-utterance only: extra words mean the user wants more than
+        // the shortcut, and the autopilot should see the whole request.
+        XCTAssertEqual(parse("Pawvis copy that file over there").command,
+                       .resolve(transcript: "copy that file over there"))
+        XCTAssertEqual(parse("Pawvis save the draft and close it").command,
+                       .resolve(transcript: "save the draft and close it"))
+    }
+
+    func testMultiClauseUtteranceFallsThroughToResolve() {
+        XCTAssertEqual(
+            parse("Pawvis close the window and open Safari").command,
+            .resolve(transcript: "close the window and open Safari"))
+    }
+
+    func testQuit() {
+        XCTAssertEqual(parse("Pawvis quit").command, .quit(app: nil))
+        XCTAssertEqual(parse("Pawvis quit this app").command, .quit(app: nil))
+        XCTAssertEqual(parse("Pawvis quit Safari").command, .quit(app: "Safari"))
+    }
+
+    func testQuitPronounsNeverFuzzyMatchAnApp() {
+        // "quit it" must pin to the frontmost app — a two-letter payload
+        // would fuzzy-match a real app name ("it" → iTerm).
+        for phrase in ["quit it", "quit this", "quit that", "quit the app"] {
+            XCTAssertEqual(parse("Pawvis \(phrase)").command, .quit(app: nil),
+                           "'\(phrase)' must quit the frontmost app")
+        }
     }
 
     func testResolveTranscriptIsWakeStripped() {

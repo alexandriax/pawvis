@@ -54,8 +54,14 @@ public enum VoiceCommand: Equatable, Sendable {
     /// Click at the current pointer position.
     case click(ClickKind)
     case scroll(direction: ScrollDirection, amount: ScrollAmount)
+    /// Quit an app gracefully; nil quits the frontmost one.
+    case quit(app: String?)
     /// Turn voice control off ("Pawvis stop listening").
     case stopVoiceControl
+    /// Cancel whatever is in flight ("Pawvis stop" / "cancel"). With nothing
+    /// running, the controller treats it as `stopVoiceControl` — bare "stop"
+    /// keeps its original meaning when there's nothing to cancel.
+    case cancelActivity
     /// Not matched by the deterministic grammar — resolve against on-screen
     /// context with the on-device model ("Pawvis click sign in").
     case resolve(transcript: String)
