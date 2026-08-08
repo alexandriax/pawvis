@@ -97,8 +97,12 @@
 
     <figure class="hero-media" id="heroMedia" data-reveal>
       <div class="screen-frame">
-        <img src="assets/hero-office.jpg" alt="A woman directs her MacBook with a raised open hand, in a dark office lit purple and blue." width="1536" height="1024">
+        <video id="demoVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
+               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
+          <source src="assets/demo.mp4" type="video/mp4">
+        </video>
       </div>
+      <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
     </figure>
   </div>
 </section>
@@ -195,20 +199,17 @@
 <!-- ============================================================ DEMO FILM -->
 <section class="demo" id="demo" aria-labelledby="demo-h">
   <div class="container">
-    <p class="kicker mono" data-reveal>In motion</p>
-    <h2 id="demo-h" data-reveal>Eight seconds, no <em class="serif grad">hardware</em>.</h2>
+    <p class="kicker mono" data-reveal>The setup</p>
+    <h2 id="demo-h" data-reveal>One hand, no <em class="serif grad">hardware</em>.</h2>
     <p class="lede" data-reveal>
-      One hand, one built-in camera, and a cursor that goes where she points.
+      A hand in the air, the webcam your Mac already has, and a cursor that
+      goes where she points.
     </p>
 
     <figure class="demo-media" id="demoMedia" data-reveal>
       <div class="screen-frame">
-        <video id="demoVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
-               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
-          <source src="assets/demo.mp4" type="video/mp4">
-        </video>
+        <img src="assets/hero-office.jpg" alt="A woman directs her MacBook with a raised open hand, in a dark office lit purple and blue." width="1536" height="1024" loading="lazy">
       </div>
-      <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
     </figure>
   </div>
 </section>
