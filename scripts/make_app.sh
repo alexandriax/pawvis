@@ -24,6 +24,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Pawvis"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/icon_1024.png "$APP/Contents/Resources/icon_1024.png"
+# The About pane's portrait: the photoreal paw the README leads with. Copied
+# from the repo root rather than duplicated into Resources/ so the two can't
+# drift — Resources/ holds art derived from claw.png, this isn't.
+cp icon.png "$APP/Contents/Resources/paw-photo.png"
 # `cmd && cp` would abort the script under `set -e` whenever the test is
 # false, so guard these with explicit ifs.
 if [[ -f Resources/menubar-claw.png ]]; then

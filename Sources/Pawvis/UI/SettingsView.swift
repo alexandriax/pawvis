@@ -739,10 +739,5 @@ private struct AboutTab: View {
         }
     }
 
-    private func bundledIcon() -> NSImage? {
-        guard let url = Bundle.main.url(forResource: "icon_1024", withExtension: "png") else {
-            return nil
-        }
-        return NSImage(contentsOf: url)
-    }
+    private func bundledIcon() -> NSImage? { PawvisGlyph.pawPhoto() }
 }

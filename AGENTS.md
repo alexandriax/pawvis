@@ -370,6 +370,12 @@ Rules that keep the site honest:
   never version it, and it never needs editing per release.
 - **Icon art on the site derives from the committed sources.** Regenerate
   `docs/assets/icon-*.png` with `sips` from `icon.png` if it ever changes.
+- **The share card is derived, not drawn.** `docs/banner.png` (the Open Graph
+  / Twitter image) renders from `scripts/banner.html` via
+  `./scripts/make_banner.sh`, reusing the site's own fonts, palette and claw
+  art. Restyle the splash page and re-run it rather than hand-editing a PNG;
+  keep the 1200×630 Open Graph ratio and the filename, which the meta tags and
+  every cached scrape point at.
 
 Site-only pull requests take the `no-release` label: publishing a web page is
 not shipping an app version.

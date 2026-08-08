@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+@font-face {
+  font-family: "Bricolage Grotesque";
+  src: url("../docs/assets/fonts/bricolage-grotesque-var-latin.woff2") format("woff2");
+  font-weight: 400 800; font-style: normal;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("../docs/assets/fonts/inter-var-latin.woff2") format("woff2");
+  font-weight: 400 700; font-style: normal;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../docs/assets/fonts/jetbrains-mono-var-latin.woff2") format("woff2");
+  font-weight: 400 600; font-style: normal;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("../docs/assets/fonts/instrument-serif-italic-latin.woff2") format("woff2");
+  font-weight: 400; font-style: italic;
+}
+
+:root {
+  --purple: #8B5CF6;
+  --blue: #0EA5E9;
+  --purple-light: #C4B5FD;
+  --blue-light: #7DD3FC;
+  --bg: #0B0912;
+  --ink: #EFECF8;
+  --ink-body: #BCB4D2;
+  --ink-dim: #8E86A8;
+  --grad: linear-gradient(100deg, var(--purple-light) 0%, var(--purple) 32%, var(--blue) 78%, var(--blue-light) 100%);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  width: 1200px; height: 630px;
+  background: var(--bg);
+  font-family: "Inter", system-ui, sans-serif;
+  color: var(--ink-body);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.frame { position: relative; width: 1200px; height: 630px; overflow: hidden; }
+
+/* Ambient glows — the site's three-lamp arrangement, tightened to this canvas */
+.glow {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(660px 420px at 4% -12%, rgba(139, 92, 246, 0.30), transparent 62%),
+    radial-gradient(640px 460px at 80% 32%, rgba(14, 165, 233, 0.20), transparent 62%),
+    radial-gradient(760px 460px at 40% 120%, rgba(139, 92, 246, 0.14), transparent 58%);
+}
+
+/* Film grain: the site's whisper-opacity turbulence tile */
+.grain {
+  position: absolute; inset: 0; opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
+}
+
+/* Brand rule across the top, in the headline's own gradient */
+.rule {
+  position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  background: var(--grad);
+}
+
+.wordmark {
+  position: absolute; top: 52px; left: 64px;
+  display: flex; align-items: center; gap: 12px;
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-weight: 700; font-size: 27px;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.wordmark::before {
+  content: "";
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--grad);
+}
+
+.copy { position: absolute; left: 64px; top: 214px; width: 780px; }
+
+.eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px; font-weight: 500;
+  letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--blue-light);
+  margin-bottom: 24px;
+}
+
+h1 {
+  font-family: "Bricolage Grotesque", sans-serif;
+  font-weight: 750;
+  font-variation-settings: "opsz" 96;
+  font-size: 48px;
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.serif {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic; font-weight: 400;
+  letter-spacing: 0;
+  padding-right: 0.06em;
+  font-size: 1.14em;
+}
+.grad {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.meta {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 15px;
+  color: var(--ink-dim);
+  margin-top: 38px;
+}
+
+/* The paw, lit from behind and bleeding off the corner so it never ends
+   in a hard edge where the source canvas stops. */
+.art {
+  position: absolute;
+  right: -34px; bottom: -78px;
+  width: 520px; height: 520px;
+}
+.art::before {
+  content: "";
+  position: absolute;
+  left: 8%; top: 2%; width: 84%; height: 84%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 44% 38%, rgba(139, 92, 246, 0.46), transparent 60%),
+    radial-gradient(circle at 60% 64%, rgba(14, 165, 233, 0.34), transparent 60%);
+  filter: blur(30px);
+}
+.art img {
+  position: relative;
+  width: 100%; height: 100%;
+  filter: drop-shadow(0 22px 44px rgba(11, 9, 18, 0.8));
+}
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="glow"></div>
+  <div class="rule"></div>
+
+  <div class="art">
+    <img src="../docs/assets/icon-512.png" alt="">
+  </div>
+
+  <div class="wordmark">Pawvis</div>
+
+  <div class="copy">
+    <p class="eyebrow">Touch-free gesture &amp; voice control for macOS</p>
+    <h1>
+      A mouse made of <em class="serif grad">thin air</em>.<br>
+      A Mac that answers to its <em class="serif grad">name</em>.
+    </h1>
+    <p class="meta">macOS 14+&nbsp;&nbsp;·&nbsp;&nbsp;100% on-device&nbsp;&nbsp;·&nbsp;&nbsp;Free &amp; open source</p>
+  </div>
+
+  <div class="grain"></div>
+</div>
+</body>
+</html>
