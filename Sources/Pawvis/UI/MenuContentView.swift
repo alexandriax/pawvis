@@ -1,11 +1,11 @@
 import PawvisCore
 import SwiftUI
 
-/// Readable buttons on the translucent menu material: always reverse type on a
-/// solid chip, with both colors fixed rather than semantic, so a chip reads the
-/// same in either color scheme. (Plain purple text was illegible on the dark
-/// vibrancy background, and the faint light-mode chip washed out against the
-/// light one.)
+/// Readable buttons on the translucent menu material: always a solid chip with
+/// high-contrast type, both colors fixed rather than semantic, so a chip reads
+/// the same in either color scheme. (Plain purple text was illegible on the
+/// dark vibrancy background, and the faint light-mode chip washed out against
+/// the light one.)
 struct PawvisButtonStyle: ButtonStyle {
     var color: Color = PawvisTheme.purpleUI
     var textColor: Color = .white
@@ -172,8 +172,8 @@ struct MenuContentView: View {
         HStack {
             Button("Settings…") { openSettingsInFront() }
                 .buttonStyle(PawvisButtonStyle(
-                    color: PawvisTheme.inkUI,
-                    textColor: PawvisTheme.blueLightUI))
+                    color: PawvisTheme.blueLightUI,
+                    textColor: PawvisTheme.inkUI))
             Button("Gesture Guide") {
                 dismiss() // close the menu bar popover — it floats above windows
                 openWindow(id: "gesture-guide")

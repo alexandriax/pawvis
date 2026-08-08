@@ -13,7 +13,7 @@ enum PawvisTheme {
     // Menu footer chips. Fixed sRGB rather than semantic colors: these chips
     // sit on translucent menu material, so they must read the same whether the
     // OS is in light or dark mode instead of flipping with the appearance.
-    static let ink = NSColor(hex: 0x000000)          // Settings chip
+    static let ink = NSColor(hex: 0x000000)          // Settings chip's type
     static let danger = NSColor(hex: 0x991B1B)       // red-800 — Quit chip
 
     static let purpleUI = Color(nsColor: purple)
