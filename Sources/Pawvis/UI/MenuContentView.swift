@@ -1,25 +1,28 @@
 import PawvisCore
 import SwiftUI
 
-/// Readable buttons on the translucent menu material: always a solid chip with
-/// high-contrast type, both colors fixed rather than semantic, so a chip reads
-/// the same in either color scheme. (Plain purple text was illegible on the
-/// dark vibrancy background, and the faint light-mode chip washed out against
-/// the light one.)
+/// Readable buttons on the translucent menu material: always a solid chip
+/// with high-contrast type. The chip colors are appearance-dynamic (see
+/// `PawvisTheme.Chip`), so each one keeps its contrast on both menu
+/// materials rather than splitting the difference with one fixed fill.
+///
+/// Hue carries meaning here, so keep it doing that: violet for the primary
+/// action, sky for navigation, fuchsia for anything wanting attention, and
+/// the quiet chip for what should stay out of the way.
 struct PawvisButtonStyle: ButtonStyle {
-    var color: Color = PawvisTheme.purpleUI
-    var textColor: Color = .white
+    var chip: PawvisTheme.Chip = PawvisTheme.chipPurple
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+        let shape = RoundedRectangle(cornerRadius: 6)
+        return configuration.label
             .font(.callout.weight(.medium))
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(color))
-            .foregroundStyle(textColor)
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .background(shape.fill(chip.fillUI))
+            .overlay(chip.borderUI.map { shape.strokeBorder($0, lineWidth: 1) })
+            .foregroundStyle(chip.textUI)
+            .opacity(configuration.isPressed ? 0.7 : (isEnabled ? 1 : 0.45))
     }
 }
 
@@ -49,7 +52,7 @@ struct MenuContentView: View {
         }
         .padding(12)
         .frame(width: 300)
-        .tint(PawvisTheme.purpleUI)
+        .tint(PawvisTheme.accentUI)
         .onAppear { controller.refreshPermissions() }
     }
 
@@ -96,7 +99,12 @@ struct MenuContentView: View {
                 Button(voice.state.isActive ? "Stop" : "Start") {
                     voice.toggle()
                 }
-                .buttonStyle(PawvisButtonStyle())
+                // Fuchsia while live: the mic being on is the one thing in
+                // here worth catching an eye, and it earns the attention
+                // color without the alarm-red reading of a stop button.
+                .buttonStyle(PawvisButtonStyle(
+                    chip: voice.state.isActive
+                        ? PawvisTheme.chipFuchsia : PawvisTheme.chipPurple))
                 .disabled(!controller.settingsStore.settings.voiceControl.enabled
                           && !voice.state.isActive)
             }
@@ -164,26 +172,27 @@ struct MenuContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
             Button(warning.action, action: warning.handler)
-                .buttonStyle(PawvisButtonStyle())
+                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipFuchsia))
         }
     }
 
+    /// Sky for Settings, violet for the guide, and Quit on the quiet chip:
+    /// leaving is mundane, not dangerous, so it gets the least ink in the
+    /// row rather than a red slab.
     private var footer: some View {
         HStack {
             Button("Settings…") { openSettingsInFront() }
-                .buttonStyle(PawvisButtonStyle(
-                    color: PawvisTheme.blueLightUI,
-                    textColor: PawvisTheme.inkUI))
+                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
             Button("Gesture Guide") {
                 dismiss() // close the menu bar popover — it floats above windows
-                openWindow(id: "gesture-guide")
+                openWindow(id: GuideWindow.id)
                 NSApp.activate(ignoringOtherApps: true)
             }
             Spacer()
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(PawvisButtonStyle(color: PawvisTheme.dangerUI))
+            .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipQuiet))
         }
         .buttonStyle(PawvisButtonStyle())
     }
@@ -239,12 +248,14 @@ struct MenuContentView: View {
         }
     }
 
+    /// The mic glyph tracks the Start/Stop chip beside it: fuchsia once the
+    /// mic is live, accent violet while a command is being worked out. Red
+    /// stays for genuine errors, where it means what it says.
     private var voiceTint: Color {
         switch voice.state {
         case .off: return .secondary
-        case .connecting: return .orange
-        case .listening: return .orange
-        case .resolving, .working: return .purple
+        case .connecting, .listening: return PawvisTheme.attentionUI
+        case .resolving, .working: return PawvisTheme.accentUI
         case .error: return .red
         }
     }

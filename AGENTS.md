@@ -19,6 +19,10 @@ Extras:
   (engine, settings round-trip, launch-at-login rules, voice parser).
 - `PAWVIS_NO_AUTOSTART=1` — launch without starting tracking, so automated
   runs don't trip the camera permission prompt.
+- `PAWVIS_OPEN_GUIDE=1` — open the Gesture Guide window at launch, the same
+  eyes-on hook as `PAWVIS_OPEN_SETTINGS` below. Its posed-hand art is
+  bundle-only, so a bare `swift run` shows the SF Symbol fallbacks instead:
+  look at the guide from `build/Pawvis.app`, not from the binary.
 - `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
   (CI does this from the release tag; local builds show `0.0.0-dev`).
 
@@ -72,6 +76,42 @@ the right — both invisible in code review and obvious to the user.
    launch, so `make app` + launch + `screencapture` covers it without
    hand-clicking. Pay attention to the longest strings (the Voice control and
    Tracking tabs have them).
+
+## Menu bar chips: hue means something
+
+The `MenuBarExtra` dropdown sits on translucent menu material, which is the
+constraint behind every rule here. `PawvisTheme.Chip` owns the colors and
+`PawvisButtonStyle` draws them; the palette is save.page's (Tailwind violet /
+sky / fuchsia).
+
+1. **Chips are appearance-dynamic, not fixed.** Each one resolves a light and
+   a dark value (`PawvisTheme.dynamic`). One fixed fill cannot clear contrast
+   on both materials, which is what a fixed violet-500 and a fixed sky-300
+   were doing badly at. `--selftest` fails the build if a chip's fill stops
+   varying by appearance, or if its type drops under WCAG AA (4.5:1) against
+   its own fill in either mode. Retune freely; keep the check green.
+2. **One visual language per appearance.** Light mode: saturated fill, white
+   type. Dark mode: the pale 300-shade, ink type. Mixing the two in one row
+   (a pale chip with black type next to a saturated chip with white type) is
+   what made the old footer look broken, more than any individual color did.
+3. **Hue is meaning, not decoration.** Violet is the primary action, sky is
+   navigation, fuchsia is attention (mic live, warnings needing a decision),
+   and `chipQuiet` recedes. Quit wears the quiet chip on purpose: quitting is
+   mundane, so it takes the least ink in the row. It was red-800 once and read
+   as a hazard; it was near-white once and became the loudest thing on screen.
+   Red is left for genuine errors, where it means what it says.
+4. **Light fills sit a stop darker than save.page's 500s** (violet-600,
+   sky-700, fuchsia-600). White on violet-500 is 4.2:1, just under AA at chip
+   text size. The web can use the 500s because its buttons are larger.
+5. **Nothing tinted-and-translucent.** A low-alpha wash over vibrancy washes
+   out on a light desktop. Chips are opaque; the quiet chip earns its edge
+   from a hairline border, not from transparency.
+
+The claw in the header and the toggle both take `PawvisTheme.accent`, the same
+violet-500/violet-300 pair, because violet-500 on the dark menu material is
+~3.4:1 and effectively invisible. If you tint anything else in this menu, use
+`accent` rather than `purpleUI` — `purpleUI` is the fixed overlay color, which
+paints over arbitrary screen content and must not flip with the appearance.
 
 ## Launch at login
 
@@ -174,12 +214,63 @@ migrations needed).
   so that finger's dip only engages while the pose's *other* folding finger
   is still extended. A genuine dip keeps the rest of the hand up.
 
+**The criss-cross tracking-off wave** (optional, on by default): both hands
+up, open and splayed, then traded sides `crissCrossDisableCrossings` times
+(default 2 — over and back). Its constraints, each deliberate:
+
+- **Chirality, never slot identity, orders the palms.** Greedy slot matching
+  swaps identities at exactly the moment the hands overlap — the moment this
+  gesture is about — so a crossing is the *left/right-labeled* palms trading
+  sides. Frames with unknown or duplicated chirality hold state.
+- **Crossings only count outside a separation band** (±0.10 screen-normalized
+  x) and after the shared debounce, so midline jitter and one-frame label
+  glitches never count.
+- **The cursor parks once the first crossing lands** (not on engage — two
+  static open hands must not freeze the cursor), and both buttons' engage is
+  blocked while the wave is engaged.
+- **Two escape hatches**: a partner hand Vision drops mid-crossing gets the
+  tracking-loss grace, and a wave that stalls for 2 s resets outright, so an
+  idle double high-five can never park the cursor for good. A genuinely
+  curled finger on either hand (debounced) is the deliberate exit.
+- **Completion emits `.disableTracking`**, the one non-mouse `GestureEvent`:
+  `PawvisController` intercepts it before `mouse.apply` and calls
+  `stopTracking()` — the same full stop as the menu bar switch.
+
 A new pose-triggered mode wants the same shape: a pose (or ratio) in
 `HandFeatures`, strict-engage/loose-hold hysteresis, debounce both ways, an
 explicit story for how it interacts with presses and the trigger, synthetic
 poses in `SyntheticHands.swift`, and tests covering engage, release, the
 band, tracking loss, and the guards. Copy lives in `SettingsView` and
-`GestureGuideView`.
+`GestureGuideView` — and so does a picture: add the pose to
+`scripts/make_gesture_glyphs.py` (see [Gesture art](#gesture-art)) rather than
+reaching for an SF Symbol, because the symbols are what taught the wrong
+gesture last time.
+
+## Gesture art
+
+The posed hands in the Gesture Guide and the site's gestures grid are drawn by
+`scripts/make_gesture_glyphs.py` into `docs/assets/gestures/*.svg`. Run it by
+hand after changing a pose (like `make_banner.sh`), and commit the SVGs:
+
+```bash
+python3 scripts/make_gesture_glyphs.py
+```
+
+- **One file set, two consumers.** The site loads them as `<img class="glyph">`
+  and `make_app.sh` copies them into the bundle as `gesture-*.svg`, where
+  `PawvisGlyph.gesture` loads them. A pose can't disagree between the app and
+  the page because there is only one of it.
+- **The app tints them, so the colors inside don't matter to it.** They are
+  loaded as template images (`NSImage` renders SVG as a vector rep, and
+  template rendering keys off alpha alone), which is also why the hand and the
+  accent flatten into one color in the guide. The colors baked into the files
+  are the site's own `--purple-light` / `--blue-light`.
+- **Draw the gesture, not a metaphor.** Every glyph is the same hand with the
+  fingers the gesture actually moves folded, and an arrow through the column
+  they vacated. The SF Symbols this replaced were teaching poses the engine
+  does not implement: a *pinch* for the click, a pointing finger for move.
+- **Right-click follows its setting.** There is a glyph per finger the picker
+  offers, and the guide shows the configured one.
 
 ## Secrets
 
@@ -385,6 +476,11 @@ Rules that keep the site honest:
   never version it, and it never needs editing per release.
 - **Icon art on the site derives from the committed sources.** Regenerate
   `docs/assets/icon-*.png` with `sips` from `icon.png` if it ever changes.
+- **The gestures grid's hands are shared with the app.**
+  `docs/assets/gestures/*.svg` are generated (see [Gesture art](#gesture-art))
+  and copied into the app bundle at build time, so editing one by hand splits
+  the page from the guide. Their colors are baked in rather than inherited
+  from `.glyph`: if the palette moves, regenerate them.
 - **The share card is derived, not drawn.** `docs/banner.png` (the Open Graph
   / Twitter image) renders from `scripts/banner.html` via
   `./scripts/make_banner.sh`, reusing the site's own fonts, palette and claw

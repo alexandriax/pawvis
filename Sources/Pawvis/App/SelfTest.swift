@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import PawvisCore
 
@@ -106,6 +107,47 @@ func runSelfTest() -> Int32 {
         signature: 1, step: AutopilotStep(action: .click, elementIndex: 0))
     check("autopilot.noProgressAborts",
           AutopilotPolicy.shouldAbortNoProgress([stuck, stuck, stuck]))
+
+    // Menu chips stay readable in both appearances. These sit on translucent
+    // menu material where a too-light fill has washed out before, so the
+    // check is on the numbers rather than on someone remembering to look:
+    // every chip's type must clear WCAG AA (4.5:1) against its own fill,
+    // in light mode and in dark. Resolving them here also proves the
+    // dynamic colors actually flip, which a fixed palette never had to.
+    for (name, chip) in PawvisTheme.allChips {
+        for (appearanceName, appearance) in [("light", NSAppearance.Name.aqua),
+                                             ("dark", NSAppearance.Name.darkAqua)] {
+            guard let appearance = NSAppearance(named: appearance) else {
+                check("chips.\(name).\(appearanceName)Available", false)
+                continue
+            }
+            let fill = chip.fill.resolved(for: appearance)
+            let text = chip.text.resolved(for: appearance)
+            let ratio = fill.contrastRatio(against: text)
+            check("chips.\(name).\(appearanceName)ContrastAA \(String(format: "%.2f", ratio)):1",
+                  ratio >= 4.5)
+        }
+        // A chip that resolves to one color in both appearances is a chip
+        // that forgot to be dynamic.
+        let light = chip.fill.resolved(for: NSAppearance(named: .aqua)!)
+        let dark = chip.fill.resolved(for: NSAppearance(named: .darkAqua)!)
+        check("chips.\(name).fillIsDynamic", light != dark)
+    }
+
+    // The Gesture Guide's posed hands have to be *in* the bundle. Missing art
+    // doesn't crash and doesn't look broken: every row quietly falls back to
+    // an SF Symbol, which is exactly the wrong-gesture picture the drawings
+    // replaced. Only worth asserting from a real bundle — a bare binary has
+    // no Resources to look in, and CI runs this against `build/Pawvis.app`.
+    if Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" {
+        // Every finger the right-click picker offers needs its own pose; the
+        // index is not one of them (it already drives the left button).
+        let poses = ["take-control", "move", "click", "drag", "scroll", "stop-tracking"]
+            + Finger.allCases.filter { $0 != .index }.map { "right-click-\($0.rawValue)" }
+        for name in poses {
+            check("guide.glyph.\(name)", PawvisGlyph.gesture(name, size: 40) != nil)
+        }
+    }
 
     print(failures == 0 ? "SELFTEST OK (\(checks) checks)" : "SELFTEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1

@@ -23,7 +23,7 @@ struct PawvisApp: App {
                          loginItem: appDelegate.loginItem)
         }
 
-        Window("Pawvis Gesture Guide", id: "gesture-guide") {
+        Window("Pawvis Gesture Guide", id: GuideWindow.id) {
             GestureGuideView(store: appDelegate.controller.settingsStore)
         }
         .windowResizability(.contentSize)
@@ -45,6 +45,7 @@ struct PawvisApp: App {
 private struct MenuBarIcon: View {
     let voiceActive: Bool
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     private static let clawImage: NSImage? = PawvisGlyph.claw(size: 18)
 
@@ -55,7 +56,7 @@ private struct MenuBarIcon: View {
                     Image(nsImage: claw)
                     if voiceActive {
                         Circle()
-                            .fill(PawvisTheme.purpleUI)
+                            .fill(PawvisTheme.accentUI)
                             .frame(width: 5, height: 5)
                             .offset(x: 2, y: -1)
                     }
@@ -64,7 +65,10 @@ private struct MenuBarIcon: View {
                 Image(systemName: voiceActive ? "pawprint.circle.fill" : "pawprint.fill")
             }
         }
-        .onAppear { SettingsWindow.opener = openSettings }
+        .onAppear {
+            SettingsWindow.opener = openSettings
+            GuideWindow.opener = openWindow
+        }
     }
 }
 
@@ -157,6 +161,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
            let tab = SettingsTab(rawValue: name) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 SettingsRouter.shared.open(tab)
+            }
+        }
+
+        // PAWVIS_OPEN_GUIDE=1 does the same for the Gesture Guide, whose art
+        // is bundle-only: the fallback SF Symbols are what a bare `swift run`
+        // shows, so looking at the real thing means launching the .app.
+        if ProcessInfo.processInfo.environment["PAWVIS_OPEN_GUIDE"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                GuideWindow.show()
             }
         }
 

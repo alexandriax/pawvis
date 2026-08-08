@@ -71,6 +71,11 @@ Gestures**.
 - **Scroll**: fold your **middle and ring fingers** in, index and pinky up,
   then move your hand up and down. The cursor parks while the pose is held.
   Toggle it (or invert the direction) in Settings.
+- **Stop tracking**: hold up **both hands** open with fingers spread wide, like
+  a double high-five, then wave them across each other. Once they have traded
+  sides twice (over and back), hand tracking switches off entirely, the same
+  as the menu bar switch. Optional, on by default; the number of crossings is
+  a setting under **Settings → Tracking**.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a

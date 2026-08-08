@@ -96,6 +96,16 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// scroll up (`.scroll` deltas are positive-up wheel units).
     public var scrollInvert: Bool = false
 
+    // MARK: Tracking-off wave
+    /// Hold up both hands open with fingers spread wide (a double high-five)
+    /// and cross them over each other back and forth to switch hand tracking
+    /// off entirely — the same full stop as the menu bar toggle. Optional,
+    /// on by default.
+    public var crissCrossDisableEnabled: Bool = true
+    /// How many times the hands must trade sides before tracking switches
+    /// off. Two is one full wave: cross over, then back.
+    public var crissCrossDisableCrossings: Int = 2
+
     // MARK: Click timing
     /// Two clicks within this interval (and within `doubleClickSlop`) become a
     /// double-click (macOS default ballpark).
@@ -152,6 +162,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         case pinchEngageRatio, pinchReleaseHysteresis, pinchDebounceFrames
         case rightClickEnabled, rightClickFinger
         case scrollEnabled, scrollInvert
+        case crissCrossDisableEnabled, crissCrossDisableCrossings
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case dragStartDelay, dragIntentDistance, jitterDeadband
         case smoothing, poseThresholds
@@ -172,6 +183,8 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Finger.self, forKey: .rightClickFinger) { rightClickFinger = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollInvert) { scrollInvert = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .crissCrossDisableEnabled) { crissCrossDisableEnabled = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .crissCrossDisableCrossings) { crissCrossDisableCrossings = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) { doubleClickSlop = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) { dragActivationDistance = v }

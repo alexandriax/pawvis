@@ -17,6 +17,22 @@ enum PawvisGlyph {
         return image
     }
 
+    /// A posed-hand glyph for the Gesture Guide, by the name of its file in
+    /// `docs/assets/gestures` (`click`, `right-click-little`, …), which
+    /// `make_app.sh` copies into the bundle with a `gesture-` prefix.
+    ///
+    /// Template, like the claw: the SVG carries the *site's* colors, and
+    /// template rendering keys off alpha alone, so the app draws the whole
+    /// pose in the surrounding tint and one file serves both. NSImage renders
+    /// SVG as a vector rep, so setting `size` scales it cleanly.
+    static func gesture(_ name: String, size: CGFloat) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "gesture-\(name)", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        image.size = NSSize(width: size, height: size)
+        return image
+    }
+
     /// The photoreal sloth paw from the README — the About pane's portrait.
     /// Not a template: it's a photograph, not a glyph.
     static func pawPhoto() -> NSImage? {
