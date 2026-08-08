@@ -210,11 +210,26 @@ themselves come from `.github/workflows/labels.yml`, run once from the Actions
 tab.
 
 **Label the pull requests you open, at creation** — `gh pr create --label …`,
-not as an afterthought for a human to fill in. `patch` for fixes, docs and
-chores; `minor` for features; `major` for anything that breaks existing
-behavior; `no-release` when the change should not ship on its own (CI
-plumbing, this file). Pick deliberately: the label *is* the release decision,
-because merging is publishing.
+not as an afterthought for a human to fill in. Pick deliberately: the label
+*is* the release decision, because merging is publishing.
+
+**If the change reaches the app, it ships.** Anything that alters the built
+`Pawvis.app` — `Sources/`, `Resources/`, `Package.swift`, the bundling in
+`scripts/` — takes `major` / `minor` / `patch`, never `no-release`. A recolored
+button, a swapped icon, a one-line copy fix in a settings pane: all of it is a
+new build that users need a release to receive. Holding an app change back
+under `no-release` strands it in `main`, where the next release silently
+carries it out under someone else's version number and changelog.
+
+- `patch` — fixes, small changes, and copy or asset tweaks inside the app
+- `minor` — new features
+- `major` — anything that breaks existing behavior
+- `no-release` — **only** for changes that never reach the app: the splash page
+  under `docs/`, the README, this file, and CI plumbing. Publishing a web page
+  is not shipping an app version.
+
+When a PR touches both the app and the site, it is an app PR: label it for the
+bump the app change deserves.
 
 On merge, `.github/workflows/release.yml` tests, stamps the version into
 `Info.plist`, bundles, signs with Developer ID, notarizes, staples, zips, and
@@ -378,4 +393,5 @@ Rules that keep the site honest:
   every cached scrape point at.
 
 Site-only pull requests take the `no-release` label: publishing a web page is
-not shipping an app version.
+not shipping an app version. The moment a PR also touches the app, that stops
+applying — see [Releases](#releases).
