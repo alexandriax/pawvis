@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
+import PawvisCore
 import ScreenCaptureKit
 import Vision
 
@@ -33,27 +34,38 @@ struct ScreenContextSnapshot {
     /// False when the Screen Recording permission is missing (AX-only mode).
     var ocrAvailable: Bool
 
-    /// Numbered target list for the language model. Coordinates are integer
-    /// screen points so the model can reason about layout.
-    var promptDescription: String {
-        var lines: [String] = []
-        if let app = frontmostAppName {
-            lines.append("Frontmost app: \(app)")
-        }
-        if let title = windowTitle, !title.isEmpty {
-            lines.append("Window: \(title)")
-        }
-        if let focused = focusedElement {
-            lines.append("Focused element: \(focused)")
-        }
-        lines.append("Pointer position: (\(Int(pointer.x)), \(Int(pointer.y)))")
-        lines.append("Visible elements (index. role “label” at x,y size w×h):")
-        for (index, target) in targets.enumerated() {
-            let f = target.frame
-            lines.append(
-                "\(index). \(target.role) “\(target.label)” at \(Int(f.minX)),\(Int(f.minY)) size \(Int(f.width))×\(Int(f.height))")
-        }
-        return lines.joined(separator: "\n")
+    /// AX roles rendered as the plain words the autopilot prompt uses —
+    /// they read better to the small model and cost fewer tokens than
+    /// AXCamelCase.
+    private static let kindWords: [String: String] = [
+        "AXButton": "button", "AXLink": "link",
+        "AXTextField": "field", "AXTextArea": "field", "AXSearchField": "field",
+        "AXCheckBox": "checkbox", "AXRadioButton": "radio",
+        "AXPopUpButton": "popup", "AXMenuButton": "popup", "AXComboBox": "popup",
+        "AXMenuBarItem": "menu", "AXMenuItem": "item",
+        "AXTab": "tab", "AXSlider": "slider",
+        "AXDisclosureTriangle": "disclosure", "AXHeading": "heading",
+        "AXCell": "row", "AXRow": "row",
+    ]
+
+    /// The snapshot reduced to the pure ingredients the autopilot's prompt
+    /// builder and executor need (PawvisCore never sees AX types).
+    func coreScreen() -> AutopilotScreen {
+        AutopilotScreen(
+            appName: frontmostAppName,
+            windowTitle: windowTitle,
+            focusedElement: focusedElement,
+            pointerX: pointer.x,
+            pointerY: pointer.y,
+            isFullScreen: scope == .fullScreen,
+            elements: targets.map { target in
+                AutopilotElement(
+                    label: target.label,
+                    kind: Self.kindWords[target.role] ?? "text",
+                    actionable: ScreenContextProvider.actionableRoles.contains(target.role),
+                    x: target.frame.minX, y: target.frame.minY,
+                    width: target.frame.width, height: target.frame.height)
+            })
     }
 }
 
@@ -71,26 +83,40 @@ final class ScreenContextProvider {
     private static let maxRawTargets = 120
     /// Prompt-size caps. Prefill latency scales with prompt tokens (measured:
     /// a 50-element list costs ~10× the probe's small-prompt latency), so the
-    /// first, near-the-pointer pass stays small; the full-screen escalation
-    /// pass may carry more. The model's window is 4096 tokens total.
+    /// first, near-the-pointer pass stays small; the full-screen pass may
+    /// carry more — but the autopilot's goal and history now share the
+    /// model's 4096-token window with the list, hence 40, not the old 50.
     private static func maxTargets(for scope: ScreenContextSnapshot.Scope) -> Int {
-        scope == .regionAroundPointer ? 30 : 50
+        scope == .regionAroundPointer ? 30 : 40
     }
 
     func snapshot(scope: ScreenContextSnapshot.Scope) async -> ScreenContextSnapshot {
         let pointer = CGEvent(source: nil)?.location ?? .zero
-        let roi = Self.regionOfInterest(scope: scope, pointer: pointer)
         let frontmost = NSWorkspace.shared.frontmostApplication
+        // Full-screen snapshots follow the frontmost window, not the
+        // pointer: after "open Notes" the pointer is still wherever the last
+        // click left it, possibly on another display.
+        let windowFrame: CGRect? = scope == .fullScreen
+            ? Self.focusedWindowFrame(pid: frontmost?.processIdentifier) : nil
+        let roi = Self.regionOfInterest(
+            scope: scope, pointer: pointer, windowFrame: windowFrame)
 
-        // The two legs are independent; run them concurrently.
+        // The legs are independent; run them concurrently. Menus live on the
+        // app element, not in any window's subtree, so they need their own
+        // leg — full screen only, keeping the measured region fast path
+        // exactly as small as it was.
         async let axLeg = Self.accessibilityTargets(
             pointer: pointer, roi: roi, frontmostPID: frontmost?.processIdentifier)
         async let ocrLeg = Self.ocrTargets(roi: roi)
+        async let menuLeg = scope == .fullScreen
+            ? Self.menuTargets(frontmostPID: frontmost?.processIdentifier)
+            : []
 
         let ax = await axLeg
+        let menus = await menuLeg
         let ocr = await ocrLeg
 
-        var targets = ax.targets
+        var targets = menus + ax.targets
         // OCR lines that duplicate an AX label add noise; keep the ones that
         // bring new text.
         let axLabels = Set(targets.map { $0.label.lowercased() })
@@ -115,10 +141,11 @@ final class ScreenContextProvider {
     /// well: drop junk labels, put actionable controls before passive text,
     /// and collapse duplicate labels (web AX trees fragment one visual button
     /// into many static-text shards).
-    private static let actionableRoles: Set<String> = [
+    static let actionableRoles: Set<String> = [
         "AXButton", "AXLink", "AXTextField", "AXTextArea", "AXSearchField",
         "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
-        "AXComboBox", "AXMenuItem", "AXTab", "AXSlider", "AXDisclosureTriangle",
+        "AXComboBox", "AXMenuItem", "AXMenuBarItem", "AXTab", "AXSlider",
+        "AXDisclosureTriangle",
     ]
 
     private static func curate(_ targets: [ScreenTarget], cap: Int) -> [ScreenTarget] {
@@ -146,8 +173,19 @@ final class ScreenContextProvider {
 
     // MARK: - Region
 
+    /// The frontmost app's focused-window frame, in top-left-origin global
+    /// points (AXFrame's native space). Two IPC reads — fine to do inline.
+    private static func focusedWindowFrame(pid: pid_t?) -> CGRect? {
+        guard let pid else { return nil }
+        let appElement = AXUIElementCreateApplication(pid)
+        guard let windowRef = copyAttribute(appElement, kAXFocusedWindowAttribute) else {
+            return nil
+        }
+        return frame(of: windowRef as! AXUIElement)
+    }
+
     private static func regionOfInterest(
-        scope: ScreenContextSnapshot.Scope, pointer: CGPoint
+        scope: ScreenContextSnapshot.Scope, pointer: CGPoint, windowFrame: CGRect?
     ) -> CGRect {
         let screens = NSScreen.screens
         // Screen bounds in top-left-origin global space (same as CGEvent).
@@ -158,13 +196,22 @@ final class ScreenContextProvider {
                    width: screen.frame.width,
                    height: screen.frame.height)
         }
-        let containing = screenFrames.first { $0.contains(pointer) }
-            ?? screenFrames.first ?? .zero
 
         switch scope {
         case .fullScreen:
-            return containing
+            // The screen holding the frontmost window, falling back to the
+            // pointer's.
+            if let windowFrame, !windowFrame.isEmpty {
+                let mid = CGPoint(x: windowFrame.midX, y: windowFrame.midY)
+                if let containing = screenFrames.first(where: { $0.contains(mid) }) {
+                    return containing
+                }
+            }
+            return screenFrames.first { $0.contains(pointer) }
+                ?? screenFrames.first ?? .zero
         case .regionAroundPointer:
+            let containing = screenFrames.first { $0.contains(pointer) }
+                ?? screenFrames.first ?? .zero
             var rect = CGRect(
                 x: pointer.x - regionSize.width / 2,
                 y: pointer.y - regionSize.height / 2,
@@ -260,6 +307,71 @@ final class ScreenContextProvider {
             }
             return result
         }.value
+    }
+
+    // MARK: - Menu leg
+
+    /// The frontmost app's menu bar items — and, when one is open, the
+    /// menu's items. Menus hang off the application AX element, never any
+    /// window's subtree, which is why the window-rooted traversal above can
+    /// never see them at any node budget. OCR remains the fallback: an open
+    /// menu is plain pixels on screen.
+    private static func menuTargets(frontmostPID: pid_t?) async -> [ScreenTarget] {
+        guard let pid = frontmostPID else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            var targets: [ScreenTarget] = []
+            let appElement = AXUIElementCreateApplication(pid)
+            if let menuBarRef = copyAttribute(appElement, kAXMenuBarAttribute) {
+                for item in children(of: menuBarRef as! AXUIElement) {
+                    guard role(of: item) == "AXMenuBarItem",
+                          isEnabled(item),
+                          let f = frame(of: item), !f.isEmpty,
+                          let text = label(of: item), !text.isEmpty else { continue }
+                    targets.append(ScreenTarget(
+                        label: String(text.prefix(120)),
+                        role: "AXMenuBarItem",
+                        frame: f,
+                        source: .accessibility))
+                    // An open menu is an AXMenu child of its bar item.
+                    for menu in children(of: item) where role(of: menu) == "AXMenu" {
+                        collectMenuItems(of: menu, into: &targets)
+                    }
+                }
+            }
+            // Context/popup menus surface as AXMenu children of the app
+            // element itself in some apps — cheap to check, easy to miss.
+            for child in children(of: appElement) where role(of: child) == "AXMenu" {
+                collectMenuItems(of: child, into: &targets)
+            }
+            return targets
+        }.value
+    }
+
+    /// Visible, enabled menu items of one open menu (submenus included while
+    /// open — their items are AXMenuItem descendants with real frames).
+    private static func collectMenuItems(
+        of menu: AXUIElement, into targets: inout [ScreenTarget]
+    ) {
+        var queue = children(of: menu)
+        var visited = 0
+        while !queue.isEmpty, visited < 300 {
+            let element = queue.removeFirst()
+            visited += 1
+            queue.append(contentsOf: children(of: element))
+            guard role(of: element) == "AXMenuItem",
+                  isEnabled(element),
+                  let f = frame(of: element), !f.isEmpty,
+                  let text = label(of: element), !text.isEmpty else { continue }
+            targets.append(ScreenTarget(
+                label: String(text.prefix(120)),
+                role: "AXMenuItem",
+                frame: f,
+                source: .accessibility))
+        }
+    }
+
+    private static func isEnabled(_ element: AXUIElement) -> Bool {
+        (copyAttribute(element, kAXEnabledAttribute) as? Bool) ?? true
     }
 
     private static func windowContaining(_ element: AXUIElement) -> AXUIElement? {

@@ -238,8 +238,10 @@
         <li class="chip"><span class="wake">Pawvis,</span> press command shift T</li>
         <li class="chip"><span class="wake">Pawvis,</span> open Notes</li>
         <li class="chip"><span class="wake">Pawvis,</span> switch to Chrome</li>
+        <li class="chip"><span class="wake">Pawvis,</span> close the window</li>
         <li class="chip"><span class="wake">Pawvis,</span> scroll down a page</li>
         <li class="chip chip-accent"><span class="wake">Pawvis,</span> click sign in</li>
+        <li class="chip chip-accent"><span class="wake">Pawvis,</span> open Notes and start a new note</li>
         <li class="chip"><span class="wake">Pawvis,</span> stop listening</li>
       </ul>
     </div>
@@ -248,10 +250,10 @@
       The wake word is configurable, and mishearings are tolerated. Speech
       recognition is Apple's on-device engine: private, free, no API key, no
       cloud. Anything that isn't a set phrase goes to on-device
-      Apple&nbsp;Intelligence, which maps your words to an intent and grounds
-      screen commands like &ldquo;click sign in&rdquo; against the area around
-      your pointer, widening to the whole screen only if the target isn't
-      nearby. That part needs macOS&nbsp;26; everything else works without it.
+      Apple&nbsp;Intelligence, which carries it out step by step: it reads the
+      screen, acts, looks again, and repeats until the request is done, up to
+      eight steps. Say the wake word and &ldquo;stop&rdquo; to cancel. That
+      part needs macOS&nbsp;26; everything else works without it.
     </p>
 
     <article class="agent-card" data-reveal>

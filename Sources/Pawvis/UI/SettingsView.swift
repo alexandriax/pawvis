@@ -469,7 +469,7 @@ private struct VoiceControlSettingsTab: View {
                         }
                     }))
 
-            RiskNote(text: "Voice control acts on what it hears. It clicks, types, presses keys and opens apps for real, wherever the pointer and focus happen to be, and a misheard command is still a command.")
+            RiskNote(text: "Voice control acts on what it hears. It clicks, types, presses keys and opens apps for real, wherever the pointer and focus happen to be, and a misheard command is still a command. A multi-step command keeps acting until it finishes, hits its limits, or you say “\(wake) stop”.")
 
             Divider()
 
@@ -563,8 +563,8 @@ private struct VoiceControlSettingsTab: View {
             }
 
             SettingToggle(
-                title: "Apple Intelligence understanding",
-                caption: "Maps commands the grammar doesn't recognize to intents, and resolves screen commands (“\(wake) click sign in”) against the area near your pointer — widening to the whole screen only when needed. Nothing leaves your Mac.",
+                title: "Apple Intelligence autopilot",
+                caption: "Commands the grammar doesn't match are carried out step by step: Pawvis looks at the screen, acts, then looks again until the request is done (“\(wake) open Notes and start a new note”). Up to 8 steps per command, entirely on this Mac. Say “\(wake) stop” to cancel a run.",
                 isOn: $store.settings.voiceControl.visualContextEnabled)
                 .disabled(!store.settings.voiceControl.agentExecutor.isEmpty)
 
@@ -609,7 +609,7 @@ private struct VoiceControlSettingsTab: View {
 
     private var agentPickerCaption: String {
         if store.settings.voiceControl.agentExecutor.isEmpty {
-            return "On-device: the instant grammar runs first, then Apple Intelligence maps what it missed to an intent (open app, type text, press keys…) and grounds screen commands against what's near your pointer. Private and fast."
+            return "On-device: the instant grammar runs first, then Apple Intelligence carries out the rest step by step, grounded in what is on screen. Private and fast."
         }
         return "EVERYTHING after the wake word goes to the agent, asked to perform it via computer use. Slower than on-device and far more capable; the run streams in the corner panel and the outcome flashes in the top-of-screen capsule."
     }

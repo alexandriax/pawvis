@@ -95,14 +95,43 @@ public final class VoiceControlParser {
         guard let first = tokens.first else { return nil }
         let normalizedJoined = tokens.joined(separator: " ")
 
-        // Whole-utterance phrases first.
-        switch normalizedJoined {
-        case "stop", "stop listening", "go to sleep", "sleep", "turn off", "goodbye":
+        // Stop and cancel first, and tolerant of politeness padding
+        // ("please stop listening", "ok stop now"): these are the safety
+        // phrases, and padding must never turn a brake into an autopilot
+        // goal that starts acting on the screen.
+        let depoliteJoined = tokens
+            .filter { !Self.politenessTokens.contains($0) }
+            .joined(separator: " ")
+        switch depoliteJoined {
+        case "stop listening", "go to sleep", "sleep", "turn off", "goodbye":
             return .stopVoiceControl
+        // Bare "stop" cancels what's running (and only stops listening when
+        // nothing is) — the instant brake for a runaway autopilot or agent.
+        case "stop", "stop it", "cancel", "cancel that", "never mind", "nevermind":
+            return .cancelActivity
+        default: break
+        }
+
+        // Whole-utterance phrases, exact matches only: any trailing words
+        // ("copy that file over there") fall through to the autopilot, so
+        // multi-clause requests are never half-eaten by a chord.
+        switch normalizedJoined {
         case "click", "tap": return .click(.left)
         case "right click": return .click(.right)
         case "double click", "double tap": return .click(.double)
+        // "quit it/this/that" pin to the frontmost app: two-letter payloads
+        // would otherwise fuzzy-match real apps ("it" → iTerm), and quit is
+        // no verb to guess on.
+        case "quit", "quit this app", "quit it", "quit this", "quit that",
+             "quit the app":
+            return .quit(app: nil)
         default: break
+        }
+
+        // Window and edit chords — the shortcuts everyone means by the bare
+        // phrase. Whole-utterance only, same rule as above.
+        if let chord = Self.phraseChords[normalizedJoined] {
+            return .press(chord)
         }
 
         // "go to X" / "navigate to X" / "visit X" — a URL or a web search.
@@ -124,6 +153,11 @@ public final class VoiceControlParser {
         if let app = payload(after: ["switch to", "switch back to", "go back to"],
                              cleaned: cleaned, tokens: tokens), !app.isEmpty {
             return .switchTo(app: app)
+        }
+
+        if let app = payload(after: ["quit"], cleaned: cleaned, tokens: tokens),
+           !app.isEmpty {
+            return .quit(app: app)
         }
 
         if let app = payload(after: ["open", "launch"], cleaned: cleaned, tokens: tokens),
@@ -150,6 +184,43 @@ public final class VoiceControlParser {
 
         return nil
     }
+
+    /// Filler that pads spoken stop phrases without changing their meaning.
+    /// Only the stop/cancel matching strips these — a chord or app name is
+    /// never rewritten.
+    private static let politenessTokens: Set<String> = [
+        "please", "ok", "okay", "hey", "now",
+    ]
+
+    /// Spoken window/edit phrases and the chord each one means. All keys
+    /// exist in TextTyper's code table.
+    private static let phraseChords: [String: KeyChord] = [
+        "close window": KeyChord(key: "w", modifiers: [.command]),
+        "close the window": KeyChord(key: "w", modifiers: [.command]),
+        "close this window": KeyChord(key: "w", modifiers: [.command]),
+        "close tab": KeyChord(key: "w", modifiers: [.command]),
+        "close the tab": KeyChord(key: "w", modifiers: [.command]),
+        "close this tab": KeyChord(key: "w", modifiers: [.command]),
+        "minimize": KeyChord(key: "m", modifiers: [.command]),
+        "minimize window": KeyChord(key: "m", modifiers: [.command]),
+        "minimize the window": KeyChord(key: "m", modifiers: [.command]),
+        "hide": KeyChord(key: "h", modifiers: [.command]),
+        "hide this": KeyChord(key: "h", modifiers: [.command]),
+        "hide this app": KeyChord(key: "h", modifiers: [.command]),
+        "new tab": KeyChord(key: "t", modifiers: [.command]),
+        "new window": KeyChord(key: "n", modifiers: [.command]),
+        "copy": KeyChord(key: "c", modifiers: [.command]),
+        "paste": KeyChord(key: "v", modifiers: [.command]),
+        "cut": KeyChord(key: "x", modifiers: [.command]),
+        "undo": KeyChord(key: "z", modifiers: [.command]),
+        "redo": KeyChord(key: "z", modifiers: [.command, .shift]),
+        "save": KeyChord(key: "s", modifiers: [.command]),
+        "select all": KeyChord(key: "a", modifiers: [.command]),
+        "full screen": KeyChord(key: "f", modifiers: [.control, .command]),
+        "fullscreen": KeyChord(key: "f", modifiers: [.control, .command]),
+        "enter full screen": KeyChord(key: "f", modifiers: [.control, .command]),
+        "exit full screen": KeyChord(key: "f", modifiers: [.control, .command]),
+    ]
 
     private func scrollCommand(from tokens: [String]) -> VoiceCommand {
         var direction = ScrollDirection.down

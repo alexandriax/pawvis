@@ -14,7 +14,7 @@ import FoundationModels
 /// that showed the model the garbled wake word, or asked it to extract
 /// the command, flip-flopped between prompts — the 3B model is only
 /// reliable on the enum-typed classification, so the code keeps every
-/// other job (matches the code-guard pattern in IntentMapper).
+/// other job (matches the code-guard pattern in AutopilotEngine).
 @available(macOS 26.0, *)
 @MainActor
 enum WakeRescuer {
@@ -52,7 +52,7 @@ enum WakeRescuer {
         favorite shoes", "was late again yesterday".
         """
 
-    // MARK: - Session lifecycle (same pattern as IntentMapper)
+    // MARK: - Session lifecycle (same pattern as AutopilotEngine)
 
     private static var session: LanguageModelSession?
     private static var sessionUses = 0

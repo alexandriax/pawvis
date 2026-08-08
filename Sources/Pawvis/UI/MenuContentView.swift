@@ -226,13 +226,14 @@ struct MenuContentView: View {
         case .connecting: return "Voice control starting…"
         case .listening: return "Listening for “\(wakeWord) …”"
         case .resolving: return "Working on your command…"
+        case .working(let line): return line
         case .error(let message): return message
         }
     }
 
     private var voiceIcon: String {
         switch voice.state {
-        case .resolving: return "sparkles"
+        case .resolving, .working: return "sparkles"
         case .error: return "mic.slash.fill"
         default: return "mic.fill"
         }
@@ -243,7 +244,7 @@ struct MenuContentView: View {
         case .off: return .secondary
         case .connecting: return .orange
         case .listening: return .orange
-        case .resolving: return .purple
+        case .resolving, .working: return .purple
         case .error: return .red
         }
     }

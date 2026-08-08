@@ -60,7 +60,9 @@ final class CommandExecutor {
         case .scroll(let direction, let amount):
             scroll(direction: direction, amount: amount)
             return .done(notice: nil)
-        case .stopVoiceControl, .resolve:
+        case .quit(let app):
+            return quitApp(named: app)
+        case .stopVoiceControl, .cancelActivity, .resolve:
             // Handled by the controller, not the executor.
             return .done(notice: nil)
         }
@@ -141,6 +143,38 @@ final class CommandExecutor {
         return .done(notice: "Switched to \(app.localizedName ?? spoken)")
     }
 
+    /// Graceful termination (the app may put up its own save dialogs) — the
+    /// same request Quit in its menu sends, no fronting or ⌘Q required.
+    private func quitApp(named spoken: String?) -> ExecutionOutcome {
+        let app: NSRunningApplication?
+        if let spoken {
+            app = matchRunningApp(named: spoken)
+        } else {
+            app = NSWorkspace.shared.frontmostApplication
+        }
+        guard let app, app.activationPolicy == .regular,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return .failed(spoken.map { "“\($0)” isn't running" } ?? "Nothing to quit")
+        }
+        let name = app.localizedName ?? spoken ?? "app"
+        app.terminate()
+        return .done(notice: "Quitting \(name)")
+    }
+
+    /// Waits for the frontmost app to change (an open/switch settling in)
+    /// before the autopilot takes its next snapshot. Returns early on
+    /// cancellation; the fixed settle tail still applies either way.
+    func waitForFrontmostChange(from pid: pid_t?, timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, !Task.isCancelled {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier != pid
+    }
+
     private func matchRunningApp(named spoken: String) -> NSRunningApplication? {
         let query = AppCatalog.fold(Self.appAliases[AppCatalog.fold(spoken)] ?? spoken)
         guard !query.isEmpty else { return nil }
@@ -157,8 +191,17 @@ final class CommandExecutor {
         return best?.app
     }
 
-    /// Type literal text into the focused element (used by the resolver).
+    /// Type literal text into the focused element (used by the autopilot).
     func type(_ text: String) {
+        typer.type(text)
+    }
+
+    /// Click a field to focus it, then type into it. The pause matches the
+    /// address-bar timing above: typing immediately after a focusing click
+    /// intermittently drops the first keys.
+    func type(_ text: String, into target: CGPoint) async {
+        click(.left, at: target)
+        try? await Task.sleep(for: .milliseconds(150))
         typer.type(text)
     }
 
