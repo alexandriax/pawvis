@@ -185,7 +185,7 @@ struct MenuContentView: View {
                 .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
             Button("Gesture Guide") {
                 dismiss() // close the menu bar popover — it floats above windows
-                openWindow(id: "gesture-guide")
+                openWindow(id: GuideWindow.id)
                 NSApp.activate(ignoringOtherApps: true)
             }
             Spacer()

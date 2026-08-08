@@ -108,6 +108,21 @@ func runSelfTest() -> Int32 {
         check("chips.\(name).fillIsDynamic", light != dark)
     }
 
+    // The Gesture Guide's posed hands have to be *in* the bundle. Missing art
+    // doesn't crash and doesn't look broken: every row quietly falls back to
+    // an SF Symbol, which is exactly the wrong-gesture picture the drawings
+    // replaced. Only worth asserting from a real bundle — a bare binary has
+    // no Resources to look in, and CI runs this against `build/Pawvis.app`.
+    if Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" {
+        // Every finger the right-click picker offers needs its own pose; the
+        // index is not one of them (it already drives the left button).
+        let poses = ["take-control", "move", "click", "drag", "scroll", "stop-tracking"]
+            + Finger.allCases.filter { $0 != .index }.map { "right-click-\($0.rawValue)" }
+        for name in poses {
+            check("guide.glyph.\(name)", PawvisGlyph.gesture(name, size: 40) != nil)
+        }
+    }
+
     print(failures == 0 ? "SELFTEST OK (\(checks) checks)" : "SELFTEST FAILED (\(failures) failures)")
     return failures == 0 ? 0 : 1
 }
