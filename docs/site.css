@@ -388,14 +388,6 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
 .media-placeholder img { width: clamp(84px, 14vw, 140px); height: auto; border-radius: 20%; }
 .media-placeholder p { color: var(--ink-dim); font-size: 0.85rem; margin: 14px 0 0; }
 
-/* ----------------------------------------------------------- 8. Demo film */
-.demo {
-  padding: clamp(72px, 10vw, 130px) 0 0;
-  text-align: center;
-}
-.demo .lede { margin-inline: auto; }
-.demo-media { margin: clamp(34px, 5vw, 60px) auto 0; }
-
 /* ----------------------------------------------------------- 9. Sections */
 .gestures, .voice, .privacy, .install {
   padding: clamp(72px, 10vw, 140px) 0 0;
@@ -452,56 +444,42 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   .card-wide { grid-column: auto; }
 }
 
-/* ----------------------------------------------------------- 11. Interludes */
-.interlude {
-  position: relative;
-  margin: clamp(56px, 8vw, 100px) 0 0;
-  overflow: hidden;
-}
-.interlude img {
-  width: 100%;
-  max-height: 72vh;
-  object-fit: cover;
-  filter: saturate(1.05);
-}
-.interlude::before { /* top + bottom fades into the page */
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: linear-gradient(to bottom, var(--bg), transparent 22%, transparent 72%, var(--bg));
-}
-.interlude figcaption {
-  position: absolute;
-  inset: auto 0 clamp(28px, 6vw, 64px);
-  z-index: 2;
-  text-align: center;
-  padding-inline: 20px;
-}
-.interlude blockquote {
-  margin: 0 auto;
-  max-width: 22em;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: clamp(1.5rem, 3.6vw, 2.6rem);
-  line-height: 1.2;
-  color: var(--ink);
-  text-shadow: 0 2px 24px rgba(11, 9, 18, 0.85);
-}
-
-/* if the photo never arrives, keep the quote on a gradient field */
-.interlude.media-missing img { display: none; }
-.interlude.media-missing {
-  min-height: 300px;
+/* ----------------------------------------------------------- 11. App shots
+   Real window captures, alpha and all. No frame or plate: the shadow is a
+   drop-shadow so it follows the window's own rounded corners instead of
+   boxing them in. */
+.shots {
   display: grid;
-  align-items: center;
-  background:
-    radial-gradient(50rem 22rem at 25% 100%, rgba(139, 92, 246, 0.22), transparent 70%),
-    radial-gradient(44rem 20rem at 80% 0%, rgba(14, 165, 233, 0.16), transparent 70%);
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(22px, 3.4vw, 44px);
+  margin-top: clamp(44px, 6vw, 78px);
 }
-.interlude.media-missing figcaption { position: static; }
-.interlude.media-missing::before { display: none; }
+.shot { margin: 0; align-self: start; }
+.shot-tall { grid-row: span 2; }
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter:
+    drop-shadow(0 26px 50px rgba(6, 4, 12, 0.62))
+    drop-shadow(0 8px 26px rgba(139, 92, 246, 0.22));
+}
+.shot figcaption {
+  margin-top: 16px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+/* The menu panel is a 300pt window: past its capture width it just goes soft. */
+.shot-small img { max-width: 420px; margin-inline: auto; }
+.shot-small figcaption { max-width: 420px; margin-inline: auto; }
+
+@media (max-width: 820px) {
+  .shots { grid-template-columns: 1fr; }
+  .shot-tall { grid-row: auto; }
+  /* the menu panel is a small window: don't blow it up on a phone */
+  .shot img { margin-inline: auto; max-width: 560px; }
+}
 
 /* ----------------------------------------------------------- 12. Voice */
 .beta-tag {
@@ -618,7 +596,6 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   font-size: 0.88rem;
 }
 
-.interlude-voice { margin-top: clamp(56px, 8vw, 90px); }
 
 /* ----------------------------------------------------------- 13. Privacy */
 .privacy { text-align: center; }
