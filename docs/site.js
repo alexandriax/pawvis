@@ -68,16 +68,4 @@
     }
   }
 
-  /* ------------------------------------------------ photos
-     If a photo hasn't landed, keep the pull-quote on a gradient field
-     instead of a broken image. */
-  ["gestureInterlude", "voiceInterlude"].forEach(function (id) {
-    var fig = document.getElementById(id);
-    if (!fig) return;
-    var img = fig.querySelector("img");
-    if (!img) return;
-    function missing() { fig.classList.add("media-missing"); }
-    if (img.complete && img.naturalWidth === 0) missing();
-    else img.addEventListener("error", missing);
-  });
 })();
