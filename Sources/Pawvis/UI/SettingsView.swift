@@ -128,7 +128,7 @@ struct SettingsView: View {
                 .tag(SettingsTab.about)
         }
         .frame(width: 620, height: 580)
-        .tint(PawvisTheme.purpleUI)
+        .tint(PawvisTheme.accentUI)
     }
 }
 

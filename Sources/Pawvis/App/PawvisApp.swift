@@ -55,7 +55,7 @@ private struct MenuBarIcon: View {
                     Image(nsImage: claw)
                     if voiceActive {
                         Circle()
-                            .fill(PawvisTheme.purpleUI)
+                            .fill(PawvisTheme.accentUI)
                             .frame(width: 5, height: 5)
                             .offset(x: 2, y: -1)
                     }

@@ -73,6 +73,42 @@ the right — both invisible in code review and obvious to the user.
    hand-clicking. Pay attention to the longest strings (the Voice control and
    Tracking tabs have them).
 
+## Menu bar chips: hue means something
+
+The `MenuBarExtra` dropdown sits on translucent menu material, which is the
+constraint behind every rule here. `PawvisTheme.Chip` owns the colors and
+`PawvisButtonStyle` draws them; the palette is save.page's (Tailwind violet /
+sky / fuchsia).
+
+1. **Chips are appearance-dynamic, not fixed.** Each one resolves a light and
+   a dark value (`PawvisTheme.dynamic`). One fixed fill cannot clear contrast
+   on both materials, which is what a fixed violet-500 and a fixed sky-300
+   were doing badly at. `--selftest` fails the build if a chip's fill stops
+   varying by appearance, or if its type drops under WCAG AA (4.5:1) against
+   its own fill in either mode. Retune freely; keep the check green.
+2. **One visual language per appearance.** Light mode: saturated fill, white
+   type. Dark mode: the pale 300-shade, ink type. Mixing the two in one row
+   (a pale chip with black type next to a saturated chip with white type) is
+   what made the old footer look broken, more than any individual color did.
+3. **Hue is meaning, not decoration.** Violet is the primary action, sky is
+   navigation, fuchsia is attention (mic live, warnings needing a decision),
+   and `chipQuiet` recedes. Quit wears the quiet chip on purpose: quitting is
+   mundane, so it takes the least ink in the row. It was red-800 once and read
+   as a hazard; it was near-white once and became the loudest thing on screen.
+   Red is left for genuine errors, where it means what it says.
+4. **Light fills sit a stop darker than save.page's 500s** (violet-600,
+   sky-700, fuchsia-600). White on violet-500 is 4.2:1, just under AA at chip
+   text size. The web can use the 500s because its buttons are larger.
+5. **Nothing tinted-and-translucent.** A low-alpha wash over vibrancy washes
+   out on a light desktop. Chips are opaque; the quiet chip earns its edge
+   from a hairline border, not from transparency.
+
+The claw in the header and the toggle both take `PawvisTheme.accent`, the same
+violet-500/violet-300 pair, because violet-500 on the dark menu material is
+~3.4:1 and effectively invisible. If you tint anything else in this menu, use
+`accent` rather than `purpleUI` — `purpleUI` is the fixed overlay color, which
+paints over arbitrary screen content and must not flip with the appearance.
+
 ## Launch at login
 
 On by default (`general.launchAtLogin`), registered through
