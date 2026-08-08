@@ -4,16 +4,17 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free gesture &amp; voice control</em></p>
+<p align="center"><em>macOS touch-free hand control</em></p>
 
 ---
 
 Pawvis turns your webcam into a pointing device that works from thin air.
 Raise your open hand anywhere the camera can see it and the cursor follows;
-dip a finger to click. Nothing under your palm, nothing to touch. Talk to
-your Mac by name, without a keyboard in reach: *"Pawvis, go to github.com"*,
-*"Pawvis, type hello"*, *"Pawvis, open Safari"*. The aim is an
-accessibility-grade voice control that's more intuitive and capable than the
+dip a finger to click, hold it down to drag, fold two fingers to scroll.
+Nothing under your palm, nothing to touch: your hand is the mouse. There's
+also a [voice mode, in beta](#voice-control-beta) — talk to your Mac by name
+(*"Pawvis, open Safari"*), with the aim of growing into an
+accessibility-grade voice control more intuitive and capable than the
 built-in one.
 
 Hand tracking runs entirely on-device with Apple's Vision framework; speech
