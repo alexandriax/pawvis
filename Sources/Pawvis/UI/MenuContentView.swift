@@ -1,12 +1,14 @@
 import PawvisCore
 import SwiftUI
 
-/// Readable buttons on the translucent menu material: always reverse type —
-/// white text on a solid tinted chip — in both color schemes. (Plain purple
-/// text was illegible on the dark vibrancy background, and the faint
-/// light-mode chip washed out against the light one.)
+/// Readable buttons on the translucent menu material: always reverse type on a
+/// solid chip, with both colors fixed rather than semantic, so a chip reads the
+/// same in either color scheme. (Plain purple text was illegible on the dark
+/// vibrancy background, and the faint light-mode chip washed out against the
+/// light one.)
 struct PawvisButtonStyle: ButtonStyle {
     var color: Color = PawvisTheme.purpleUI
+    var textColor: Color = .white
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -16,7 +18,7 @@ struct PawvisButtonStyle: ButtonStyle {
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(color))
-            .foregroundStyle(Color.white)
+            .foregroundStyle(textColor)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
@@ -51,11 +53,20 @@ struct MenuContentView: View {
         .onAppear { controller.refreshPermissions() }
     }
 
+    /// The same claw the status item shows, so the dropdown reads as an
+    /// extension of the menu bar icon rather than a different animal.
+    private static let clawGlyph = PawvisGlyph.claw(size: 17)
+
     private var header: some View {
         HStack {
-            Image(systemName: "pawprint.fill")
-                .font(.title3)
-                .foregroundStyle(.tint)
+            Group {
+                if let claw = Self.clawGlyph {
+                    Image(nsImage: claw).renderingMode(.template)
+                } else {
+                    Image(systemName: "pawprint.fill").font(.title3)
+                }
+            }
+            .foregroundStyle(.tint)
             Text("Pawvis").font(.headline)
             Spacer()
             Toggle("", isOn: Binding(
@@ -160,7 +171,9 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack {
             Button("Settings…") { openSettingsInFront() }
-                .buttonStyle(PawvisButtonStyle(color: PawvisTheme.blueUI))
+                .buttonStyle(PawvisButtonStyle(
+                    color: PawvisTheme.inkUI,
+                    textColor: PawvisTheme.blueLightUI))
             Button("Gesture Guide") {
                 dismiss() // close the menu bar popover — it floats above windows
                 openWindow(id: "gesture-guide")
@@ -170,7 +183,7 @@ struct MenuContentView: View {
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(PawvisButtonStyle(color: .black))
+            .buttonStyle(PawvisButtonStyle(color: PawvisTheme.dangerUI))
         }
         .buttonStyle(PawvisButtonStyle())
     }
