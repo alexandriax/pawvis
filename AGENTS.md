@@ -210,6 +210,28 @@ migrations needed).
   so that finger's dip only engages while the pose's *other* folding finger
   is still extended. A genuine dip keeps the rest of the hand up.
 
+**The criss-cross tracking-off wave** (optional, on by default): both hands
+up, open and splayed, then traded sides `crissCrossDisableCrossings` times
+(default 2 — over and back). Its constraints, each deliberate:
+
+- **Chirality, never slot identity, orders the palms.** Greedy slot matching
+  swaps identities at exactly the moment the hands overlap — the moment this
+  gesture is about — so a crossing is the *left/right-labeled* palms trading
+  sides. Frames with unknown or duplicated chirality hold state.
+- **Crossings only count outside a separation band** (±0.10 screen-normalized
+  x) and after the shared debounce, so midline jitter and one-frame label
+  glitches never count.
+- **The cursor parks once the first crossing lands** (not on engage — two
+  static open hands must not freeze the cursor), and both buttons' engage is
+  blocked while the wave is engaged.
+- **Two escape hatches**: a partner hand Vision drops mid-crossing gets the
+  tracking-loss grace, and a wave that stalls for 2 s resets outright, so an
+  idle double high-five can never park the cursor for good. A genuinely
+  curled finger on either hand (debounced) is the deliberate exit.
+- **Completion emits `.disableTracking`**, the one non-mouse `GestureEvent`:
+  `PawvisController` intercepts it before `mouse.apply` and calls
+  `stopTracking()` — the same full stop as the menu bar switch.
+
 A new pose-triggered mode wants the same shape: a pose (or ratio) in
 `HandFeatures`, strict-engage/loose-hold hysteresis, debounce both ways, an
 explicit story for how it interacts with presses and the trigger, synthetic

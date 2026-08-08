@@ -20,6 +20,11 @@ public enum GestureEvent: Equatable, Sendable {
     /// (toward the top of the document), matching Quartz's positive axis-1
     /// wheel direction. The cursor does not move.
     case scroll(deltaY: Double)
+    /// The criss-cross tracking-off wave completed: the app should switch
+    /// hand tracking off entirely (camera and all), exactly as the menu bar
+    /// toggle does. The one non-mouse event — `PawvisController` intercepts
+    /// it before the rest of the frame's events reach the mouse controller.
+    case disableTracking
 }
 
 /// Per-hand overlay data: small dots for every detected fingertip.

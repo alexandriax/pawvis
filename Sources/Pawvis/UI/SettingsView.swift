@@ -276,6 +276,27 @@ private struct TrackingSettingsTab: View {
             Divider()
 
             SettingToggle(
+                title: "Wave both hands to stop tracking",
+                caption: "Hold up both hands open with fingers spread wide, like a double high-five, then cross them over each other and back. Once they've traded sides enough times, hand tracking switches off entirely — the same as the menu bar switch.",
+                isOn: $store.settings.gestures.crissCrossDisableEnabled)
+
+            SettingRow(
+                title: "Crossings required",
+                caption: "How many times your hands must trade sides. Two is one full wave: cross over, then back."
+            ) {
+                HStack(spacing: 10) {
+                    Text("\(store.settings.gestures.crissCrossDisableCrossings)×")
+                        .font(.callout)
+                        .monospacedDigit()
+                    Stepper("", value: $store.settings.gestures.crissCrossDisableCrossings,
+                            in: 1...6)
+                }
+            }
+            .disabled(!store.settings.gestures.crissCrossDisableEnabled)
+
+            Divider()
+
+            SettingToggle(
                 title: "Start tracking when Pawvis launches",
                 caption: "Off: hand tracking waits until you flip the switch in the menu bar.",
                 isOn: $store.settings.general.startTrackingOnLaunch)
@@ -370,7 +391,7 @@ private struct GestureSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
             }
         }
     }

@@ -118,24 +118,28 @@ enum SyntheticHand {
 
     /// Open hand, fingers together — the neutral pointing pose.
     static func openRelaxed(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15,
+                            chirality: Hand.Chirality = .right,
                             confidence: Double = 1.0) -> Hand {
         build(pose: Pose(fingerDirs: relaxedDirs, thumbTipOffset: thumbExtendedOffset),
-              wrist: wrist, scale: scale, confidence: confidence)
+              wrist: wrist, scale: scale, chirality: chirality, confidence: confidence)
     }
 
-    /// Open hand, fingers spread wide — the dictation-toggle splay.
+    /// Open hand, fingers spread wide — the criss-cross wave's pose (and,
+    /// once, the dictation-toggle splay).
     static func openSplayed(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15,
+                            chirality: Hand.Chirality = .right,
                             confidence: Double = 1.0) -> Hand {
         build(pose: Pose(fingerDirs: splayedDirs, thumbTipOffset: thumbExtendedOffset),
-              wrist: wrist, scale: scale, confidence: confidence)
+              wrist: wrist, scale: scale, chirality: chirality, confidence: confidence)
     }
 
     /// Closed fist — the clutch pose.
-    static func fist(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
+    static func fist(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15,
+                     chirality: Hand.Chirality = .right) -> Hand {
         build(pose: Pose(fingerDirs: relaxedDirs,
                          curled: [.index, .middle, .ring, .little],
                          thumbTipOffset: thumbTuckedOffset),
-              wrist: wrist, scale: scale)
+              wrist: wrist, scale: scale, chirality: chirality)
     }
 
     /// Thumb–index pinch with the given tip gap (in scale units).

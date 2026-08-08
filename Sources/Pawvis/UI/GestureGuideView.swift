@@ -67,6 +67,14 @@ struct GestureGuideView: View {
                 title: "Scroll",
                 detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
         }
+
+        if store.settings.gestures.crissCrossDisableEnabled {
+            let crossings = store.settings.gestures.crissCrossDisableCrossings
+            rows.append(Row(
+                symbol: "hand.raised.fingers.spread.fill",
+                title: "Stop tracking",
+                detail: "Hold up both hands open with fingers spread wide — a double high-five — and wave them across each other. Once they've traded sides \(crossings == 2 ? "twice (over and back)" : "\(crossings) times"), tracking switches off entirely. Turn it back on from the menu bar."))
+        }
         return rows
     }
 

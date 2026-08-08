@@ -154,6 +154,16 @@ final class PawvisController: ObservableObject {
         guard trackingActive else { return }
         let (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
 
+        // The criss-cross wave completed: deliver everything else this frame
+        // produced (a queued release must still land), then stop tracking
+        // outright — the same full stop as the menu bar switch.
+        if events.contains(.disableTracking) {
+            mouse.apply(events.filter { $0 != .disableTracking })
+            Log.app.info("Tracking stopped by the criss-cross wave")
+            stopTracking()
+            return
+        }
+
         mouse.apply(events)
         overlay.render(
             overlay: overlayState,
