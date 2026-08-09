@@ -36,6 +36,64 @@ final class AppNameMatchTests: XCTestCase {
         XCTAssertEqual(AppNameMatch.matchScore(query: "", name: "Google Chrome"), 0)
     }
 
+    // MARK: - Phonetic tier
+
+    func testPhoneticMishearingsResolveClaude() {
+        // The recognizer garbles names it doesn't know; the consonant
+        // skeleton catches the common ones with no model round.
+        for heard in ["clod", "clawed", "cloud", "clawd"] {
+            XCTAssertGreaterThan(
+                AppNameMatch.bestScore(spoken: heard, name: "Claude"), 0,
+                "'\(heard)' should phonetically match Claude")
+        }
+    }
+
+    func testPhoneticTierScoresBelowRealMatches() {
+        XCTAssertLessThan(
+            AppNameMatch.bestScore(spoken: "clod", name: "Claude"),
+            AppNameMatch.matchScore(query: "claude", name: "Claude"))
+    }
+
+    func testPhoneticTierRejectsUnrelatedNames() {
+        XCTAssertEqual(AppNameMatch.bestScore(spoken: "slack", name: "Claude"), 0)
+        XCTAssertEqual(AppNameMatch.bestScore(spoken: "notion", name: "Claude"), 0)
+    }
+
+    func testShortTokensDoNotPhoneticallyMatch() {
+        // One-consonant skeletons ("up" → "p") would collide with half the
+        // catalog; they must stay out of the phonetic tier.
+        XCTAssertEqual(AppNameMatch.bestScore(spoken: "up", name: "App Store"), 0)
+    }
+
+    // MARK: - Spoken-padding variants
+
+    func testTrailingFillerWordsStripped() {
+        XCTAssertGreaterThan(
+            AppNameMatch.bestScore(spoken: "claude desktop app", name: "Claude"), 0)
+        // Garbled AND padded — the user's actual failure case.
+        XCTAssertGreaterThan(
+            AppNameMatch.bestScore(spoken: "clod desktop app", name: "Claude"), 0)
+    }
+
+    func testLeadingArticleStripped() {
+        XCTAssertGreaterThan(
+            AppNameMatch.bestScore(spoken: "the claude app", name: "Claude"), 0)
+    }
+
+    func testFullerMatchOutranksStrippedVariant() {
+        // "docker desktop app" names Docker Desktop; the variant stripped
+        // down to "docker" must not outrank it for a hypothetical "Docker".
+        XCTAssertGreaterThan(
+            AppNameMatch.bestScore(spoken: "docker desktop app", name: "Docker Desktop"),
+            AppNameMatch.bestScore(spoken: "docker desktop app", name: "Docker"))
+    }
+
+    func testDesktopOnlyStrippedAsPadding() {
+        // "github desktop" IS the app name — direct match, no stripping.
+        XCTAssertEqual(
+            AppNameMatch.bestScore(spoken: "github desktop", name: "GitHub Desktop"), 1000)
+    }
+
     // MARK: - matches
 
     func testMatchesTrueForPlausibleSpokenName() {

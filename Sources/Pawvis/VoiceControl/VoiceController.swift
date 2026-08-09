@@ -94,6 +94,7 @@ final class VoiceController: ObservableObject {
     func setConfig(_ config: VoiceControlConfig) {
         self.config = config
         parser.config = config
+        executor.aiAppNameRescueEnabled = config.visualContextEnabled
         transcriptOverlay.enabled = config.transcriptOverlayEnabled
         transcriptOverlay.timeout = config.transcriptOverlaySeconds
         transcriptOverlay.manualDismiss = config.transcriptOverlayManualDismiss
@@ -193,21 +194,28 @@ final class VoiceController: ObservableObject {
         case .ready:
             if state.isActive { state = .listening }
 
-        case .delta(let itemId, let text):
+        case .hypothesis(let itemId, let text):
             if itemId != liveItemId {
                 liveItemId = itemId
-                liveText = ""
                 liveShown = false
                 liveWakeMatched = false
             }
-            liveText += text
-            // The capsule shows only speech addressed to Pawvis — ambient
-            // conversation is never displayed. While the capture window is
-            // open the speech *is* addressed to Pawvis (the wake word was the
-            // previous final), so it shows too.
+            // Full hypothesis, not a delta: recognizers revise earlier words
+            // mid-utterance, and the capsule repaints with each correction.
+            liveText = text
             let live = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if parser.hasWakePrefix(live) || gate.isArmed(now: now) {
-                if parser.hasWakePrefix(live) { liveWakeMatched = true }
+            guard !live.isEmpty else { break }
+            if parser.hasWakePrefix(live) { liveWakeMatched = true }
+            // The capsule shows only speech addressed to Pawvis — ambient
+            // conversation is never displayed. Addressed means: the wake
+            // word matched some hypothesis (sticky, so a revision that
+            // garbles it away doesn't blank the capsule mid-utterance), the
+            // near tier thinks the opening is a mishearing of it ("Paw
+            // this…" is usually the user — a final that then drops gets a
+            // visible explanation in dropFinal), or the capture window from
+            // a bare wake word is open.
+            if liveWakeMatched || parser.nearWakeRemainder(live) != nil
+                || gate.isArmed(now: now) {
                 transcriptOverlay.showLive(live)
                 liveShown = true
             }

@@ -207,10 +207,10 @@ final class OverlayController {
         case .hidden:
             return nil
         case .connecting:
-            return .init(text: "🎤 Starting voice control…", background: NSColor.systemGray.withAlphaComponent(0.85))
+            return .init(text: "🎤 Starting voice control…", background: NSColor.black.withAlphaComponent(0.92))
         case .listening(let wakeWord):
             return .init(text: "🎤 Say “\(wakeWord) …” — open · go to · type · press · click",
-                         background: PawvisTheme.blue.withAlphaComponent(0.88))
+                         background: NSColor.black.withAlphaComponent(0.92))
         case .resolving:
             return .init(text: "✨ Looking at your screen…",
                          background: PawvisTheme.purple.withAlphaComponent(0.9))

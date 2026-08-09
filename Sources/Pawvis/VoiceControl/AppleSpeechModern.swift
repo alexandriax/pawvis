@@ -67,7 +67,7 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
 
     // Segment bookkeeping (touched only from the results task + setup).
     private var segmentCounter = 0
-    private var emittedForSegment = ""
+    private var lastHypothesis = ""
 
     private let preferredLanguage: String
     /// Vocabulary to bias recognition toward (the wake word isn't a
@@ -205,27 +205,22 @@ final class ModernAppleSpeechBackend: @unchecked Sendable {
     }
 
     /// Volatile results replace the in-flight hypothesis; finalized results
-    /// close out a segment. Map onto the provider's delta/completed events:
-    /// emit grown suffixes as deltas, hold on backward revisions (the final
-    /// transcript reconciles via the parser), and bump the segment id on final.
+    /// close out a segment. Every changed hypothesis is emitted whole —
+    /// including backward revisions ("pause" → "Pawvis"), which the live
+    /// view must repaint. The earlier grown-suffix-only scheme stalled the
+    /// live transcript for the rest of a segment after one revision.
     private func handleResult(text: String, isFinal: Bool) {
         let itemId = "apple-seg-\(segmentCounter)"
         if isFinal {
             let transcript = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            emittedForSegment = ""
+            lastHypothesis = ""
             segmentCounter += 1
             if !transcript.isEmpty {
                 emit(.completed(itemId: itemId, transcript: transcript))
             }
-        } else {
-            if text.hasPrefix(emittedForSegment) {
-                let delta = String(text.dropFirst(emittedForSegment.count))
-                if !delta.isEmpty {
-                    emittedForSegment = text
-                    emit(.delta(itemId: itemId, text: delta))
-                }
-            }
-            // else: hypothesis revised backwards — wait for the final.
+        } else if !text.isEmpty, text != lastHypothesis {
+            lastHypothesis = text
+            emit(.hypothesis(itemId: itemId, text: text))
         }
     }
 
