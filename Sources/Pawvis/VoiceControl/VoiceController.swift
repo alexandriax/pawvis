@@ -332,19 +332,20 @@ final class VoiceController: ObservableObject {
         case .stopVoiceControl, .cancelActivity:
             stop()
         case .resolve(let transcript):
-            runAutopilot(transcript)
+            resolveFreeForm(transcript)
         default:
             Task { [weak self] in
                 guard let self else { return }
                 let outcome = await self.executor.execute(command)
                 // The grammar can mis-slice a garbled utterance ("open up
                 // safari please" → app "up safari please"). When an app
-                // command fails to resolve, give the autopilot the whole
-                // phrase for a second opinion instead of surfacing the error.
+                // command fails to resolve, hand the whole phrase back to
+                // the free-form ladder — which retries with the translator
+                // first, never straight into GUI flailing.
                 if case .failed = outcome,
                    let fallback = fallbackTranscript,
-                   Self.autopilotCanRescue(command) {
-                    self.runAutopilot(fallback)
+                   Self.freeFormCanRescue(command) {
+                    self.resolveFreeForm(fallback)
                 } else {
                     self.show(outcome)
                 }
@@ -354,7 +355,7 @@ final class VoiceController: ObservableObject {
 
     /// Commands whose failures are usually a mis-sliced argument (worth an
     /// AI retry) rather than a true "can't do that".
-    private static func autopilotCanRescue(_ command: VoiceCommand) -> Bool {
+    private static func freeFormCanRescue(_ command: VoiceCommand) -> Bool {
         switch command {
         case .open, .switchTo, .quit: return true
         default: return false
@@ -363,9 +364,19 @@ final class VoiceController: ObservableObject {
 
     /// A command the deterministic grammar didn't recognize, on-device mode
     /// only — agent mode never reaches the grammar (see `dispatch`). The
-    /// transcript is already wake-stripped and becomes the autopilot's goal:
-    /// look at the screen, act, look again, until done or out of budget.
-    private func runAutopilot(_ goal: String) {
+    /// ladder matches the on-device model's actual abilities:
+    ///
+    /// 1. One screen-free translation round — "what single primitive does
+    ///    this mean?" — executed deterministically when it compiles. Small
+    ///    models translate reliably; they sequence GUI actions badly.
+    /// 2. The visual autopilot loop, only for goals that are genuinely
+    ///    about the screen (click-family, multi-clause, or translations
+    ///    that came back needsScreen/unusable).
+    ///
+    /// A translated command that then fails reports its failure honestly —
+    /// it never cascades into the loop, because the loop drives the same
+    /// executor and would only add flailing to the same dead end.
+    private func resolveFreeForm(_ goal: String) {
         guard config.visualContextEnabled else {
             flashNotice("Didn't recognize a command: “\(goal)”")
             return
@@ -377,41 +388,72 @@ final class VoiceController: ObservableObject {
         autopilotTask?.cancel()
         autopilotGeneration += 1
         let generation = autopilotGeneration
+        // Superseding a run suppresses its own cleanup (the generation
+        // guard), so clear its panel here; the loop re-opens it on entry.
+        autopilotPanel.hide()
         state = .resolving
+        autopilotTask = Task { [weak self] in
+            guard let self else { return }
+            if !AutopilotPolicy.goesStraightToLoop(goal: goal) {
+                let translation = await self.autopilot.translate(goal: goal)
+                guard self.autopilotGeneration == generation else { return }
+                if Task.isCancelled {
+                    self.autopilotTask = nil
+                    self.flashNotice("Stopped")
+                    if case .resolving = self.state { self.state = .listening }
+                    return
+                }
+                if let translation,
+                   let command = TranslationPolicy.command(from: translation) {
+                    Log.voice.log("Translated free-form command: \(String(describing: command), privacy: .private)")
+                    let outcome = await self.executor.execute(command)
+                    guard self.autopilotGeneration == generation else { return }
+                    self.autopilotTask = nil
+                    self.show(outcome)
+                    if case .resolving = self.state { self.state = .listening }
+                    return
+                }
+            }
+            await self.runAutopilotLoop(goal: goal, generation: generation)
+        }
+    }
+
+    /// The visual loop: look at the screen, act, look again — with the
+    /// bottom-right progress panel and Cancel.
+    @available(macOS 26.0, *)
+    private func runAutopilotLoop(goal: String, generation: Int) async {
+        guard autopilotGeneration == generation, !Task.isCancelled else { return }
         autopilotPanel.begin(goal: goal) { [weak self] in
             self?.cancelAutopilot()
         }
-        autopilotTask = Task { [weak self] in
-            guard let self else { return }
-            let outcome = await self.autopilot.run(
-                goal: goal, executor: self.executor
-            ) { [weak self] _, line in
-                guard let self, self.autopilotGeneration == generation,
-                      self.state.isActive else { return }
-                self.state = .working(line)
-                self.autopilotPanel.append(line: line)
-            }
-            // A superseded or shut-down run must vanish silently — its
-            // successor owns the panel, the notice, and the state now.
-            guard self.autopilotGeneration == generation else { return }
-            self.autopilotTask = nil
-            switch outcome {
-            case .finished(let notice):
-                self.autopilotPanel.finish(success: true)
-                if let notice { self.flashNotice(notice) }
-            case .failed(let message):
-                self.autopilotPanel.finish(success: false)
-                self.flashNotice("⚠️ \(message)")
-            case .cancelled:
-                self.autopilotPanel.hide()
-                self.flashNotice("Stopped")
-            }
-            switch self.state {
-            case .resolving, .working:
-                self.state = .listening
-            default:
-                break
-            }
+        let outcome = await autopilot.run(
+            goal: goal, executor: executor
+        ) { [weak self] _, line in
+            guard let self, self.autopilotGeneration == generation,
+                  self.state.isActive else { return }
+            self.state = .working(line)
+            self.autopilotPanel.append(line: line)
+        }
+        // A superseded or shut-down run must vanish silently — its
+        // successor owns the panel, the notice, and the state now.
+        guard autopilotGeneration == generation else { return }
+        autopilotTask = nil
+        switch outcome {
+        case .finished(let notice):
+            autopilotPanel.finish(success: true)
+            if let notice { flashNotice(notice) }
+        case .failed(let message):
+            autopilotPanel.finish(success: false)
+            flashNotice("⚠️ \(message)")
+        case .cancelled:
+            autopilotPanel.hide()
+            flashNotice("Stopped")
+        }
+        switch state {
+        case .resolving, .working:
+            state = .listening
+        default:
+            break
         }
     }
 

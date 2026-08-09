@@ -272,6 +272,80 @@ python3 scripts/make_gesture_glyphs.py
 - **Right-click follows its setting.** There is a glyph per finger the picker
   offers, and the guide shows the configured one.
 
+## Voice control
+
+Free-form commands descend an interpretation ladder, going only as far as
+they must. The bottom rung drives the screen through on-device Apple
+Intelligence, a small (~3B-parameter, 4096-token) model that's reliable at
+translating one sentence and unreliable at sequencing a multi-step GUI task,
+so anything answerable without looking at the screen must never reach it.
+The regression that forced this: "Pawvis, open discord dot com in Chrome"
+used to mis-parse as an app launch of an app literally named "discord dot
+com in Chrome"; the failure then fell into the GUI autopilot loop, where the
+model clicked Finder, opened Chrome's File menu, hovered "New Incognito
+Window", and then claimed success. Two root causes: simple operations were
+being routed to the least reliable layer, and completion was model-asserted
+rather than verified.
+
+1. **Deterministic grammar** (`VoiceControlParser`, pure `PawvisCore`,
+   unit-tested): wake word + verb phrases. Understands URL-shaped targets
+   after open/go-to verbs ("open discord dot com" → `goTo` discord.com) and
+   a trailing app qualifier, `<target> in/with/using <app>` ("open discord
+   dot com in Chrome" → `goTo(discord.com, app: Chrome)`). A non-URL payload
+   with a known-browser qualifier becomes an address-bar search in that
+   browser ("open discord in chrome"); browser-furniture payloads (tab,
+   window, incognito) and pronouns are refused rather than turned into
+   nonsense searches.
+2. **One-shot intent translation** (new stage: `TranslationPolicy` in
+   `PawvisCore`, plus a dedicated FoundationModels session in
+   `AutopilotEngine`): one screen-free guided-generation round that
+   translates the utterance into a single primitive, openApp / switchToApp /
+   goToURL / webSearch / pressKey / quitApp, or `needsScreen`. Exists because
+   the same small model that flails at sequencing a GUI task is reliable at
+   constrained one-sentence translation. Compiled commands are validated
+   through the same parsers that execute them
+   (`TranslationPolicy.command(from:)`); anything unusable falls through to
+   the loop, and a translated command that then fails execution reports that
+   honestly rather than cascading into the loop.
+3. **Visual autopilot loop** (last resort): only for goals genuinely about
+   the screen, click-family goals, multi-clause goals ("open notes and start
+   a new note"), or `needsScreen` translations.
+   `AutopilotPolicy.goesStraightToLoop` is the routing predicate. The
+   initial snapshot is now near-pointer only for click-family goals;
+   everything else starts full-screen.
+
+**Completion is verified, not asserted.** The model's `goalComplete` flag is
+a hypothesis, checked against the world before a run is allowed to finish
+(`AutopilotPolicy.completionCheck` + `AutopilotEngine.completionShortfall`):
+`openApp`/`switchToApp` confirm the named app actually became frontmost
+(`AppNameMatch`, the same fuzzy rules as resolution); `goToURL`/`webSearch`
+confirm a browser is frontmost; click/scroll steps confirm the full-screen
+accessibility signature changed at all, against a baseline snapshot taken
+before the click. A verification failure becomes a failure-history line and
+the loop keeps going: honest failure beats a fake success. `typeText` and
+`pressKey` claims are still trusted as reported — an unverifiable false
+negative would just mean blind, destructive repetition.
+
+- **The logic is pure and lives in `PawvisCore`.** The parser and both
+  policies (`VoiceControlParser`, `TranslationPolicy`, `AutopilotPolicy`) are
+  plain Swift, model-free, and unit-tested; the app layer
+  (`Sources/Pawvis/VoiceControl`) only owns the FoundationModels sessions and
+  the side effects: opening apps, posting keys, driving the screen.
+- **The browser-word list is vocabulary, not app resolution.** The static
+  list in `VoiceControlParser` only recognizes that "Chrome" or "in Safari"
+  names a browser; resolution stays in the executor (`AppCatalog`, in
+  `CommandExecutor.swift`), which falls back to the default browser, saying
+  so in the notice, when the named app doesn't resolve.
+- **The selftest carries a voice-routing table.** `--selftest`
+  (`Sources/Pawvis/App/SelfTest.swift`) asserts that the simple-operations
+  class parses deterministically and never reaches the GUI loop. Extend that
+  table when extending the grammar.
+- **A seam for the next provider.** `PawvisCore` stays model-free, plain
+  mirrors of the `@Generable` schemas; all FoundationModels usage is
+  confined to `AutopilotEngine` behind two entry points, `translate` and
+  `run`, so a different inference provider (OpenAI, etc.) can slot in behind
+  the same seam later. Apple Intelligence is the only provider today.
+
 ## Secrets
 
 Pawvis needs no API key and talks to no network service. Speech recognition is
