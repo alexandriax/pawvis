@@ -14,5 +14,8 @@ if let evalIndex = CommandLine.arguments.firstIndex(of: "--voice-eval") {
 if let wakeIndex = CommandLine.arguments.firstIndex(of: "--wake-eval") {
     exit(runWakeEval(Array(CommandLine.arguments[(wakeIndex + 1)...])))
 }
+if let execIndex = CommandLine.arguments.firstIndex(of: "--voice-exec") {
+    exit(runVoiceExec(Array(CommandLine.arguments[(execIndex + 1)...])))
+}
 
 PawvisApp.main()

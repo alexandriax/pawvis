@@ -87,6 +87,78 @@ private func evalRows(_ corpus: [String]) async {
     }
 }
 
+/// Execution eval (`Pawvis --voice-exec "<utterance>" …`): parses each
+/// utterance and EXECUTES it for real — the same CommandExecutor the voice
+/// path uses, posting real keystrokes and activations, with each step's
+/// outcome printed. This is the layer the other evals can't reach: parsing
+/// can be right while keystroke delivery is wrong, and only a real
+/// execution shows it. Deterministic commands only (grammar output); the
+/// model paths are excluded on purpose. Requires explicit utterances —
+/// there is no default corpus for a tool that controls the machine.
+func runVoiceExec(_ utterances: [String]) -> Int32 {
+    guard !utterances.isEmpty else {
+        print("Usage: Pawvis --voice-exec \"open chrome and go to youtube dot com\" …")
+        print("Executes the parsed commands FOR REAL (keystrokes, activations).")
+        return 2
+    }
+    var finished = false
+    var failures = 0
+    Task { @MainActor in
+        let parser = VoiceControlParser()
+        let executor = CommandExecutor()
+        let typer = TextTyper()
+        for utterance in utterances {
+            let result = parser.parseRemainder(utterance)
+            if !result.typing.isEmpty {
+                print("[exec] “\(utterance)” → typing \(result.typing)")
+                typer.perform(result.typing)
+                continue
+            }
+            guard let command = result.command else {
+                print("[skip] “\(utterance)” → no action")
+                continue
+            }
+            if case .resolve = command {
+                print("[skip] “\(utterance)” → needs the model ladder; not executed here")
+                continue
+            }
+            let steps: [VoiceCommand]
+            if case .sequence(let members) = command {
+                steps = members
+            } else {
+                steps = [command]
+            }
+            print("[plan] “\(utterance)” → \(steps.count) step(s)")
+            for (index, step) in steps.enumerated() {
+                let outcome = await executor.execute(step)
+                switch outcome {
+                case .done(let notice):
+                    print("  step \(index + 1): ✓ \(notice ?? String(describing: step))")
+                    if let unmet = await executor.sequenceSettle(after: step) {
+                        print("  step \(index + 1): ✗ didn't take — \(unmet)")
+                        failures += 1
+                        break
+                    }
+                case .failed(let message):
+                    print("  step \(index + 1): ✗ \(message)")
+                    failures += 1
+                }
+                if case .failed = outcome { break }
+            }
+        }
+        finished = true
+    }
+    let deadline = Date().addingTimeInterval(120)
+    while !finished, Date() < deadline {
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.05))
+    }
+    if !finished {
+        print("TIMED OUT")
+        return 1
+    }
+    return failures == 0 ? 0 : 1
+}
+
 /// Wake-word eval (`Pawvis --wake-eval "<full transcript>" …`): shows, tier
 /// by tier, what the wake matcher does with a transcript AS THE RECOGNIZER
 /// WROTE IT — paste mis-hearings from the log or from the capsule to see

@@ -64,6 +64,15 @@ final class TextTyper {
     /// Unicode injection: no keyboard-layout mapping needed, works for any
     /// text. Chunked because keyboardSetUnicodeString tops out around 20
     /// UTF-16 units per event.
+    ///
+    /// `.flags = []` on every event is load-bearing, not tidiness: a CGEvent
+    /// created from a source INHERITS the source state's current modifier
+    /// flags. After a flagged chord (⌘L to focus an address bar), inherited
+    /// state intermittently left Command on the "typed" events and the
+    /// Return that followed — in Chrome's omnibox that turns into ignored
+    /// text plus ⌘Return, which opens the still-selected CURRENT url in a
+    /// background tab. Every synthetic keyboard event states its modifiers
+    /// explicitly; nothing is left to inheritance.
     func type(_ text: String) {
         let units = Array(text.utf16)
         var index = 0
@@ -74,6 +83,8 @@ final class TextTyper {
                   let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
                 continue
             }
+            down.flags = []
+            up.flags = []
             chunk.withUnsafeBufferPointer { buffer in
                 down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: buffer.baseAddress)
                 up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: buffer.baseAddress)
@@ -107,10 +118,11 @@ final class TextTyper {
                   let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
                 continue
             }
-            if !flags.isEmpty {
-                down.flags = flags
-                up.flags = flags
-            }
+            // Always assigned — an unmodified press must SAY it is
+            // unmodified, or it inherits whatever the source state holds
+            // (see type() above for the bug that taught this).
+            down.flags = flags
+            up.flags = flags
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
             // Brief spacing so repeated deletes register reliably everywhere.
