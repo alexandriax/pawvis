@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import PawvisCore
@@ -137,8 +138,13 @@ final class CommandExecutor {
             }
         }
         if frontmostBrowser != nil {
-            await driveAddressBar(text: url)
-            return .done(notice: "→ \(url)")
+            if await driveAddressBar(text: url) {
+                return .done(notice: "→ \(url)")
+            }
+            // The address bar never verifiably held the text — open the URL
+            // through the system instead of pressing Return on faith.
+            NSWorkspace.shared.open(full)
+            return .done(notice: "→ \(url) (address bar balked — opened via the system)")
         }
         NSWorkspace.shared.open(full)
         return .done(notice: "→ \(url)")
@@ -153,15 +159,13 @@ final class CommandExecutor {
             if case .done = await openApp(named: spokenApp) {
                 _ = await waitForFrontmost(appNamed: spokenApp, timeout: 3.0)
                 try? await Task.sleep(for: .milliseconds(250))
-                if frontmostBrowser != nil {
-                    await driveAddressBar(text: query)
+                if frontmostBrowser != nil, await driveAddressBar(text: query) {
                     return .done(notice: "Searching: \(query)")
                 }
             }
         }
-        if frontmostBrowser != nil {
+        if frontmostBrowser != nil, await driveAddressBar(text: query) {
             // The address bar searches with the user's own default engine.
-            await driveAddressBar(text: query)
             return .done(notice: "Searching: \(query)")
         }
         let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
@@ -172,14 +176,96 @@ final class CommandExecutor {
         return .done(notice: "Searching: \(query)")
     }
 
-    /// ⌘L (focus address bar) → type → return. Small sleeps let the browser
-    /// move focus; typing immediately after ⌘L intermittently drops keys.
-    private func driveAddressBar(text: String) async {
+    /// ⌘L (focus address bar) → type → VERIFY → return. Return is gated on
+    /// the focused field verifiably holding what was typed (read back over
+    /// accessibility), because a Return pressed into an unknown field state
+    /// navigates to whatever is there — the "went to the URL I already had"
+    /// failure. One reselect-and-retype retry; then fail honestly rather
+    /// than press Return on faith. Returns false when the text never
+    /// verifiably landed.
+    private func driveAddressBar(text: String) async -> Bool {
         typer.press(KeyChord(key: "l", modifiers: [.command]))
-        try? await Task.sleep(for: .milliseconds(150))
-        typer.type(text)
-        try? await Task.sleep(for: .milliseconds(80))
-        typer.press(KeyChord(key: "return"))
+        // The browser may still be becoming key after an activation — wait
+        // for an editable focused field before typing at it.
+        guard await waitForFocusedEditableField(timeout: 1.5) else { return false }
+        for _ in 0..<2 {
+            typer.type(text)
+            try? await Task.sleep(for: .milliseconds(150))
+            // Inline autocomplete extends typed text with a selected
+            // completion ("youtube.com" → the user's most-visited channel);
+            // Return would navigate to the completion, not the command.
+            // Forward-delete removes a selected completion and is a no-op at
+            // end-of-text, so it's always safe here.
+            if let value = focusedFieldValue(),
+               value.lowercased() != text.lowercased(),
+               value.lowercased().hasPrefix(text.lowercased()) {
+                typer.press(KeyChord(key: "forwarddelete"))
+                try? await Task.sleep(for: .milliseconds(80))
+            }
+            if focusedFieldHolds(text) {
+                typer.press(KeyChord(key: "return"))
+                return true
+            }
+            // Reselect the address bar (⌘L selects-all, so retyping
+            // replaces whatever half-state the last attempt left).
+            typer.press(KeyChord(key: "l", modifiers: [.command]))
+            try? await Task.sleep(for: .milliseconds(150))
+        }
+        return false
+    }
+
+    // MARK: - Focused-field verification (accessibility)
+
+    private func focusedElement() -> AXUIElement? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+            let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID() else {
+            return nil
+        }
+        return (element as! AXUIElement)
+    }
+
+    private static let editableRoles: Set<String> = [
+        kAXTextFieldRole as String, kAXTextAreaRole as String,
+        kAXComboBoxRole as String, "AXSearchField",
+    ]
+
+    private func waitForFocusedEditableField(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if let element = focusedElement() {
+                var role: CFTypeRef?
+                if AXUIElementCopyAttributeValue(
+                    element, kAXRoleAttribute as CFString, &role) == .success,
+                   let roleName = role as? String,
+                   Self.editableRoles.contains(roleName) {
+                    return true
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        } while Date() < deadline && !Task.isCancelled
+        return false
+    }
+
+    private func focusedFieldValue() -> String? {
+        guard let element = focusedElement() else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element, kAXValueAttribute as CFString, &value) == .success,
+            let string = value as? String else { return nil }
+        return string
+    }
+
+    /// True when the focused field's value starts with the typed text —
+    /// prefix, not equality, because browser omniboxes extend what you type
+    /// with inline autocompletion (removed before Return, see above, but a
+    /// completion that survives the forward-delete must not fail the drive).
+    private func focusedFieldHolds(_ typed: String) -> Bool {
+        guard let string = focusedFieldValue() else { return false }
+        return string.lowercased().hasPrefix(typed.lowercased())
     }
 
     // MARK: - Apps

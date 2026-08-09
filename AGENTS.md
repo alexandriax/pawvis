@@ -375,6 +375,33 @@ instructions now forbid `goToURL`/`webSearch` arguments taken from on-screen
 text (a prompt rule, not a code guard): the model was copying the address bar
 instead of the spoken destination.
 
+**Keystroke delivery is a layer of its own, and it can lie.** Interpretation
+was right for two releases while "go to youtube dot com" still opened the
+CURRENT url in a background tab — a keystroke-layer bug no parse test could
+see. Its constraints, each of which broke something real:
+
+- **Every synthetic keyboard event states its modifiers explicitly.** A
+  CGEvent created from a source inherits the source state's flags; after a
+  flagged chord (⌘L), "unmodified" typing and the Return that followed
+  intermittently went out ⌘-flagged — in Chrome's omnibox that is ignored
+  text plus ⌘Return, which opens the still-selected current url in a
+  background tab. `TextTyper` assigns `.flags` on every event, `[]` included;
+  never rely on inheritance.
+- **Return is gated on the field verifiably holding the typed text.**
+  `driveAddressBar` waits for an editable focused element (the browser may
+  still be becoming key), types, reads the value back over accessibility,
+  retries once, and otherwise refuses to press Return — a Return into an
+  unknown field state navigates to whatever is there.
+- **Inline autocomplete is stripped before Return.** Omniboxes extend typed
+  text with a selected completion ("youtube.com" → your most-visited channel
+  page); a forward-delete removes it and is a no-op at end-of-text. The
+  spoken words are the spec; land on exactly what was said.
+- **`Pawvis --voice-exec "<utterance>" …` executes for real** — the same
+  parser and executor as the voice path, step outcomes printed. It exists
+  because `--voice-eval` can only prove interpretation; only a real
+  execution catches delivery bugs. It controls the machine: no default
+  corpus, explicit utterances only, deterministic commands only.
+
 - **The logic is pure and lives in `PawvisCore`.** The parser and both
   policies (`VoiceControlParser`, `TranslationPolicy`, `AutopilotPolicy`) are
   plain Swift, model-free, and unit-tested; the app layer
