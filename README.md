@@ -96,10 +96,13 @@ through every gesture.
 Off by default while in beta. Enable it in **Settings → Voice (Beta)**,
 then press **Start** next to Voice control in the menu bar. Address Pawvis
 by its **wake word** (default `Pawvis`, configurable; mishearings are
-tolerated). **Every command starts with the wake word**. Speech without it
-is ignored and never typed or displayed. Commands are understood by a fast
-built-in grammar first, then by on-device Apple Intelligence, and only
-genuinely visual requests drive the screen step by step:
+tolerated). Filler before it is fine too, like "Um, Pawvis, open Chrome",
+and a garbled wake word still gets a second look from on-device Apple
+Intelligence before Pawvis gives up on the command. **Every command starts
+with the wake word**. Speech without it is ignored and never typed or
+displayed. Commands are understood by a fast built-in grammar first, then
+by on-device Apple Intelligence, and only genuinely visual requests drive
+the screen step by step:
 
 | Say | Pawvis does |
 |---|---|
@@ -110,10 +113,15 @@ genuinely visual requests drive the screen step by step:
 | "Pawvis, **switch to** Chrome" | Brings a running app forward. |
 | "Pawvis, **click** / right click / double click" | Clicks at the pointer. |
 | "Pawvis, **scroll** down / up a page" | Scrolls at the pointer. |
+| "Pawvis, **pause** / **play**" | Presses the hardware play/pause key. macOS routes it to whatever's actually playing, not necessarily the frontmost app. |
 | "Pawvis, **close the window** / minimize / new tab / copy / paste / undo / save / select all / quit Safari" | Instant window and edit commands, no AI round-trip. |
 | "Pawvis, *anything else*" | On-device Apple Intelligence carries it out **step by step**: it reads the screen (accessibility + OCR, menus included), does the next action, looks again, and repeats until the request is done, up to 8 steps. Multi-step commands work: "open Notes and start a new note", "select the pawvis project and start a new conversation". A bottom-right panel streams each step with a **Cancel** button. |
 | "Pawvis, **stop**" | Cancels a running multi-step command. With nothing running, turns voice control off. |
 | "Pawvis, **stop listening**" | Turns voice control off. |
+
+You can chain several commands into one sentence and Pawvis runs each step
+in order, like "Pawvis, pause this, open a new tab, and go to youtube dot
+com".
 
 Speech recognition is **Apple's on-device engine**: private, free, no API
 key, no cloud (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).

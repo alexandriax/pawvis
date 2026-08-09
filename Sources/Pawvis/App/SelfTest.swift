@@ -86,9 +86,20 @@ func runSelfTest() -> Int32 {
           parser.parse("Pawvis stop listening").command == .stopVoiceControl)
     check("voice.closeWindowChord", parser.parse("Pawvis close the window").command
           == .press(KeyChord(key: "w", modifiers: [.command])))
-    check("voice.multiClauseFallsToResolve",
+    check("voice.parseableCompositeBecomesSequence",
           parser.parse("Pawvis close the window and open Safari").command
-          == .resolve(transcript: "close the window and open Safari"))
+          == .sequence([.press(KeyChord(key: "w", modifiers: [.command])),
+                        .open(app: "Safari")]))
+    check("voice.reportedCompositeIsDeterministic",
+          parser.parse("Pawvis pause this, open up a new tab, and go to youtube dot com").command
+          == .sequence([.mediaKey(.playPause),
+                        .press(KeyChord(key: "t", modifiers: [.command])),
+                        .goTo(url: "youtube.com", app: nil)]))
+    check("voice.unownedClauseStaysWhole",
+          parser.parse("Pawvis close the window and click submit").command
+          == .resolve(transcript: "close the window and click submit"))
+    check("voice.fillerBeforeWakeStillWakes",
+          parser.parse("Um, Pawvis, open Safari").command == .open(app: "Safari"))
 
     // Voice routing: the simple-operations class must resolve in the
     // deterministic grammar and NEVER reach the GUI loop. This table is the

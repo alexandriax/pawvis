@@ -32,27 +32,53 @@ public final class VoiceControlParser {
         wakeRemainder(transcript) != nil
     }
 
-    /// The utterance with the wake word stripped (nil when it doesn't start
-    /// with the wake word) — what the free-form handlers should receive.
+    /// The utterance with the wake word stripped (nil when the wake word
+    /// isn't there) — what the free-form handlers should receive.
+    ///
+    /// Three acceptance tiers, strictest first:
+    /// - Utterance-initial (edit distance ≤ 1), as always.
+    /// - After leading filler ("Um, Pawvis, open chrome") — people front
+    ///   commands with filler constantly, and the recognizer transcribes it.
+    /// - Glued mid-utterance (the recognizer joined ambient speech to the
+    ///   command segment): accepted ONLY when what follows the wake word
+    ///   parses as a deterministic command — "she said pawvis was busy"
+    ///   stays ambient, "…anyway pawvis open safari" acts.
     public func wakeRemainder(_ transcript: String) -> String? {
-        matchWakeWord(in: transcript.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let match = wakeMatch(in: transcript, tolerance: 1) else { return nil }
+        if match.trusted { return match.remainder }
+        return remainderIsDeterministicCommand(match.remainder) ? match.remainder : nil
     }
 
     /// A looser gate for utterances the strict one rejects: the opening
     /// chunks are a *plausible* mishearing of the wake word (edit distance
     /// ≤ 2 where the strict gate stops at 1 — "Paw this open Safari").
     /// Never act on this alone: it only nominates an utterance for on-device
-    /// AI confirmation on the agent path, so ambient speech that merely
-    /// resembles the wake word still can't trigger anything by itself.
+    /// AI confirmation, so ambient speech that merely resembles the wake
+    /// word still can't trigger anything by itself. Filler-tolerant, but
+    /// never glued-speech-tolerant — distance 2 plus a mid-utterance start
+    /// would be two loosenings at once.
     public func nearWakeRemainder(_ transcript: String) -> String? {
-        matchWakeWord(
-            in: transcript.trimmingCharacters(in: .whitespacesAndNewlines), tolerance: 2)
+        guard let match = wakeMatch(in: transcript, tolerance: 2),
+              match.trusted else { return nil }
+        return match.remainder
+    }
+
+    /// True when a remainder parses to a plain deterministic command (or
+    /// typing) — the acceptance bar for glued-speech wake matches.
+    func remainderIsDeterministicCommand(_ remainder: String) -> Bool {
+        let result = parseRemainder(remainder)
+        if !result.typing.isEmpty { return true }
+        switch result.command {
+        case nil, .resolve:
+            return false
+        default:
+            return true
+        }
     }
 
     /// Interpret one finalized utterance.
     public func parse(_ transcript: String) -> VoiceParseResult {
-        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let remainder = matchWakeWord(in: trimmed) else {
+        guard let remainder = wakeRemainder(transcript) else {
             return VoiceParseResult()
         }
         return parseRemainder(remainder)
@@ -72,14 +98,78 @@ public final class VoiceControlParser {
         }
         let tokens = Self.normalize(cleaned).split(separator: " ").map(String.init)
 
-        // "type …" / "dictate …" types its payload — one-shot.
+        // "type …" / "dictate …" types its payload — one-shot, and it owns
+        // the WHOLE utterance: typed text legitimately contains "and".
         if let payload = typePayload(cleaned: cleaned, tokens: tokens) {
             return VoiceParseResult(typing: payload.isEmpty ? [] : [.type(payload)])
+        }
+        // "open chrome and go to youtube dot com": when EVERY clause parses
+        // on its own, the composite executes deterministically in order —
+        // the visual loop never sees it.
+        if let sequence = clauseSequence(cleaned: cleaned, tokens: tokens) {
+            return VoiceParseResult(command: sequence)
         }
         if let command = matchCommandVerb(cleaned: cleaned, tokens: tokens) {
             return VoiceParseResult(command: command)
         }
         return VoiceParseResult(command: .resolve(transcript: cleaned))
+    }
+
+    // MARK: - Clause sequences
+
+    /// Splits a multi-clause utterance at standalone "and"/"then" tokens and
+    /// parses each clause independently. Returns a `.sequence` only when
+    /// every clause parses to a plain command — one clause the grammar
+    /// can't own sends the whole utterance down the ladder instead, and
+    /// safety phrases (stop/cancel) never take part in a sequence at all.
+    /// This is what keeps "go to fish and chips dot com" whole (clause two
+    /// isn't verb-led, so the split fails) while "pause this, open a new
+    /// tab, and go to youtube dot com" becomes three verified steps.
+    private func clauseSequence(cleaned: String, tokens: [String]) -> VoiceCommand? {
+        let words = cleaned.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        var clauses: [[String]] = []
+        var current: [String] = []
+        func closeClause() {
+            if !current.isEmpty {
+                clauses.append(current)
+                current = []
+            }
+        }
+        for word in words {
+            let normalized = Self.normalize(word)
+            if normalized == "and" || normalized == "then" {
+                closeClause()
+                continue
+            }
+            current.append(word)
+            // The recognizer punctuates list-style commands ("pause this,
+            // open a new tab, and …") — a trailing comma ends a clause.
+            if word.hasSuffix(",") || word.hasSuffix(";") {
+                closeClause()
+            }
+        }
+        closeClause()
+        guard clauses.count >= 2, clauses.count <= 4 else { return nil }
+
+        var commands: [VoiceCommand] = []
+        for clause in clauses {
+            let clauseText = Self.trimTrailingNoise(clause.joined(separator: " "))
+            let clauseTokens = Self.normalize(clauseText)
+                .split(separator: " ").map(String.init)
+            guard !clauseTokens.isEmpty,
+                  let command = matchCommandVerb(cleaned: clauseText, tokens: clauseTokens) else {
+                return nil
+            }
+            switch command {
+            case .resolve, .sequence, .stopVoiceControl, .cancelActivity:
+                // Needs the screen, or is a safety phrase — the utterance
+                // stays whole.
+                return nil
+            default:
+                commands.append(command)
+            }
+        }
+        return .sequence(commands)
     }
 
     // MARK: - Command grammar
@@ -128,9 +218,24 @@ public final class VoiceControlParser {
         default: break
         }
 
+        // "pause" / "play" — the hardware media key. macOS routes it to the
+        // now-playing app, which is exactly what the speaker means, no
+        // matter which app is frontmost.
+        if Self.mediaPlayPausePhrases.contains(normalizedJoined) {
+            return .mediaKey(.playPause)
+        }
+
         // Window and edit chords — the shortcuts everyone means by the bare
         // phrase. Whole-utterance only, same rule as above.
         if let chord = Self.phraseChords[normalizedJoined] {
+            return .press(chord)
+        }
+
+        // "open a new tab" means ⌘T, not an app named "a new tab": strip a
+        // leading open/make/create verb (plus "up" and articles) and retry
+        // the chord table, so browser furniture gets its shortcut instead of
+        // wandering down the app-launch path.
+        if let chord = Self.phraseChords[Self.strippedChordPhrase(tokens: tokens)] {
             return .press(chord)
         }
 
@@ -175,7 +280,8 @@ public final class VoiceControlParser {
             return .quit(app: app)
         }
 
-        if let app = payload(after: ["open", "launch"], cleaned: cleaned, tokens: tokens),
+        if let app = payload(after: ["open up", "pull up", "bring up", "open", "launch"],
+                             cleaned: cleaned, tokens: tokens),
            !app.isEmpty {
             // "open" covers places as well as apps: a URL-shaped target
             // ("open discord dot com"), or anything aimed at a browser
@@ -215,6 +321,30 @@ public final class VoiceControlParser {
     private static let politenessTokens: Set<String> = [
         "please", "ok", "okay", "hey", "now",
     ]
+
+    /// Whole-clause phrases that mean the hardware play/pause key.
+    private static let mediaPlayPausePhrases: Set<String> = [
+        "pause", "pause this", "pause it", "pause that",
+        "pause the video", "pause the music", "pause the song",
+        "pause playback", "pause the movie",
+        "play", "play it", "resume", "resume playback", "unpause",
+    ]
+
+    /// "open a new tab" → "new tab": drop one leading open/make/create verb
+    /// (with an optional "up") and any articles, so furniture phrases land
+    /// on their chord. Returns the stripped normalized phrase (which may
+    /// simply not be in the chord table — that's fine).
+    static func strippedChordPhrase(tokens: [String]) -> String {
+        var rest = tokens[...]
+        if let first = rest.first, ["open", "make", "create", "start"].contains(first) {
+            rest = rest.dropFirst()
+            if rest.first == "up" { rest = rest.dropFirst() }
+        }
+        while let first = rest.first, ["a", "an", "the", "another"].contains(first) {
+            rest = rest.dropFirst()
+        }
+        return rest.joined(separator: " ")
+    }
 
     // MARK: - App-qualified navigation
 
@@ -388,15 +518,52 @@ public final class VoiceControlParser {
 
     // MARK: - Wake word
 
-    /// If the utterance begins with the wake word (or a close mishearing),
-    /// returns the remainder with original casing (may be empty).
-    /// "Pawvis, go to github.com" → "go to github.com".
-    private func matchWakeWord(in transcript: String) -> String? {
-        matchWakeWord(in: transcript, tolerance: 1)
+    /// One wake-word hit inside an utterance.
+    public struct WakeMatch: Equatable, Sendable {
+        public var remainder: String
+        /// True when the wake word was utterance-initial or preceded only by
+        /// filler — trusted outright. False means it was glued after other
+        /// speech, which needs the deterministic-command bar.
+        public var trusted: Bool
     }
 
-    private func matchWakeWord(in transcript: String, tolerance: Int) -> String? {
-        let chunks = transcript.split(whereSeparator: { $0.isWhitespace })
+    /// Filler people front commands with, transcribed faithfully by the
+    /// recognizer. Skipping these before the wake word costs nothing:
+    /// matching the wake word itself is still required.
+    private static let leadingFillerTokens: Set<String> = [
+        "um", "uh", "umm", "uhh", "er", "erm", "hmm", "mm",
+        "hey", "hi", "yo", "oh", "ah", "so", "well", "yeah", "yes",
+        "ok", "okay", "and", "then", "now", "please", "alright", "right",
+    ]
+
+    /// How far into an utterance the wake word may sit (chunks skipped).
+    private static let maxWakeSkip = 3
+
+    /// Finds the wake word within the first few chunks of the utterance.
+    /// Skipped filler keeps full trust; skipped non-filler (the recognizer
+    /// glued ambient speech to a command segment) is matched but marked
+    /// untrusted for the caller's stricter acceptance bar.
+    public func wakeMatch(in transcript: String, tolerance: Int) -> WakeMatch? {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let chunks = trimmed.split(whereSeparator: { $0.isWhitespace })
+        guard !chunks.isEmpty else { return nil }
+        for skip in 0...min(Self.maxWakeSkip, chunks.count - 1) {
+            guard let remainder = matchWakeWord(
+                in: trimmed, chunks: chunks, from: skip, tolerance: tolerance) else {
+                continue
+            }
+            let trusted = chunks[0..<skip].allSatisfy {
+                Self.leadingFillerTokens.contains(Self.normalize(String($0)))
+            }
+            return WakeMatch(remainder: remainder, trusted: trusted)
+        }
+        return nil
+    }
+
+    private func matchWakeWord(
+        in transcript: String, chunks: [Substring], from start: Int, tolerance: Int
+    ) -> String? {
+        let chunks = Array(chunks[start...])
         guard !chunks.isEmpty else { return nil }
 
         var candidates: Set<String> = [Self.foldedWakeToken(config.wakeWord)]
@@ -414,9 +581,16 @@ public final class VoiceControlParser {
         for k in 1...min(maxCandidateWords + 1, chunks.count) {
             let joined = chunks[0..<k].map { Self.normalize(String($0)) }.joined()
             guard joined.count >= 3 else { continue }
+            // Fuzzy matching needs 6+ character candidates (at five, one
+            // edit reaches common names — "pavis" ± 1 = "Davis", "Paris")
+            // and a shared initial letter (a garble that loses the opening
+            // consonant is beyond rescuing; requiring it keeps "Davis, open
+            // the meeting notes" ambient at every tier). Short aliases
+            // still match — exactly, as written.
             let matched = candidates.contains(joined)
                 || candidates.contains { candidate in
-                    candidate.count >= 5 && abs(candidate.count - joined.count) <= tolerance
+                    candidate.count >= 6 && candidate.first == joined.first
+                        && abs(candidate.count - joined.count) <= tolerance
                         && Self.editDistance(joined, candidate, isAtMost: tolerance)
                 }
             if matched {

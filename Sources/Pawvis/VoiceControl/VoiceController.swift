@@ -63,6 +63,12 @@ final class VoiceController: ObservableObject {
     /// final is then dropped, the user must be told why, never left staring
     /// at a capsule that just vanished.
     private var liveShown = false
+    /// Whether any live hypothesis of this utterance strictly matched the
+    /// wake word. The final often revises the wake word into ordinary words
+    /// ("Pawvis" → "Paw this"); a delta that matched is evidence the user
+    /// addressed us, and the final's command shouldn't be dropped for the
+    /// recognizer's second thoughts.
+    private var liveWakeMatched = false
 
     var hud: VoiceHUD {
         switch state {
@@ -172,6 +178,9 @@ final class VoiceController: ObservableObject {
                 // Agent mode uses the model only to rescue garbled wake words.
                 WakeRescuer.prewarm()
             } else if config.visualContextEnabled {
+                // The rescuer serves the on-device path too now — a garbled
+                // final gets one AI-confirmed second chance either way.
+                WakeRescuer.prewarm()
                 autopilot.prewarm()
             }
         }
@@ -189,6 +198,7 @@ final class VoiceController: ObservableObject {
                 liveItemId = itemId
                 liveText = ""
                 liveShown = false
+                liveWakeMatched = false
             }
             liveText += text
             // The capsule shows only speech addressed to Pawvis — ambient
@@ -197,16 +207,19 @@ final class VoiceController: ObservableObject {
             // previous final), so it shows too.
             let live = liveText.trimmingCharacters(in: .whitespacesAndNewlines)
             if parser.hasWakePrefix(live) || gate.isArmed(now: now) {
+                if parser.hasWakePrefix(live) { liveWakeMatched = true }
                 transcriptOverlay.showLive(live)
                 liveShown = true
             }
 
         case .completed(_, let transcript):
             let showedLive = liveShown
+            let wakeHeardLive = liveWakeMatched
             liveItemId = nil
             liveText = ""
             liveShown = false
-            handleFinal(transcript, showedLive: showedLive)
+            liveWakeMatched = false
+            handleFinal(transcript, showedLive: showedLive, wakeHeardLive: wakeHeardLive)
 
         case .failed(let message):
             engine?.stop()
@@ -217,9 +230,17 @@ final class VoiceController: ObservableObject {
 
     // MARK: - Finalized utterances
 
-    private func handleFinal(_ transcript: String, showedLive: Bool) {
+    private func handleFinal(_ transcript: String, showedLive: Bool, wakeHeardLive: Bool) {
         let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor)
-        let remainder = parser.wakeRemainder(transcript)
+        var remainder = parser.wakeRemainder(transcript)
+        // The live hypotheses matched the wake word but the final revised it
+        // away ("Pawvis" → "Paw this"): the user addressed us — take the
+        // near tier's remainder directly, no AI round needed.
+        if remainder == nil, wakeHeardLive,
+           let near = parser.nearWakeRemainder(transcript) {
+            Log.voice.log("Wake heard live; final revised it — accepting near remainder")
+            remainder = near
+        }
         let decision = gate.decide(remainder: remainder, transcript: transcript, now: now)
         gateWindowTimer?.invalidate()
         gateWindowTimer = nil
@@ -257,12 +278,15 @@ final class VoiceController: ObservableObject {
     }
 
     /// The final didn't start with the wake word and no capture window was
-    /// open. Agent mode gives garbled wake words one AI-confirmed rescue;
+    /// open. Garbled wake words get one AI-confirmed rescue — on the agent
+    /// path AND the on-device path (it was agent-only, which left the
+    /// default configuration with zero tolerance for a mangled final);
     /// beyond that, an utterance the capsule already showed must end in a
     /// visible explanation, never a silent vanish.
     private func handleNoWake(_ transcript: String, tool: AgentCLIExecutor.Tool?,
                               showedLive: Bool) {
-        if tool != nil, #available(macOS 26.0, *), WakeRescuer.isSupported,
+        if tool != nil || config.visualContextEnabled, #available(macOS 26.0, *),
+           WakeRescuer.isSupported,
            let nearRemainder = parser.nearWakeRemainder(transcript)?
                .trimmingCharacters(in: .whitespacesAndNewlines),
            !nearRemainder.isEmpty {
@@ -333,6 +357,8 @@ final class VoiceController: ObservableObject {
             stop()
         case .resolve(let transcript):
             resolveFreeForm(transcript)
+        case .sequence(let commands):
+            runSequence(commands)
         default:
             Task { [weak self] in
                 guard let self else { return }
@@ -415,6 +441,63 @@ final class VoiceController: ObservableObject {
                 }
             }
             await self.runAutopilotLoop(goal: goal, generation: generation)
+        }
+    }
+
+    /// Deterministic composite ("open chrome and go to youtube dot com"):
+    /// every clause already parsed on its own, so run the steps in order,
+    /// verifying focus between them. The first step that fails or doesn't
+    /// take stops the chain honestly — no model rescue mid-sequence, because
+    /// later steps would run against whatever state the failure left behind.
+    /// Uses the autopilot task slot so "Pawvis stop" brakes a sequence too.
+    private func runSequence(_ commands: [VoiceCommand]) {
+        autopilotTask?.cancel()
+        autopilotGeneration += 1
+        let generation = autopilotGeneration
+        autopilotPanel.hide()
+        state = .resolving
+        autopilotTask = Task { [weak self] in
+            guard let self else { return }
+            var lastNotice: String?
+            for (index, command) in commands.enumerated() {
+                if Task.isCancelled { break }
+                guard self.autopilotGeneration == generation else { return }
+                let outcome = await self.executor.execute(command)
+                guard self.autopilotGeneration == generation else { return }
+                if Task.isCancelled { break }
+                switch outcome {
+                case .done(let notice):
+                    if let notice {
+                        lastNotice = notice
+                        self.state = .working(notice)
+                    }
+                    if let unmet = await self.executor.sequenceSettle(after: command) {
+                        self.finishSequence(generation, "⚠️ Step \(index + 1) didn't take: \(unmet)")
+                        return
+                    }
+                case .failed(let message):
+                    self.finishSequence(generation, "⚠️ Step \(index + 1) failed: \(message)")
+                    return
+                }
+            }
+            if Task.isCancelled {
+                self.finishSequence(generation, "Stopped")
+                return
+            }
+            self.finishSequence(
+                generation, lastNotice.map { "✓ \($0)" } ?? "✓ Done")
+        }
+    }
+
+    private func finishSequence(_ generation: Int, _ notice: String) {
+        guard autopilotGeneration == generation else { return }
+        autopilotTask = nil
+        flashNotice(notice)
+        switch state {
+        case .resolving, .working:
+            state = .listening
+        default:
+            break
         }
     }
 

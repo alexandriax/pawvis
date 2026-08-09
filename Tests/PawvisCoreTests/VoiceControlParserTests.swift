@@ -77,6 +77,53 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertFalse(parser.hasWakePrefix(""))
     }
 
+    func testLeadingFillerDoesNotDefeatTheWake() {
+        // People front commands with filler constantly, and the recognizer
+        // transcribes it. Filler costs nothing: the wake word itself is
+        // still required.
+        XCTAssertEqual(parse("Um, Pawvis, open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("Hey Pawvis type hi").typing, [.type("hi")])
+        XCTAssertEqual(parse("uh so um Pawvis go to github.com").command,
+                       .goTo(url: "github.com", app: nil))
+        // Bare wake behind filler still arms the capture window (empty
+        // remainder, same as a clean bare wake).
+        XCTAssertEqual(parser.wakeRemainder("Okay, Pawvis"), "")
+    }
+
+    func testFillerAloneNeverWakes() {
+        XCTAssertEqual(parse("um so okay then"), VoiceParseResult())
+        XCTAssertEqual(parse("hey, you there?"), VoiceParseResult())
+    }
+
+    func testCommonNamesNearShortAliasesStayAmbient() {
+        // "pavis" ± one edit reaches real names — fuzzy matching is
+        // reserved for 6+ character candidates so the strict tier can't
+        // fire on them. The short alias itself still matches exactly.
+        XCTAssertEqual(parse("Davis open the meeting notes"), VoiceParseResult())
+        XCTAssertEqual(parse("Paris open the guidebook"), VoiceParseResult())
+        XCTAssertEqual(parse("Pavis open Safari").command, .open(app: "Safari"))
+        // The near tier (AI-rescue nominations) must reject them too: a
+        // garble that loses the initial consonant is beyond rescuing.
+        XCTAssertNil(parser.nearWakeRemainder("Davis open the meeting notes"))
+        // …while genuine initial-preserving garbles stay nominated.
+        XCTAssertEqual(parser.nearWakeRemainder("Paw this open Safari"), "open Safari")
+    }
+
+    func testGluedSpeechWakesOnlyForDeterministicCommands() {
+        // The recognizer sometimes glues ambient speech to a command
+        // segment. A mid-utterance wake word acts ONLY when what follows
+        // parses as a plain command…
+        XCTAssertEqual(parse("anyway whatever Pawvis open Safari").command,
+                       .open(app: "Safari"))
+        // …and stays ambient otherwise — retelling a story about Pawvis
+        // must not trigger the free-form ladder.
+        XCTAssertEqual(parse("she said Pawvis was busy"), VoiceParseResult())
+        XCTAssertEqual(parse("I renamed Pawvis do something weird"), VoiceParseResult())
+        // Too deep into the utterance never wakes, deterministic or not.
+        XCTAssertEqual(parse("one two three four five Pawvis open Safari"),
+                       VoiceParseResult())
+    }
+
     // The near tier nominates borderline mishearings for on-device AI
     // confirmation on the agent path — it must be wider than the strict
     // gate but still reject plainly unrelated speech.
@@ -95,6 +142,59 @@ final class VoiceControlParserTests: XCTestCase {
                       "talking about something else", ""] {
             XCTAssertNil(parser.nearWakeRemainder(heard), "'\(heard)' must not near-wake")
         }
+    }
+
+    // MARK: - Wake tiers, breadth
+
+    func testCustomWakeWordToleratesLeadingFiller() {
+        // A non-default wake word still gets the filler-skipping tier, not
+        // just utterance-initial matching.
+        parser.config.wakeWord = "computer"
+        parser.config.wakeWordAliases = []
+        XCTAssertEqual(parse("um, computer, open safari").command, .open(app: "safari"))
+    }
+
+    func testFillerSkippingAndFuzzyMatchingCombine() {
+        // "Hey" is skipped as filler, then "Pavis" fuzzy-matches "Pawvis" —
+        // both tiers apply to the same utterance at once.
+        XCTAssertEqual(parse("Hey Pavis open Safari").command, .open(app: "Safari"))
+    }
+
+    func testWakeMatchTrustedFlag() {
+        // Filler-only lead-in is trusted outright…
+        XCTAssertEqual(
+            parser.wakeMatch(in: "Um Pawvis open safari", tolerance: 1)?.trusted, true)
+        // …real words ahead of the wake word are matched but untrusted…
+        XCTAssertEqual(
+            parser.wakeMatch(in: "anyway whatever Pawvis open safari", tolerance: 1)?.trusted,
+            false)
+        // …and speech with no wake word in it doesn't match at all.
+        XCTAssertNil(
+            parser.wakeMatch(in: "completely unrelated words spoken here", tolerance: 1))
+    }
+
+    func testNearWakeIsFillerTolerantButNotGlueTolerant() {
+        // Filler ahead of a near-miss wake word is still trusted…
+        XCTAssertEqual(parser.nearWakeRemainder("um Paw this open Safari"), "open Safari")
+        // …but real leading speech ahead of the SAME near-miss is not: the
+        // near tier widens the edit-distance budget, not the glued-speech
+        // tolerance — those are two independent loosenings.
+        XCTAssertNil(parser.nearWakeRemainder("she said Paw this open Safari"))
+    }
+
+    func testGluedWakeDepthLimit() {
+        // Three skipped chunks is within maxWakeSkip and still wakes…
+        XCTAssertEqual(parse("one two three Pawvis open safari").command,
+                       .open(app: "safari"))
+        // …a fourth pushes the wake word out of reach entirely, deterministic
+        // remainder or not.
+        XCTAssertEqual(parse("one two three four Pawvis open safari"), VoiceParseResult())
+    }
+
+    func testGluedSpeechTypingCountsAsDeterministic() {
+        // The glued-tier acceptance bar is "parses to typing or a plain
+        // command" — typing counts too, not just VoiceCommand cases.
+        XCTAssertEqual(parse("anyway anyway Pawvis type hello").typing, [.type("hello")])
     }
 
     // MARK: - Commands: go to / search
@@ -405,30 +505,113 @@ final class VoiceControlParserTests: XCTestCase {
                        .resolve(transcript: "save the draft and close it"))
     }
 
-    func testMultiClauseUtteranceFallsThroughToResolve() {
+    func testFullyParseableCompositesBecomeSequences() {
+        // Every clause stands on its own → deterministic sequence, executed
+        // in order with focus verified between steps. The loop never sees it.
         XCTAssertEqual(
             parse("Pawvis close the window and open Safari").command,
-            .resolve(transcript: "close the window and open Safari"))
+            .sequence([.press(KeyChord(key: "w", modifiers: [.command])),
+                       .open(app: "Safari")]))
+        XCTAssertEqual(
+            parse("Pawvis switch to safari then scroll down").command,
+            .sequence([.switchTo(app: "safari"),
+                       .scroll(direction: .down, amount: .step)]))
+        XCTAssertEqual(
+            parse("Pawvis open chrome and go to youtube dot com").command,
+            .sequence([.open(app: "chrome"), .goTo(url: "youtube.com", app: nil)]))
+        // The reported three-clause composite, commas and all: media key,
+        // ⌘T via furniture-chord normalization, then the navigation.
+        XCTAssertEqual(
+            parse("Pawvis pause this, open up a new tab, and go to youtube dot com").command,
+            .sequence([.mediaKey(.playPause),
+                       .press(KeyChord(key: "t", modifiers: [.command])),
+                       .goTo(url: "youtube.com", app: nil)]))
+        XCTAssertEqual(
+            parse("Pawvis select all and copy").command,
+            .sequence([.press(KeyChord(key: "a", modifiers: [.command])),
+                       .press(KeyChord(key: "c", modifiers: [.command]))]))
     }
 
-    func testMultiClauseAppTargetsAreTasksNotAppNames() {
-        // "open notes and start a new note" is a task, not an app named
-        // "notes and start a new note" — a doomed app-launch would only
-        // reach the ladder after a failed resolution round.
+    func testCompositesWithAnUnownedClauseStayWhole() {
+        // A clause the grammar can't own (visual, or no verb) sends the
+        // whole utterance down the ladder — never a half-executed sequence.
+        XCTAssertEqual(
+            parse("Pawvis close the window and click submit").command,
+            .resolve(transcript: "close the window and click submit"))
         XCTAssertEqual(
             parse("Pawvis open notes and start a new note").command,
             .resolve(transcript: "open notes and start a new note"))
         XCTAssertEqual(
-            parse("Pawvis switch to safari then scroll down").command,
-            .resolve(transcript: "switch to safari then scroll down"))
-        XCTAssertEqual(
             parse("Pawvis quit safari and notes").command,
             .resolve(transcript: "quit safari and notes"))
+        // Safety phrases never take part in a sequence.
+        XCTAssertEqual(
+            parse("Pawvis stop and close the window").command,
+            .resolve(transcript: "stop and close the window"))
         // Clause markers inside a go-to target stay part of the query —
         // web searches legitimately contain "and".
         XCTAssertEqual(
             parse("Pawvis go to fish and chips near me").command,
             .webSearch(query: "fish and chips near me", app: nil))
+    }
+
+    // MARK: - Sequences, breadth
+
+    func testSequenceOfGoToAndOpen() {
+        XCTAssertEqual(
+            parse("Pawvis go to github dot com and open notes").command,
+            .sequence([.goTo(url: "github.com", app: nil), .open(app: "notes")]))
+    }
+
+    func testSequenceOfAppQualifiedGoToAndMediaKey() {
+        XCTAssertEqual(
+            parse("Pawvis open discord dot com in chrome and pause").command,
+            .sequence([.goTo(url: "discord.com", app: "chrome"), .mediaKey(.playPause)]))
+    }
+
+    func testFiveClausesExceedTheCeilingAndStayWhole() {
+        // Above the 4-clause max, the utterance is never split — and no
+        // single verb owns the whole string, so it falls all the way to
+        // resolve rather than a half-built sequence.
+        XCTAssertEqual(
+            parse("Pawvis copy and paste and copy and paste and copy").command,
+            .resolve(transcript: "copy and paste and copy and paste and copy"))
+    }
+
+    func testMediaPhrasesSingly() {
+        XCTAssertEqual(parse("Pawvis pause the video").command, .mediaKey(.playPause))
+        XCTAssertEqual(parse("Pawvis resume").command, .mediaKey(.playPause))
+        XCTAssertEqual(parse("Pawvis play").command, .mediaKey(.playPause))
+    }
+
+    func testChordStrippingSingly() {
+        XCTAssertEqual(parse("Pawvis open a new tab").command,
+                       .press(KeyChord(key: "t", modifiers: [.command])))
+        XCTAssertEqual(parse("Pawvis make a new window").command,
+                       .press(KeyChord(key: "n", modifiers: [.command])))
+        // "up" plus an article both strip before the chord-table lookup.
+        XCTAssertEqual(parse("Pawvis open up a new tab").command,
+                       .press(KeyChord(key: "t", modifiers: [.command])))
+    }
+
+    func testChordStrippingDoesNotEatAppOpens() {
+        // strippedChordPhrase("open a document") reduces to "document",
+        // which isn't in the chord table — so the stripped form is simply
+        // not found, and the original "open X" handling opens the
+        // un-stripped payload as an app/place name instead.
+        XCTAssertEqual(parse("Pawvis open a document").command,
+                       .open(app: "a document"))
+    }
+
+    func testPullUpOpensAnApp() {
+        XCTAssertEqual(parse("Pawvis pull up safari").command, .open(app: "safari"))
+    }
+
+    func testSequenceClauseThatIsABareChordWithTrailingComma() {
+        XCTAssertEqual(
+            parse("Pawvis copy, then paste").command,
+            .sequence([.press(KeyChord(key: "c", modifiers: [.command])),
+                       .press(KeyChord(key: "v", modifiers: [.command]))]))
     }
 
     func testQuit() {

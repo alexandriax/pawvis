@@ -53,7 +53,7 @@ final class CommandExecutor {
         case .open(let app):
             return await openApp(named: app)
         case .switchTo(let app):
-            return switchToApp(named: app)
+            return await switchToApp(named: app)
         case .click(let kind):
             click(kind)
             return .done(notice: nil)
@@ -62,9 +62,38 @@ final class CommandExecutor {
             return .done(notice: nil)
         case .quit(let app):
             return quitApp(named: app)
-        case .stopVoiceControl, .cancelActivity, .resolve:
+        case .mediaKey(let key):
+            typer.press(key)
+            return .done(notice: nil)
+        case .stopVoiceControl, .cancelActivity, .resolve, .sequence:
             // Handled by the controller, not the executor.
             return .done(notice: nil)
+        }
+    }
+
+    /// Between sequence steps: let the step's effect land, and for app
+    /// switches verify focus actually moved — a sequence must never run its
+    /// next step against the wrong app. Returns nil when settled, or the
+    /// reason the step didn't take.
+    func sequenceSettle(after command: VoiceCommand) async -> String? {
+        switch command {
+        case .open(let app), .switchTo(let app):
+            if await waitForFrontmost(appNamed: app, timeout: 3.0) {
+                try? await Task.sleep(for: .milliseconds(300))
+                return nil
+            }
+            return "\(app) never came to the front"
+        case .goTo, .webSearch:
+            try? await Task.sleep(for: .milliseconds(600))
+            return nil
+        case .press, .mediaKey, .quit:
+            try? await Task.sleep(for: .milliseconds(300))
+            return nil
+        case .click, .scroll:
+            try? await Task.sleep(for: .milliseconds(250))
+            return nil
+        case .stopVoiceControl, .cancelActivity, .resolve, .sequence:
+            return nil
         }
     }
 
@@ -155,11 +184,21 @@ final class CommandExecutor {
 
     // MARK: - Apps
 
+    /// Focus is the contract, not a hope: "open X" means X ends up frontmost
+    /// (the effect of ⌘Space + typing the name + return, via the same system
+    /// call Spotlight uses). A running app gets activate-and-verify; if it
+    /// won't front that way, relaunching through NSWorkspace fronts it more
+    /// forcefully. Every path verifies before claiming success.
     private func openApp(named spoken: String) async -> ExecutionOutcome {
-        // Already running? Just bring it forward.
         if let running = matchRunningApp(named: spoken) {
+            let name = running.localizedName ?? spoken
             running.activate()
-            return .done(notice: "Switched to \(running.localizedName ?? spoken)")
+            if await waitForFrontmost(appNamed: name, timeout: 1.5) {
+                return .done(notice: "Switched to \(name)")
+            }
+            // Fall through: openApplication on a running app re-activates it
+            // through the workspace, which succeeds where activate() is
+            // ignored (e.g. the app was busy or activation was contested).
         }
         guard let url = AppCatalog.resolve(spokenName: spoken) else {
             return .failed("No app matching “\(spoken)”")
@@ -168,19 +207,32 @@ final class CommandExecutor {
         do {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
-            _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            if !(await waitForFrontmost(appNamed: name, timeout: 3.0)) {
+                app.activate()
+                _ = await waitForFrontmost(appNamed: name, timeout: 1.5)
+            }
             return .done(notice: "Opening \(name)")
         } catch {
             return .failed("Couldn't open \(name): \(error.localizedDescription)")
         }
     }
 
-    private func switchToApp(named spoken: String) -> ExecutionOutcome {
+    private func switchToApp(named spoken: String) async -> ExecutionOutcome {
         guard let app = matchRunningApp(named: spoken) else {
             return .failed("“\(spoken)” isn't running — say “open \(spoken)”")
         }
+        let name = app.localizedName ?? spoken
         app.activate()
-        return .done(notice: "Switched to \(app.localizedName ?? spoken)")
+        if await waitForFrontmost(appNamed: name, timeout: 1.5) {
+            return .done(notice: "Switched to \(name)")
+        }
+        // Once more — apps mid-launch or mid-dialog ignore the first ask.
+        app.activate()
+        if await waitForFrontmost(appNamed: name, timeout: 1.5) {
+            return .done(notice: "Switched to \(name)")
+        }
+        return .failed("Couldn't bring \(name) to the front")
     }
 
     /// Graceful termination (the app may put up its own save dialogs) — the

@@ -41,9 +41,22 @@ public enum ScrollAmount: String, Equatable, Sendable {
     case nudge, step, page
 }
 
+/// Hardware media keys the system routes to the now-playing app.
+public enum MediaKey: String, Equatable, Sendable {
+    case playPause
+}
+
 /// A machine-control command parsed from a wake-word utterance. Typing is not
 /// a command — the parser handles it as a mode (see `VoiceControlParser`).
 public enum VoiceCommand: Equatable, Sendable {
+    /// Press a hardware media key ("pause", "play") — macOS routes it to
+    /// whatever is playing, which is exactly what the speaker means.
+    case mediaKey(MediaKey)
+    /// Deterministic composite ("open chrome and go to youtube dot com"):
+    /// every clause parsed on its own, so the whole thing executes
+    /// sequentially with focus verified between steps — no model involved.
+    /// Only ever produced with 2+ non-control member commands, never nested.
+    case sequence([VoiceCommand])
     /// Navigate to a URL — in the named app when one was spoken ("open
     /// discord dot com in Chrome"), else the frontmost browser, else the
     /// default one.
