@@ -101,28 +101,172 @@ final class VoiceControlParserTests: XCTestCase {
 
     func testGoToSpokenURL() {
         let result = parse("Pawvis go to here's alexandria dot com")
-        XCTAssertEqual(result.command, .goTo(url: "heresalexandria.com"))
+        XCTAssertEqual(result.command, .goTo(url: "heresalexandria.com", app: nil))
         XCTAssertEqual(result.typing, [])
     }
 
     func testGoToRecognizerFormattedURL() {
         XCTAssertEqual(parse("Pawvis go to github.com/anthropics.").command,
-                       .goTo(url: "github.com/anthropics"))
+                       .goTo(url: "github.com/anthropics", app: nil))
     }
 
     func testGoToWithPathWords() {
         XCTAssertEqual(parse("Pawvis go to github dot com slash anthropics").command,
-                       .goTo(url: "github.com/anthropics"))
+                       .goTo(url: "github.com/anthropics", app: nil))
     }
 
     func testGoToNonURLBecomesWebSearch() {
         XCTAssertEqual(parse("Pawvis go to the apple store").command,
-                       .webSearch(query: "the apple store"))
+                       .webSearch(query: "the apple store", app: nil))
     }
 
     func testSearchFor() {
         XCTAssertEqual(parse("Pawvis search for sloth videos").command,
-                       .webSearch(query: "sloth videos"))
+                       .webSearch(query: "sloth videos", app: nil))
+    }
+
+    // MARK: - App-qualified navigation
+
+    func testOpenURLWithAppQualifierGoesToThatApp() {
+        // The exact reported regression: "open X in Y" must keep the app
+        // qualifier instead of dropping it or gluing it into the URL.
+        XCTAssertEqual(parse("Pawvis open discord dot com in Chrome").command,
+                       .goTo(url: "discord.com", app: "Chrome"))
+    }
+
+    func testOpenURLWithoutQualifierHasNilApp() {
+        XCTAssertEqual(parse("Pawvis open discord dot com").command,
+                       .goTo(url: "discord.com", app: nil))
+    }
+
+    func testOpenURLWithLowercaseBrowserQualifier() {
+        XCTAssertEqual(parse("Pawvis open youtube dot com in safari").command,
+                       .goTo(url: "youtube.com", app: "safari"))
+    }
+
+    func testGoToURLWithPathAndAppQualifier() {
+        XCTAssertEqual(
+            parse("Pawvis go to github dot com slash anthropics in firefox").command,
+            .goTo(url: "github.com/anthropics", app: "firefox"))
+    }
+
+    func testOpenNonURLPayloadInKnownBrowserIsAddressBarSearch() {
+        // "discord" isn't URL-shaped, but naming a known browser means the
+        // address bar would autocomplete it the same way the user would.
+        XCTAssertEqual(parse("Pawvis open discord in chrome").command,
+                       .webSearch(query: "discord", app: "chrome"))
+    }
+
+    func testOpenNonURLPayloadInGenericBrowserQualifier() {
+        XCTAssertEqual(parse("Pawvis open gmail in the browser").command,
+                       .webSearch(query: "gmail", app: "the browser"))
+    }
+
+    func testSearchForWithBrowserQualifier() {
+        XCTAssertEqual(parse("Pawvis search for sloth videos in firefox").command,
+                       .webSearch(query: "sloth videos", app: "firefox"))
+    }
+
+    func testSearchForQualifierThatIsNotABrowserStaysPartOfTheQuery() {
+        // "the universe" isn't a browser, so nothing gets split off — the
+        // whole phrase is the search.
+        XCTAssertEqual(parse("Pawvis search for life in the universe").command,
+                       .webSearch(query: "life in the universe", app: nil))
+    }
+
+    func testGoToNonURLWithoutQualifierStillBecomesWebSearch() {
+        // Unchanged behavior: no "in <app>" qualifier at all.
+        XCTAssertEqual(parse("Pawvis go to the apple store").command,
+                       .webSearch(query: "the apple store", app: nil))
+    }
+
+    func testGoToQualifierTooLongToBeAnAppNameStaysWholeQuery() {
+        // "the greater san francisco bay area" is 6 words and not a browser
+        // name — it doesn't read as an app qualifier, so nothing is split
+        // off and the whole phrase remains the search query.
+        XCTAssertEqual(
+            parse("Pawvis go to best restaurants in the greater san francisco bay area")
+                .command,
+            .webSearch(
+                query: "best restaurants in the greater san francisco bay area", app: nil))
+    }
+
+    func testTrailingInWithNothingAfterIsNotAQualifier() {
+        // "linked in" ends in "in" with no app after it — splitAppQualifier
+        // requires words on both sides, so the whole phrase stays the query.
+        XCTAssertEqual(parse("Pawvis go to linked in").command,
+                       .webSearch(query: "linked in", app: nil))
+    }
+
+    func testPlainAppOpenIsUnaffectedByQualifierSplitting() {
+        XCTAssertEqual(parse("Pawvis open safari").command, .open(app: "safari"))
+    }
+
+    func testOpenNonBrowserQualifierWithNonURLPayloadKeepsTargetWhole() {
+        // "downloads" isn't a browser, and "the file" isn't a URL, so
+        // navigation() declines and the original open-app handling keeps
+        // the full spoken target as the app name.
+        XCTAssertEqual(parse("Pawvis open the file in downloads").command,
+                       .open(app: "the file in downloads"))
+    }
+
+    func testOpenBrowserFurniturePayloadIsNotASearch() {
+        // "a new tab" is browser furniture, not a destination — must not
+        // become a web search for "a new tab".
+        XCTAssertEqual(parse("Pawvis open a new tab in chrome").command,
+                       .open(app: "a new tab in chrome"))
+    }
+
+    func testOpenPronounPayloadIsNotASearch() {
+        XCTAssertEqual(parse("Pawvis open it in chrome").command,
+                       .open(app: "it in chrome"))
+    }
+
+    func testOpenLocalhostWithPortAndAppQualifier() {
+        XCTAssertEqual(
+            parse("Pawvis open localhost colon 3000 in dia").command,
+            .goTo(url: "localhost:3000", app: "dia"))
+    }
+
+    func testInSeparatorInsideADomainDoesNotSplit() {
+        // "linked in dot com" is the domain linkedin.com — the "in" here is
+        // part of the address, not a qualifier introducing an app, because
+        // it's immediately followed by spoken URL punctuation ("dot").
+        XCTAssertEqual(parse("Pawvis go to linked in dot com").command,
+                       .goTo(url: "linkedin.com", app: nil))
+    }
+
+    func testOnQualifierThatIsNotABrowserIsDroppedNotGlued() {
+        // "on my laptop" doesn't name an app to act in — it must be dropped
+        // entirely, never concatenated onto the URL ("discord.com on my
+        // laptop" is not a URL).
+        XCTAssertEqual(parse("Pawvis go to discord dot com on my laptop").command,
+                       .goTo(url: "discord.com", app: nil))
+    }
+
+    func testOpenQualifierSplitThatIsNotNavigationNeverAssemblesAGluedURL() {
+        // A trailing "in <words>" qualifier exists here, but neither side
+        // reads as navigation ("notes" isn't a URL, "test dot app" isn't a
+        // browser) — this must not fall back to gluing the whole utterance
+        // into a bogus URL like "notesintest.app".
+        XCTAssertEqual(parse("Pawvis open notes in test dot app").command,
+                       .open(app: "notes in test dot app"))
+    }
+
+    // MARK: - App-qualified navigation: splitAppQualifier
+
+    func testSplitAppQualifierBasic() {
+        XCTAssertEqual(
+            VoiceControlParser.splitAppQualifier(of: "discord dot com in chrome"),
+            VoiceControlParser.AppQualifierSplit(
+                payload: "discord dot com", app: "chrome", separator: "in"))
+    }
+
+    func testSplitAppQualifierPreservesCasing() {
+        XCTAssertEqual(
+            VoiceControlParser.splitAppQualifier(of: "Discord dot com in Google Chrome"),
+            VoiceControlParser.AppQualifierSplit(
+                payload: "Discord dot com", app: "Google Chrome", separator: "in"))
     }
 
     // MARK: - Commands: keys
@@ -265,6 +409,26 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertEqual(
             parse("Pawvis close the window and open Safari").command,
             .resolve(transcript: "close the window and open Safari"))
+    }
+
+    func testMultiClauseAppTargetsAreTasksNotAppNames() {
+        // "open notes and start a new note" is a task, not an app named
+        // "notes and start a new note" — a doomed app-launch would only
+        // reach the ladder after a failed resolution round.
+        XCTAssertEqual(
+            parse("Pawvis open notes and start a new note").command,
+            .resolve(transcript: "open notes and start a new note"))
+        XCTAssertEqual(
+            parse("Pawvis switch to safari then scroll down").command,
+            .resolve(transcript: "switch to safari then scroll down"))
+        XCTAssertEqual(
+            parse("Pawvis quit safari and notes").command,
+            .resolve(transcript: "quit safari and notes"))
+        // Clause markers inside a go-to target stay part of the query —
+        // web searches legitimately contain "and".
+        XCTAssertEqual(
+            parse("Pawvis go to fish and chips near me").command,
+            .webSearch(query: "fish and chips near me", app: nil))
     }
 
     func testQuit() {

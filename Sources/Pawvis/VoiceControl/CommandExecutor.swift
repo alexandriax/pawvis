@@ -40,10 +40,10 @@ final class CommandExecutor {
 
     func execute(_ command: VoiceCommand) async -> ExecutionOutcome {
         switch command {
-        case .goTo(let url):
-            return await goTo(url: url)
-        case .webSearch(let query):
-            return await webSearch(query: query)
+        case .goTo(let url, let app):
+            return await goTo(url: url, app: app)
+        case .webSearch(let query, let app):
+            return await webSearch(query: query, app: app)
         case .press(let chord):
             guard TextTyper.canPress(chord) else {
                 return .failed("Don't know the key “\(chord.key)”")
@@ -77,19 +77,59 @@ final class CommandExecutor {
         return app
     }
 
-    private func goTo(url: String) async -> ExecutionOutcome {
+    /// Navigate to a URL. With no app named: the frontmost browser's address
+    /// bar, else the default browser. With one ("open discord dot com in
+    /// Chrome"): hand the URL straight to that app with NSWorkspace — the
+    /// system opens a tab whether or not the app is already running, no GUI
+    /// driving involved — and fall back to the default browser, saying so,
+    /// rather than failing the navigation over the app name.
+    private func goTo(url: String, app spokenApp: String?) async -> ExecutionOutcome {
+        guard let full = URL(string: url.contains("://") ? url : "https://\(url)") else {
+            return .failed("Couldn't form a URL from “\(url)”")
+        }
+        if let spokenApp {
+            guard let appURL = AppCatalog.resolve(spokenName: Self.canonicalName(for: spokenApp)) else {
+                NSWorkspace.shared.open(full)
+                return .done(notice: "→ \(url) — no app “\(spokenApp)”, used the default browser")
+            }
+            let name = appURL.deletingPathExtension().lastPathComponent
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            do {
+                _ = try await NSWorkspace.shared.open(
+                    [full], withApplicationAt: appURL, configuration: configuration)
+                // Postcondition, not a hope: the app the user named comes to
+                // the front, or the notice would be a lie.
+                _ = await waitForFrontmost(appNamed: name, timeout: 3.0)
+                return .done(notice: "→ \(url) in \(name)")
+            } catch {
+                NSWorkspace.shared.open(full)
+                return .done(notice: "→ \(url) — \(name) refused it, used the default browser")
+            }
+        }
         if frontmostBrowser != nil {
             await driveAddressBar(text: url)
             return .done(notice: "→ \(url)")
-        }
-        guard let full = URL(string: url.contains("://") ? url : "https://\(url)") else {
-            return .failed("Couldn't form a URL from “\(url)”")
         }
         NSWorkspace.shared.open(full)
         return .done(notice: "→ \(url)")
     }
 
-    private func webSearch(query: String) async -> ExecutionOutcome {
+    private func webSearch(query: String, app spokenApp: String?) async -> ExecutionOutcome {
+        // A named browser gets fronted first, then its address bar does the
+        // searching — the omnibox treats "discord" exactly the way the user's
+        // own typing would (autocomplete or search). If the named app never
+        // comes up as a drivable browser, fall through to the default path.
+        if let spokenApp {
+            if case .done = await openApp(named: spokenApp) {
+                _ = await waitForFrontmost(appNamed: spokenApp, timeout: 3.0)
+                try? await Task.sleep(for: .milliseconds(250))
+                if frontmostBrowser != nil {
+                    await driveAddressBar(text: query)
+                    return .done(notice: "Searching: \(query)")
+                }
+            }
+        }
         if frontmostBrowser != nil {
             // The address bar searches with the user's own default engine.
             await driveAddressBar(text: query)
@@ -175,8 +215,42 @@ final class CommandExecutor {
         return NSWorkspace.shared.frontmostApplication?.processIdentifier != pid
     }
 
+    /// Waits until the frontmost app plausibly IS the named one — the
+    /// postcondition behind "opened X" claims. Fuzzy on the same rules as
+    /// resolution, so "chrome" satisfies "Google Chrome".
+    func waitForFrontmost(appNamed spoken: String, timeout: TimeInterval) async -> Bool {
+        let target = Self.canonicalName(for: spoken)
+        func satisfied() -> Bool {
+            guard let name = NSWorkspace.shared.frontmostApplication?.localizedName else {
+                return false
+            }
+            return AppNameMatch.matches(spoken: target, appName: name)
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, !Task.isCancelled {
+            if satisfied() { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return satisfied()
+    }
+
+    /// Whether the frontmost app is a browser we know how to drive — also
+    /// the autopilot's completion check for goToURL/webSearch steps.
+    var frontmostIsBrowser: Bool { frontmostBrowser != nil }
+
+    /// The frontmost app's display name (autopilot completion checks).
+    var frontmostAppName: String? {
+        NSWorkspace.shared.frontmostApplication?.localizedName
+    }
+
+    /// Spoken names that don't fuzzy-match their bundle's actual name pass
+    /// through the alias table first.
+    private static func canonicalName(for spoken: String) -> String {
+        Self.appAliases[AppCatalog.fold(spoken)] ?? spoken
+    }
+
     private func matchRunningApp(named spoken: String) -> NSRunningApplication? {
-        let query = AppCatalog.fold(Self.appAliases[AppCatalog.fold(spoken)] ?? spoken)
+        let query = AppCatalog.fold(Self.canonicalName(for: spoken))
         guard !query.isEmpty else { return nil }
         let candidates = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
@@ -284,51 +358,18 @@ final class CommandExecutor {
 }
 
 /// Resolves spoken app names to installed application bundles by scanning the
-/// standard app directories (~16 ms; no cache needed).
+/// standard app directories (~16 ms; no cache needed). Scoring lives in
+/// PawvisCore's `AppNameMatch` so the autopilot's completion checks share the
+/// exact rules that resolution uses.
 enum AppCatalog {
     /// Lowercased, alphanumerics+spaces only, collapsed.
     static func fold(_ s: String) -> String {
-        s.lowercased()
-            .map { $0.isLetter || $0.isNumber ? $0 : " " }
-            .reduce(into: "") { $0.append($1) }
-            .split(separator: " ")
-            .joined(separator: " ")
+        AppNameMatch.fold(s)
     }
 
     /// Score a spoken query (pre-folded) against an app name. 0 = no match.
     static func matchScore(query: String, name: String) -> Int {
-        let folded = fold(name)
-        guard !folded.isEmpty else { return 0 }
-        if folded == query { return 1000 }
-
-        let nameTokens = folded.split(separator: " ").map(String.init)
-        let queryTokens = query.split(separator: " ").map(String.init)
-
-        // Every query token is a prefix of some name token, in order:
-        // "google chrome" ~ "google chrome", "chrome" ~ "google chrome".
-        var ni = 0
-        var allPrefix = true
-        for qt in queryTokens {
-            var found = false
-            while ni < nameTokens.count {
-                if nameTokens[ni].hasPrefix(qt) { found = true; ni += 1; break }
-                ni += 1
-            }
-            if !found { allPrefix = false; break }
-        }
-        if allPrefix {
-            // Prefer tighter names ("Google Chrome" over "Chrome Remote
-            // Desktop Host Uninstaller" for "chrome").
-            return 500 - min(nameTokens.count - queryTokens.count, 40) * 10
-        }
-
-        // Initialism: "vs code" won't hit this, but "gc" → "Google Chrome".
-        let initialism = nameTokens.compactMap(\.first).map(String.init).joined()
-        if initialism == query.replacingOccurrences(of: " ", with: "") { return 300 }
-
-        if folded.hasPrefix(query) { return 250 }
-        if folded.contains(query) { return 150 }
-        return 0
+        AppNameMatch.matchScore(query: query, name: name)
     }
 
     /// Best-matching installed app for a spoken name, boosting running apps

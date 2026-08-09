@@ -123,6 +123,29 @@ final class AutopilotEngine {
     private static let promptBudget = AutopilotTokenLedger.windowTokens
         - instructionTokens - AutopilotTokenLedger.reservedTokens
 
+    // MARK: - Translation schema
+
+    @Generable
+    enum TranslatedAction: String, CaseIterable {
+        case openApp, switchToApp, goToURL, webSearch, pressKey, quitApp
+        case needsScreen
+    }
+
+    @Generable
+    struct TranslationChoice {
+        @Guide(description: "The single machine intent the spoken command means; needsScreen when it refers to on-screen things or needs several actions")
+        var action: TranslatedAction
+
+        @Guide(description: "The app name, URL, search words, or key name the intent needs. Omit for needsScreen.")
+        var argument: String?
+
+        @Guide(description: "The app named to act in ('in Chrome' → 'Chrome'). Omit when none was named.")
+        var app: String?
+    }
+
+    private static let translationInstructionTokens =
+        AutopilotPolicy.estimatedTokens(TranslationPolicy.instructions)
+
     // MARK: - Session lifecycle
 
     private var session: LanguageModelSession?
@@ -131,20 +154,82 @@ final class AutopilotEngine {
     private var spare: LanguageModelSession?
     private var ledger = AutopilotTokenLedger(instructionTokens: AutopilotEngine.instructionTokens)
 
+    /// The translation stage's own session — different instructions, its own
+    /// ledger. It is the FIRST thing every free-form command hits, so it is
+    /// prewarmed as eagerly as the loop's session.
+    private var translationSession: LanguageModelSession?
+    private var translationLedger = AutopilotTokenLedger(
+        instructionTokens: AutopilotEngine.translationInstructionTokens)
+
     private let screenContext = ScreenContextProvider()
 
     /// Called when voice control starts, so the first command doesn't pay
     /// the ~5 s cold cost.
     func prewarm() {
-        guard Self.isSupported, session == nil else { return }
-        session = Self.freshSession()
-        ledger.reset()
+        guard Self.isSupported else { return }
+        if session == nil {
+            session = Self.freshSession()
+            ledger.reset()
+        }
+        if translationSession == nil {
+            translationSession = Self.freshTranslationSession()
+            translationLedger.reset()
+        }
     }
 
     private static func freshSession() -> LanguageModelSession {
         let fresh = LanguageModelSession(instructions: instructions)
         fresh.prewarm()
         return fresh
+    }
+
+    private static func freshTranslationSession() -> LanguageModelSession {
+        let fresh = LanguageModelSession(instructions: TranslationPolicy.instructions)
+        fresh.prewarm()
+        return fresh
+    }
+
+    // MARK: - Translation (free-form → one primitive)
+
+    /// One screen-free guided-generation round: what single primitive does
+    /// this utterance mean? Returns nil on model failure — the caller falls
+    /// through to the visual loop, never the other way around. This stage
+    /// exists because the on-device model is small: constrained one-sentence
+    /// translation is the job it does reliably; sequencing GUI actions isn't.
+    func translate(goal: String) async -> IntentTranslation? {
+        guard Self.isSupported else { return nil }
+        let prompt = TranslationPolicy.prompt(for: goal)
+        let promptTokens = AutopilotPolicy.estimatedTokens(prompt)
+        if translationSession == nil
+            || translationLedger.shouldRecycle(nextPromptTokens: promptTokens) {
+            translationSession = Self.freshTranslationSession()
+            translationLedger.reset()
+        }
+        for attempt in 0..<2 {
+            guard let session = translationSession else { return nil }
+            do {
+                translationLedger.record(promptTokens: promptTokens)
+                let response = try await session.respond(
+                    to: prompt, generating: TranslationChoice.self,
+                    options: GenerationOptions(sampling: .greedy))
+                return Self.mirror(response.content)
+            } catch {
+                if Task.isCancelled || error is CancellationError { return nil }
+                Log.voice.error("Intent translation failed (attempt \(attempt + 1)): \(error.localizedDescription, privacy: .public)")
+                // One retry on a fresh session (covers a filled window the
+                // ledger's estimate missed); a second failure means the loop.
+                translationSession = Self.freshTranslationSession()
+                translationLedger.reset()
+            }
+        }
+        return nil
+    }
+
+    private static func mirror(_ choice: TranslationChoice) -> IntentTranslation {
+        IntentTranslation(
+            intent: TranslatedIntent(rawValue: choice.action.rawValue) ?? .needsScreen,
+            argument: choice.argument,
+            app: choice.app)
     }
 
     private func activeSession() -> LanguageModelSession {
@@ -275,22 +360,54 @@ final class AutopilotEngine {
 
             let label = targetLabel(of: step, in: screen)
             let frontmostBefore = NSWorkspace.shared.frontmostApplication?.processIdentifier
+
+            // Baseline for click-family completion claims. Always full
+            // screen: the near-pointer region recenters on the moved
+            // pointer, so a same-scope comparison would trivially differ.
+            var completionBaseline: Int?
+            if step.goalComplete,
+               AutopilotPolicy.completionCheck(for: step) == .screenChanged {
+                let baseline = screen.isFullScreen
+                    ? screen : await snapshot(scope: .fullScreen)
+                completionBaseline = AutopilotPolicy.screenSignature(baseline)
+                if Task.isCancelled { return .cancelled }
+            }
+
             let failure = await execute(step, screen: screen, executor: executor)
+
+            // A completion claim is a hypothesis, not a result: settle, then
+            // check the world before believing it. A click that changed
+            // nothing, or an app that never came forward, is a failed step —
+            // the run keeps going instead of ending on a fiction.
+            var shortfall = failure
+            var verifiedComplete = false
+            if failure == nil, step.goalComplete {
+                await settle(after: step.action, frontmostBefore: frontmostBefore,
+                             executor: executor)
+                if Task.isCancelled { return .cancelled }
+                if let unmet = await completionShortfall(
+                    of: step, baseline: completionBaseline, executor: executor) {
+                    shortfall = unmet
+                } else {
+                    verifiedComplete = true
+                }
+            }
+
             let entry = AutopilotPolicy.historyLine(
-                index: stepIndex, step: step, targetLabel: label, failure: failure)
+                index: stepIndex, step: step, targetLabel: label, failure: shortfall)
             history.append(entry)
             onStep(stepIndex, entry.line)
 
-            if let failure {
+            if verifiedComplete {
+                return .finished(notice: "✓ \(goal)")
+            }
+            if let shortfall {
                 consecutiveFailures += 1
                 if consecutiveFailures > AutopilotPolicy.consecutiveFailureCap {
-                    return .failed(failure)
+                    return .failed(shortfall)
                 }
             } else {
                 consecutiveFailures = 0
-                if step.goalComplete {
-                    return .finished(notice: "✓ \(goal)")
-                }
             }
 
             proposals.append(AutopilotPolicy.ProposedRecord(
@@ -300,8 +417,11 @@ final class AutopilotEngine {
             }
 
             recycleAheadIfNeeded()
-            await settle(after: step.action, frontmostBefore: frontmostBefore,
-                         executor: executor)
+            // The verification path settled already; don't wait twice.
+            if failure != nil || !step.goalComplete {
+                await settle(after: step.action, frontmostBefore: frontmostBefore,
+                             executor: executor)
+            }
             if Task.isCancelled { return .cancelled }
         }
         return .failed("Stopped after \(AutopilotPolicy.stepCap) steps on “\(goal)”")
@@ -421,13 +541,13 @@ final class AutopilotEngine {
                     ?? (raw.contains(".") ? raw : nil) else {
                 return "didn't catch the address"
             }
-            return outcome(await executor.execute(.goTo(url: url)))
+            return outcome(await executor.execute(.goTo(url: url, app: nil)))
 
         case .webSearch:
             guard let query = step.argument, !query.isEmpty else {
                 return "nothing to search for"
             }
-            return outcome(await executor.execute(.webSearch(query: query)))
+            return outcome(await executor.execute(.webSearch(query: query, app: nil)))
 
         case .scrollUp:
             return outcome(await executor.execute(.scroll(direction: .up, amount: .step)))
@@ -442,6 +562,34 @@ final class AutopilotEngine {
         case .done, .cannotProceed:
             // Terminal actions are handled in the loop, never executed.
             return nil
+        }
+    }
+
+    /// Checks a goal-completing step's postcondition against the world.
+    /// Returns nil when the claim holds, or a short reason it doesn't.
+    /// Necessary, not sufficient — it can't prove the goal's semantics, but
+    /// it catches the classic lie: "finished" after an action that visibly
+    /// did nothing.
+    private func completionShortfall(
+        of step: AutopilotStep, baseline: Int?, executor: CommandExecutor
+    ) async -> String? {
+        switch AutopilotPolicy.completionCheck(for: step) {
+        case .accept:
+            return nil
+        case .appFrontmost(let named):
+            if AutopilotPolicy.frontmostSatisfies(
+                target: named,
+                frontmostAppName: executor.frontmostAppName,
+                frontmostIsBrowser: executor.frontmostIsBrowser) {
+                return nil
+            }
+            if let named { return "\(named) never came to the front" }
+            return "no browser came to the front"
+        case .screenChanged:
+            guard let baseline else { return nil }
+            let post = await snapshot(scope: .fullScreen)
+            return AutopilotPolicy.screenSignature(post) == baseline
+                ? "nothing on screen changed" : nil
         }
     }
 

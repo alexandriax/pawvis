@@ -134,34 +134,58 @@ public final class VoiceControlParser {
             return .press(chord)
         }
 
-        // "go to X" / "navigate to X" / "visit X" — a URL or a web search.
+        // "go to X" / "navigate to X" / "visit X" — a URL or a web search,
+        // possibly qualified with an app ("go to discord dot com in chrome").
         if let target = payload(after: ["go to", "goto", "navigate to", "browse to", "visit"],
                                 cleaned: cleaned, tokens: tokens), !target.isEmpty {
-            if let url = SpokenURLNormalizer.normalize(target) {
-                return .goTo(url: url)
+            if let nav = navigation(from: target) {
+                return nav
             }
-            return .webSearch(query: target)
+            return .webSearch(query: target, app: nil)
         }
 
         if let query = payload(after: ["search for", "google", "look up"],
                                cleaned: cleaned, tokens: tokens), !query.isEmpty {
-            return .webSearch(query: query)
+            // A trailing browser qualifier names where to search; anything
+            // else is part of the query ("search for life in the universe").
+            if let split = Self.splitAppQualifier(of: query),
+               Self.isBrowserWord(split.app) {
+                return .webSearch(query: split.payload, app: split.app)
+            }
+            return .webSearch(query: query, app: nil)
         }
 
         // "switch to X" before "open X" so "switch to chrome" never launches
-        // a second copy.
+        // a second copy. App-name targets can't contain clause markers — a
+        // multi-clause target ("open notes and start a new note") is a
+        // task, not an app name, and goes to the free-form ladder whole.
         if let app = payload(after: ["switch to", "switch back to", "go back to"],
                              cleaned: cleaned, tokens: tokens), !app.isEmpty {
+            if AutopilotPolicy.isMultiClause(goal: app) {
+                return .resolve(transcript: cleaned)
+            }
             return .switchTo(app: app)
         }
 
         if let app = payload(after: ["quit"], cleaned: cleaned, tokens: tokens),
            !app.isEmpty {
+            if AutopilotPolicy.isMultiClause(goal: app) {
+                return .resolve(transcript: cleaned)
+            }
             return .quit(app: app)
         }
 
         if let app = payload(after: ["open", "launch"], cleaned: cleaned, tokens: tokens),
            !app.isEmpty {
+            // "open" covers places as well as apps: a URL-shaped target
+            // ("open discord dot com"), or anything aimed at a browser
+            // ("open discord in chrome"), is navigation, not an app launch.
+            if let nav = navigation(from: app) {
+                return nav
+            }
+            if AutopilotPolicy.isMultiClause(goal: app) {
+                return .resolve(transcript: cleaned)
+            }
             return .open(app: app)
         }
 
@@ -191,6 +215,105 @@ public final class VoiceControlParser {
     private static let politenessTokens: Set<String> = [
         "please", "ok", "okay", "hey", "now",
     ]
+
+    // MARK: - App-qualified navigation
+
+    /// A spoken target split at its trailing app qualifier:
+    /// "discord dot com in chrome" → ("discord dot com", "chrome", "in").
+    struct AppQualifierSplit: Equatable {
+        var payload: String
+        var app: String
+        var separator: String
+    }
+
+    /// Browsers people name in navigation commands. Pure vocabulary — whether
+    /// the name resolves to an installed app is the executor's business; this
+    /// list only decides that a qualifier makes a phrase navigational.
+    private static let browserWords: Set<String> = [
+        "safari", "safari technology preview", "chrome", "google chrome",
+        "chromium", "firefox", "edge", "microsoft edge", "arc", "brave",
+        "brave browser", "opera", "vivaldi", "orion", "kagi", "dia",
+        "browser", "the browser", "my browser", "a browser",
+        "default browser", "the default browser",
+    ]
+
+    /// Payload words that mean browser furniture or screen context, not a
+    /// destination — "open a new tab in chrome" and "open it in chrome" must
+    /// not become web searches for "a new tab" or "it".
+    private static let nonDestinationWords: Set<String> = [
+        "tab", "tabs", "window", "windows", "incognito", "private",
+        "it", "this", "that", "them",
+    ]
+
+    static func isBrowserWord(_ s: String) -> Bool {
+        browserWords.contains(normalize(s))
+    }
+
+    /// Splits "<payload> in <app>" (also "with"/"using"/"on") at the LAST
+    /// separator. Both halves keep the original casing. Purely lexical —
+    /// whether the qualifier actually reads as an app is decided in
+    /// `navigation(from:)`.
+    static func splitAppQualifier(of target: String) -> AppQualifierSplit? {
+        let words = target.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard words.count >= 3 else { return nil }
+        let separators: Set<String> = ["in", "with", "using", "on"]
+        for index in stride(from: words.count - 2, through: 1, by: -1) {
+            let separator = normalize(words[index])
+            guard separators.contains(separator) else { continue }
+            // A separator followed by spoken URL punctuation is inside an
+            // address ("linked in dot com"), not introducing a qualifier —
+            // keep scanning left.
+            if SpokenURLNormalizer.isConnectorToken(normalize(words[index + 1])) {
+                continue
+            }
+            let payload = words[..<index].joined(separator: " ")
+            let app = trimTrailingNoise(words[(index + 1)...].joined(separator: " "))
+            guard !payload.isEmpty, !app.isEmpty else { return nil }
+            return AppQualifierSplit(payload: payload, app: app, separator: separator)
+        }
+        return nil
+    }
+
+    /// Interprets a spoken open/go-to target as a navigation destination.
+    /// In order:
+    /// - "<url> <qualifier>" → that URL; the qualifier rides along as the
+    ///   app when it reads like one (a known browser, or a short "in/with/
+    ///   using" phrase) and is DROPPED otherwise ("discord dot com on my
+    ///   laptop" navigates to discord.com) — a qualifier must never be
+    ///   glued into the address.
+    /// - "<words> in <known browser>" → search those words there (the
+    ///   address bar autocompletes "discord" the same way the user would),
+    ///   unless the words are browser furniture ("a new tab") or pronouns.
+    /// - A target that is URL-shaped as a whole → that URL.
+    /// Returns nil when the target doesn't read as navigation (an app name,
+    /// a file, free-form speech) — the caller keeps its own meaning.
+    func navigation(from target: String) -> VoiceCommand? {
+        if let split = Self.splitAppQualifier(of: target) {
+            let qualifierIsBrowser = Self.isBrowserWord(split.app)
+            if let url = SpokenURLNormalizer.normalize(split.payload) {
+                let qualifierWordCount = split.app
+                    .split(whereSeparator: { $0.isWhitespace }).count
+                let qualifierReadsAsApp = qualifierIsBrowser
+                    || (split.separator != "on" && qualifierWordCount <= 4)
+                return .goTo(url: url, app: qualifierReadsAsApp ? split.app : nil)
+            }
+            if qualifierIsBrowser {
+                let payloadWords = Set(
+                    Self.normalize(split.payload).split(separator: " ").map(String.init))
+                if payloadWords.isDisjoint(with: Self.nonDestinationWords) {
+                    return .webSearch(query: split.payload, app: split.app)
+                }
+            }
+            // A qualifier structure existed but didn't read as navigation
+            // ("open the file in downloads"): never fall through to
+            // whole-target URL assembly — that's the gluing bug again.
+            return nil
+        }
+        if let url = SpokenURLNormalizer.normalize(target) {
+            return .goTo(url: url, app: nil)
+        }
+        return nil
+    }
 
     /// Spoken window/edit phrases and the chord each one means. All keys
     /// exist in TextTyper's code table.

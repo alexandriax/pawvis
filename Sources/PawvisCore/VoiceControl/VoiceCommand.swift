@@ -44,10 +44,13 @@ public enum ScrollAmount: String, Equatable, Sendable {
 /// A machine-control command parsed from a wake-word utterance. Typing is not
 /// a command — the parser handles it as a mode (see `VoiceControlParser`).
 public enum VoiceCommand: Equatable, Sendable {
-    /// Navigate the frontmost browser (or the default browser) to a URL.
-    case goTo(url: String)
-    /// Search the web for a phrase ("go to" targets that aren't URL-shaped).
-    case webSearch(query: String)
+    /// Navigate to a URL — in the named app when one was spoken ("open
+    /// discord dot com in Chrome"), else the frontmost browser, else the
+    /// default one.
+    case goTo(url: String, app: String?)
+    /// Search the web for a phrase ("go to" targets that aren't URL-shaped) —
+    /// in the named browser when one was spoken.
+    case webSearch(query: String, app: String?)
     case press(KeyChord)
     case open(app: String)
     case switchTo(app: String)
@@ -178,6 +181,14 @@ public enum SpokenURLNormalizer {
     /// dropped (apostrophes, commas, trailing sentence punctuation…).
     private static let urlCharacters = CharacterSet(
         charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-_/:~?=&+#%@")
+
+    /// True when the token is spoken URL punctuation ("dot", "slash"…) —
+    /// used by the parser to tell "linked in dot com" (the "in" is inside
+    /// the domain) from "discord dot com in chrome" (the "in" introduces an
+    /// app qualifier).
+    public static func isConnectorToken(_ token: String) -> Bool {
+        tokenReplacements[token] != nil
+    }
 
     public static func normalize(_ spoken: String) -> String? {
         var pieces: [String] = []

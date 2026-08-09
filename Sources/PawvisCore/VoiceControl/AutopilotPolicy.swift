@@ -22,17 +22,49 @@ public enum AutopilotPolicy {
     /// from guided generation are an unproven surface.
     public static let waitActionMilliseconds = 2000
 
-    // MARK: - Scope
+    // MARK: - Goal shape
 
-    /// Step 1 keeps the resolver's measured region-first behavior for
-    /// one-shot commands ("click sign in") — unless the goal reads as
-    /// multi-clause, where the first action usually isn't near the pointer.
-    public static func initialScope(goal: String) -> AutopilotScope {
+    /// Multi-clause goals ("open notes and start a new note") need the loop's
+    /// sequencing; the one-shot translation stage never sees them.
+    public static func isMultiClause(goal: String) -> Bool {
         let normalized = " " + VoiceControlParser.normalize(goal) + " "
         for marker in [" and ", " then ", " and then "] where normalized.contains(marker) {
-            return .fullScreen
+            return true
         }
-        return .nearPointer
+        return false
+    }
+
+    /// Click-family goals are inherently visual — the target is on the
+    /// screen, usually near the pointer.
+    public static func isClickPrefixed(goal: String) -> Bool {
+        let normalized = VoiceControlParser.normalize(goal)
+        for prefix in ["click ", "tap ", "double click ", "double tap ",
+                       "right click ", "right tap "]
+            where normalized.hasPrefix(prefix) {
+            return true
+        }
+        return false
+    }
+
+    /// Goals that skip the translation stage and go straight to the visual
+    /// loop: click-family (the screen IS the subject) and multi-clause (the
+    /// translator is deliberately single-primitive). Everything else gets one
+    /// cheap screen-free translation attempt first — the small model is far
+    /// more reliable translating words than sequencing GUI actions.
+    public static func goesStraightToLoop(goal: String) -> Bool {
+        isClickPrefixed(goal: goal) || isMultiClause(goal: goal)
+    }
+
+    // MARK: - Scope
+
+    /// Click-family goals keep the resolver's measured region-first behavior
+    /// ("click sign in" → look near the pointer). Everything else that
+    /// reaches the loop is there because it needs the screen at large —
+    /// window controls, menus, another app — so the first look is the whole
+    /// screen, not whatever happens to sit under the pointer.
+    public static func initialScope(goal: String) -> AutopilotScope {
+        isClickPrefixed(goal: goal) && !isMultiClause(goal: goal)
+            ? .nearPointer : .fullScreen
     }
 
     /// From step 2 on, the loop is mid-task and the target can be anywhere —
@@ -185,6 +217,45 @@ public enum AutopilotPolicy {
             break
         }
         return .valid
+    }
+
+    // MARK: - Completion verification
+
+    /// How a step's claim of finishing the goal is checked against reality.
+    /// The model asserting `goalComplete` is a hypothesis, not a result — a
+    /// click that landed nowhere must not end the run as a success.
+    public enum CompletionCheck: Equatable, Sendable {
+        /// The named app (nil = any browser) must be frontmost.
+        case appFrontmost(named: String?)
+        /// Something visible must have changed (full-screen signature).
+        case screenChanged
+        /// No independent check available — accept the claim. Used for
+        /// actions whose blind repetition would be destructive (typing,
+        /// key presses), where a false "unverified" is worse than a false
+        /// "done".
+        case accept
+    }
+
+    public static func completionCheck(for step: AutopilotStep) -> CompletionCheck {
+        switch step.action {
+        case .openApp, .switchToApp:
+            return .appFrontmost(named: step.argument)
+        case .goToURL, .webSearch:
+            return .appFrontmost(named: nil)
+        case .click, .doubleClick, .rightClick, .scrollUp, .scrollDown:
+            return .screenChanged
+        case .typeText, .pressKey, .wait, .done, .cannotProceed:
+            return .accept
+        }
+    }
+
+    /// Whether the frontmost app satisfies an `appFrontmost` check.
+    public static func frontmostSatisfies(
+        target: String?, frontmostAppName: String?, frontmostIsBrowser: Bool
+    ) -> Bool {
+        guard let target, !target.isEmpty else { return frontmostIsBrowser }
+        guard let name = frontmostAppName else { return false }
+        return AppNameMatch.matches(spoken: target, appName: name)
     }
 
     // MARK: - History

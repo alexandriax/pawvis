@@ -97,11 +97,13 @@ Off by default while in beta. Enable it in **Settings → Voice (Beta)**,
 then press **Start** next to Voice control in the menu bar. Address Pawvis
 by its **wake word** (default `Pawvis`, configurable; mishearings are
 tolerated). **Every command starts with the wake word**. Speech without it
-is ignored and never typed or displayed:
+is ignored and never typed or displayed. Commands are understood by a fast
+built-in grammar first, then by on-device Apple Intelligence, and only
+genuinely visual requests drive the screen step by step:
 
 | Say | Pawvis does |
 |---|---|
-| "Pawvis, **go to** heresalexandria dot com" | Navigates the frontmost browser there (via the address bar); opens your default browser if you're not in one. Non-URL targets become a web search. |
+| "Pawvis, **go to** heresalexandria dot com" or "**open** discord dot com **in Chrome**" | Navigates there in the frontmost browser (via the address bar), or in a named app; falls back to your default browser, saying so, if you don't name one or it isn't found. Non-URL targets become a web search. |
 | "Pawvis, **type** good morning" | Types exactly that text into the focused app. One-shot, no lingering dictation mode. |
 | "Pawvis, **press** command shift T" | Presses any key or shortcut: enter, tab, escape, arrows, page up/down, F-keys, letters and digits with modifiers. |
 | "Pawvis, **open** Notes" | Launches (or brings forward) an app, with fuzzy name matching. |
@@ -116,7 +118,9 @@ is ignored and never typed or displayed:
 Speech recognition is **Apple's on-device engine**: private, free, no API
 key, no cloud (SpeechAnalyzer on macOS 26+, SFSpeechRecognizer before that).
 The step-by-step autopilot needs macOS 26 with Apple Intelligence enabled;
-everything else works without it.
+everything else works without it. Autopilot runs verify each step actually
+happened before reporting a command done, rather than taking the model's
+word for it.
 
 ### Agent hand-off (optional)
 

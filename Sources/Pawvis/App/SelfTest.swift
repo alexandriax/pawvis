@@ -73,7 +73,7 @@ func runSelfTest() -> Int32 {
     check("voice.wakeTypeIsOneShot", typed == VoiceParseResult(typing: [.type("hello world")]))
     check("voice.noWakeNoAction", parser.parse("type hello world") == VoiceParseResult())
     let goTo = parser.parse("Pawvis go to alexandria dot com")
-    check("voice.goToParses", goTo.command == .goTo(url: "alexandria.com"))
+    check("voice.goToParses", goTo.command == .goTo(url: "alexandria.com", app: nil))
     let press = parser.parse("Pavis press command shift T")
     check("voice.pressWithFuzzyWake",
           press.command == .press(KeyChord(key: "t", modifiers: [.command, .shift])))
@@ -89,6 +89,39 @@ func runSelfTest() -> Int32 {
     check("voice.multiClauseFallsToResolve",
           parser.parse("Pawvis close the window and open Safari").command
           == .resolve(transcript: "close the window and open Safari"))
+
+    // Voice routing: the simple-operations class must resolve in the
+    // deterministic grammar and NEVER reach the GUI loop. This table is the
+    // completion criterion for "open discord dot com in Chrome"-class
+    // commands — the case the loop once spent two minutes flailing on.
+    let simpleRoutes: [(String, VoiceCommand)] = [
+        ("open discord dot com in Chrome", .goTo(url: "discord.com", app: "Chrome")),
+        ("open discord dot com", .goTo(url: "discord.com", app: nil)),
+        ("go to github dot com in safari", .goTo(url: "github.com", app: "safari")),
+        ("open discord in chrome", .webSearch(query: "discord", app: "chrome")),
+        ("search for sloth videos in firefox",
+         .webSearch(query: "sloth videos", app: "firefox")),
+        ("open notes", .open(app: "notes")),
+    ]
+    for (utterance, expected) in simpleRoutes {
+        check("voice.route.\(utterance)",
+              parser.parse("Pawvis \(utterance)").command == expected)
+    }
+    check("voice.multiClauseOpenIsATaskNotAnAppName",
+          parser.parse("Pawvis open notes and start a new note").command
+          == .resolve(transcript: "open notes and start a new note"))
+    // Free-form commands translate before they loop; only genuinely visual
+    // goals go straight to the screen.
+    check("voice.clickGoalsGoStraightToLoop",
+          AutopilotPolicy.goesStraightToLoop(goal: "click sign in"))
+    check("voice.freeFormTranslatesFirst",
+          !AutopilotPolicy.goesStraightToLoop(goal: "make the text bigger"))
+    check("voice.translationCompiles",
+          TranslationPolicy.command(from: IntentTranslation(
+              intent: .goToURL, argument: "discord dot com", app: "Chrome"))
+          == .goTo(url: "discord.com", app: "Chrome"))
+    check("voice.needsScreenStaysVisual",
+          TranslationPolicy.command(from: IntentTranslation(intent: .needsScreen)) == nil)
 
     // Autopilot policy: the pure loop rules the engine runs on.
     check("autopilot.multiClauseStartsFullScreen",
