@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import PawvisCore
@@ -79,6 +80,23 @@ final class TextTyper {
             }
             down.post(tap: .cghidEventTap)
             up.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Hardware media keys aren't regular key codes — they're systemDefined
+    /// NSEvents (subtype 8) that macOS routes to the now-playing app.
+    func press(_ media: MediaKey) {
+        let keyType: Int32
+        switch media {
+        case .playPause: keyType = 16 // NX_KEYTYPE_PLAY
+        }
+        for down in [true, false] {
+            let data1 = Int((keyType << 16) | Int32((down ? 0xA : 0xB) << 8))
+            NSEvent.otherEvent(
+                with: .systemDefined, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
+                context: nil, subtype: 8, data1: data1, data2: -1
+            )?.cgEvent?.post(tap: .cghidEventTap)
         }
     }
 

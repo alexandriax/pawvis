@@ -314,6 +314,27 @@ rather than verified.
    initial snapshot is now near-pointer only for click-family goals;
    everything else starts full-screen.
 
+**Wake-word acceptance has tiers**, strictest first
+(`VoiceControlParser.wakeMatch`):
+
+1. Utterance-initial, edit distance ≤ 1 — the original bar.
+2. After leading filler ("Um, Pawvis, open chrome") — filler is skipped, but
+   the wake word must still match.
+3. Glued mid-utterance (ambient speech joined to a command segment, ≤ 3 chunks
+   deep) — accepted only when the remainder parses to a deterministic command
+   ("she said Pawvis was busy" stays ambient).
+4. Near tier (distance ≤ 2, filler-tolerant, never glue-tolerant) — acts only
+   once `WakeRescuer` confirms the remainder reads as an instruction, now for
+   the default on-device path too, not just agent mode.
+5. Live-delta trust: a live hypothesis that matched the wake word, revised
+   away by the final ("Pawvis" → "Paw this"), lets the near remainder act
+   directly, no AI round-trip (`VoiceController.handleFinal`).
+
+`Pawvis --wake-eval "<transcript as the recognizer wrote it>" …` prints the
+tier verdict per transcript, no model — paste real mishearings to debug a
+miss. New verbs must keep `.resolve` and the safety phrases out of a
+sequence's member switch (below).
+
 **Completion is verified, not asserted.** The model's `goalComplete` flag is
 a hypothesis, checked against the world before a run is allowed to finish
 (`AutopilotPolicy.completionCheck` + `AutopilotEngine.completionShortfall`):
@@ -325,6 +346,34 @@ before the click. A verification failure becomes a failure-history line and
 the loop keeps going: honest failure beats a fake success. `typeText` and
 `pressKey` claims are still trusted as reported — an unverifiable false
 negative would just mean blind, destructive repetition.
+
+**Deterministic clause sequences.** Multi-clause utterances split at
+standalone "and"/"then" and trailing commas
+(`VoiceControlParser.clauseSequence`). When every clause parses to a plain
+command, the utterance becomes `VoiceCommand.sequence` and runs in order with
+focus verified between steps (`CommandExecutor.sequenceSettle`: an open/switch
+step must see its app frontmost within 3 s or the chain stops honestly, no
+model rescue mid-sequence). One unowned clause sends the whole utterance down
+the ladder instead, and `.resolve`, `.sequence`, `.stopVoiceControl`,
+`.cancelActivity` are excluded from membership, so safety phrases and
+screen-needed goals can never join one.
+
+Supporting grammar: "open up"/"pull up"/"bring up" verbs; "open a new tab" →
+⌘T via `strippedChordPhrase`, never an app launch; "pause"/"play"/"resume" →
+the hardware media key (`TextTyper.press(MediaKey)`), routed by macOS to
+whatever's playing. Real example, now a selftest row: "pause this, open up a
+new tab, and go to youtube dot com" → [media play-pause, ⌘T, `goTo`
+youtube.com] — three verified steps, zero model.
+
+**Focus discipline.** "open X"/"switch to X" mean X ends up frontmost,
+verified: activate → `waitForFrontmost` → one retry; switch fails honestly
+("Couldn't bring X to the front") rather than claiming success. `openApp` on
+an already-running app falls through to an NSWorkspace re-launch when plain
+`activate()` is ignored — deliberately the effect of ⌘Space+type+return via
+the same call Spotlight uses, not synthetic keystrokes. The visual loop's
+instructions now forbid `goToURL`/`webSearch` arguments taken from on-screen
+text (a prompt rule, not a code guard): the model was copying the address bar
+instead of the spoken destination.
 
 - **The logic is pure and lives in `PawvisCore`.** The parser and both
   policies (`VoiceControlParser`, `TranslationPolicy`, `AutopilotPolicy`) are

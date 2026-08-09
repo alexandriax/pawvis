@@ -105,6 +105,10 @@ final class AutopilotEngine {
         "heresalexandria.com"; "lobste dot rs" → "lobste.rs"; "localhost \
         colon three thousand" → "localhost:3000".
         - "search for X" / "look up X" is a webSearch with X as the argument.
+        - goToURL and webSearch arguments come ONLY from the goal's words. \
+        Never copy an address or text you see in the element list — the \
+        address bar shows where the user already is, not where they asked \
+        to go.
         - pressKey presses one key or shortcut; the argument is its spoken \
         name ("return", "escape", "command shift t").
         - If the screen is still loading, or the last action's result has \

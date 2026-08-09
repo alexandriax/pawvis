@@ -87,6 +87,44 @@ private func evalRows(_ corpus: [String]) async {
     }
 }
 
+/// Wake-word eval (`Pawvis --wake-eval "<full transcript>" …`): shows, tier
+/// by tier, what the wake matcher does with a transcript AS THE RECOGNIZER
+/// WROTE IT — paste mis-hearings from the log or from the capsule to see
+/// why an utterance was accepted or dropped, and to test new aliases.
+/// Pure string matching, instant, no model.
+func runWakeEval(_ transcripts: [String]) -> Int32 {
+    let corpus = transcripts.isEmpty ? defaultWakeCorpus : transcripts
+    let parser = VoiceControlParser()
+    print("Wake-word eval — wake “\(parser.config.wakeWord)”, aliases \(parser.config.wakeWordAliases)\n")
+    for transcript in corpus {
+        if let remainder = parser.wakeRemainder(transcript) {
+            let how = parser.wakeMatch(in: transcript, tolerance: 1)?.trusted == true
+                ? "strict" : "glued+deterministic"
+            print("[wake:\(how)]  “\(transcript)” → command “\(remainder)”")
+        } else if let near = parser.nearWakeRemainder(transcript) {
+            print("[near]        “\(transcript)” → “\(near)” (needs AI confirmation, or a live-delta match)")
+        } else {
+            print("[ambient]     “\(transcript)” → ignored")
+        }
+    }
+    print("\nTiers: strict = acted on directly; near = acted on after on-device AI")
+    print("confirms it reads as an instruction (or when the live hypothesis had")
+    print("already matched the wake word); ambient = never acted on.")
+    return 0
+}
+
+private let defaultWakeCorpus = [
+    "Pawvis open Safari",
+    "Um, Pawvis, open Safari",
+    "Paw vis go to github.com",
+    "Paw this open Safari",
+    "Pavis type hello",
+    "anyway whatever Pawvis open Safari",
+    "she said Pawvis was busy",
+    "Pause the video",
+    "open safari",
+]
+
 /// The commands this architecture exists to get right — the simple-operations
 /// class first (must all be [grammar]), then free-form ones that exercise the
 /// translation stage, then genuinely visual ones that belong to the loop.
@@ -102,6 +140,10 @@ private let defaultEvalCorpus = [
     "switch to notes",
     "close the window",
     "press command shift t",
+    // Composites: every clause parses on its own → a verified sequence.
+    "open chrome and go to youtube dot com",
+    "pause this, open up a new tab, and go to youtube dot com",
+    "select all and copy",
     // Free-form: one translation round, then deterministic execution.
     "take me to wikipedia",
     "pull up the apple store page",
