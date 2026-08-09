@@ -28,7 +28,6 @@ final class SpeechEngine: NSObject {
     private var itemCounter = 0
     private var currentItemId = "apple-0"
     private var currentPartial = ""
-    private var emittedForItem = ""
     private var silenceTimer: Timer?
     /// Quiet time after the last transcript growth before we finalize.
     private var utteranceSilence: TimeInterval {
@@ -146,7 +145,6 @@ final class SpeechEngine: NSObject {
         itemCounter += 1
         currentItemId = "apple-\(itemCounter)"
         currentPartial = ""
-        emittedForItem = ""
 
         var newTask: SFSpeechRecognitionTask?
         newTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -165,7 +163,11 @@ final class SpeechEngine: NSObject {
             let text = result.bestTranscription.formattedString
             if text != currentPartial {
                 currentPartial = text
-                emitDeltaIfGrown()
+                // Whole hypothesis every change — revisions repaint the live
+                // view rather than stalling it until the final.
+                if !text.isEmpty {
+                    onEvent?(.hypothesis(itemId: currentItemId, text: text))
+                }
                 armSilenceTimer()
             }
             if result.isFinal {
@@ -187,18 +189,6 @@ final class SpeechEngine: NSObject {
                 fail("Speech recognition error: \(error.localizedDescription)")
             }
         }
-    }
-
-    private func emitDeltaIfGrown() {
-        guard currentPartial.hasPrefix(emittedForItem) else {
-            // The hypothesis was revised backwards; hold deltas and let the
-            // final transcript reconcile (the parser handles revisions).
-            return
-        }
-        let delta = String(currentPartial.dropFirst(emittedForItem.count))
-        guard !delta.isEmpty else { return }
-        emittedForItem = currentPartial
-        onEvent?(.delta(itemId: currentItemId, text: delta))
     }
 
     private func armSilenceTimer() {
@@ -227,7 +217,6 @@ final class SpeechEngine: NSObject {
             onEvent?(.completed(itemId: itemId, transcript: transcript))
         }
         currentPartial = ""
-        emittedForItem = ""
 
         if restart, !stopped {
             startRecognitionTask()

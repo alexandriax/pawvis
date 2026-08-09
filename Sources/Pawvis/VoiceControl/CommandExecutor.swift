@@ -18,6 +18,10 @@ final class CommandExecutor {
     private let typer = TextTyper()
     private let source = CGEventSource(stateID: .hidSystemState)
 
+    /// Apple-Intelligence rescue for spoken app names nothing installed
+    /// matches (Settings → Voice's visual-context switch gates on-device AI).
+    var aiAppNameRescueEnabled = false
+
     /// Bundle ids whose address bar we can drive with ⌘L.
     private static let browserBundleIDs: Set<String> = [
         "com.apple.Safari", "com.apple.SafariTechnologyPreview",
@@ -287,8 +291,32 @@ final class CommandExecutor {
             // ignored (e.g. the app was busy or activation was contested).
         }
         guard let url = AppCatalog.resolve(spokenName: spoken) else {
-            return .failed("No app matching “\(spoken)”")
+            return await openAppViaAIRescue(spoken: spoken)
         }
+        return await launch(appAt: url)
+    }
+
+    /// Nothing installed matches, even phonetically — one Apple Intelligence
+    /// round picks the sound-alike from a short, deterministically ranked
+    /// list of real installed names ("clawed ai" → Claude). The pick is only
+    /// acted on when it names a listed app verbatim, and the notice says
+    /// what was heard so a wrong rescue is explainable, not spooky.
+    private func openAppViaAIRescue(spoken: String) async -> ExecutionOutcome {
+        let failure = ExecutionOutcome.failed("No app matching “\(spoken)”")
+        guard aiAppNameRescueEnabled, #available(macOS 26.0, *),
+              AppNameRescuer.isSupported else { return failure }
+        let installed = AppCatalog.installedAppNames()
+        guard let picked = try? await AppNameRescuer.resolve(
+                  spoken: spoken, amongInstalled: installed),
+              let url = AppCatalog.resolve(spokenName: picked) else {
+            Log.voice.log("App-name rescue found nothing for: \(spoken, privacy: .private)")
+            return failure
+        }
+        Log.voice.log("App-name rescue: \(spoken, privacy: .private) → \(picked, privacy: .public)")
+        return await launch(appAt: url, heard: spoken)
+    }
+
+    private func launch(appAt url: URL, heard: String? = nil) async -> ExecutionOutcome {
         let name = url.deletingPathExtension().lastPathComponent
         do {
             let configuration = NSWorkspace.OpenConfiguration()
@@ -298,7 +326,8 @@ final class CommandExecutor {
                 app.activate()
                 _ = await waitForFrontmost(appNamed: name, timeout: 1.5)
             }
-            return .done(notice: "Opening \(name)")
+            return .done(notice: heard.map { "Opening \(name) — heard “\($0)”" }
+                ?? "Opening \(name)")
         } catch {
             return .failed("Couldn't open \(name): \(error.localizedDescription)")
         }
@@ -388,14 +417,14 @@ final class CommandExecutor {
     }
 
     private func matchRunningApp(named spoken: String) -> NSRunningApplication? {
-        let query = AppCatalog.fold(Self.canonicalName(for: spoken))
-        guard !query.isEmpty else { return nil }
+        let target = Self.canonicalName(for: spoken)
+        guard !AppCatalog.fold(target).isEmpty else { return nil }
         let candidates = NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
         var best: (app: NSRunningApplication, score: Int)?
         for app in candidates {
             guard let name = app.localizedName else { continue }
-            let score = AppCatalog.matchScore(query: query, name: name)
+            let score = AppNameMatch.bestScore(spoken: target, name: name)
             if score > 0, score > (best?.score ?? 0) {
                 best = (app, score)
             }
@@ -514,8 +543,7 @@ enum AppCatalog {
     /// (the running boost fixes e.g. "chrome" ranking a Chrome uninstaller
     /// above the browser).
     static func resolve(spokenName: String) -> URL? {
-        let query = fold(spokenName)
-        guard !query.isEmpty else { return nil }
+        guard !fold(spokenName).isEmpty else { return nil }
 
         let runningNames = Set(
             NSWorkspace.shared.runningApplications.compactMap { $0.localizedName.map(fold) })
@@ -523,7 +551,7 @@ enum AppCatalog {
         var best: (url: URL, score: Int)?
         for url in installedApps() {
             let name = url.deletingPathExtension().lastPathComponent
-            var score = matchScore(query: query, name: name)
+            var score = AppNameMatch.bestScore(spoken: spokenName, name: name)
             guard score > 0 else { continue }
             if runningNames.contains(fold(name)) { score += 250 }
             if score > (best?.score ?? 0) {
@@ -531,6 +559,13 @@ enum AppCatalog {
             }
         }
         return best?.url
+    }
+
+    /// Display names of every installed app (the AI name-rescue's candidate
+    /// pool), deduped and sorted for deterministic prompts.
+    static func installedAppNames() -> [String] {
+        Array(Set(installedApps().map { $0.deletingPathExtension().lastPathComponent }))
+            .sorted()
     }
 
     private static func installedApps() -> [URL] {
