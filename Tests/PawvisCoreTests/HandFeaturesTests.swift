@@ -351,6 +351,36 @@ final class HandFeaturesTests: XCTestCase {
                       "…but a fully splayed one still is")
     }
 
+    func testDefaultOpenHandFloorSitsBetweenClosedAndOpenPoses() {
+        // The retuned default is forgiving by design, so pin the margins it
+        // has to keep: every closed pose stays under it, every open one over.
+        let floor = PoseThresholds().openHandMinOpenness
+        for closed in [SyntheticHand.halfClosed(), SyntheticHand.curledTowardCamera(),
+                       SyntheticHand.mouseTap(indexDown: true)] {
+            XCTAssertLessThan(features(closed).openness()!, floor - 0.03,
+                              "a closed hand must clear the floor, not graze it")
+        }
+        for open in [SyntheticHand.openRelaxed(), SyntheticHand.openSplayed(),
+                     SyntheticHand.highFive(thumbTucked: true)] {
+            XCTAssertGreaterThan(features(open).openness()!, floor + 0.10,
+                                 "an open hand must clear the floor with room to spare")
+        }
+    }
+
+    func testRetiredOpenHandFloorFollowsTheRetunedDefaultDown() {
+        var untouched = PoseThresholds()
+        untouched.openHandMinOpenness = PoseThresholds.retiredOpenHandMinOpenness
+        untouched.adoptRetunedOpenHandFloor()
+        XCTAssertEqual(untouched.openHandMinOpenness, PoseThresholds().openHandMinOpenness,
+                       "settings still on the retired floor pick up the new default")
+
+        var dialed = PoseThresholds()
+        dialed.openHandMinOpenness = 0.52
+        dialed.adoptRetunedOpenHandFloor()
+        XCTAssertEqual(dialed.openHandMinOpenness, 0.52,
+                       "a strictness the user chose is left exactly where they put it")
+    }
+
     func testIsOpenHandNeedsEveryFingerTracked() {
         let full = SyntheticHand.openRelaxed()
         var joints: [HandJoint: Vec2] = [:]
