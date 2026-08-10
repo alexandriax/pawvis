@@ -35,7 +35,30 @@ public struct PoseThresholds: Codable, Equatable, Sendable {
     /// "open" and armed cursor control. The tips standing well off the palm
     /// is the signal foreshortening can't fake. Raised and lowered by the
     /// open-hand strictness slider.
-    public var openHandMinOpenness: Double = 0.40
+    ///
+    /// The default sits low in the slider's range on purpose: field testing
+    /// found the original 0.40 turned away hands that plainly read as open —
+    /// a hand held slightly off-axis, or fingers relaxed rather than posed —
+    /// and asking for a stiffer hand is worse than the misfires it prevented.
+    /// The floor still clears every closed pose by a wide margin: a half-curl
+    /// reads ~0.19 and a hand curled toward the camera reads 0.0, against
+    /// ~0.50 for a relaxed open hand.
+    public var openHandMinOpenness: Double = 0.29
+
+    /// The floor that shipped before that retune. A stored value of exactly
+    /// this is the old default with the slider never touched — the slider is
+    /// continuous, so a hand-dragged setting lands on a long decimal, never on
+    /// the round number.
+    public static let retiredOpenHandMinOpenness = 0.40
+
+    /// Follows the retuned default down, but only for settings still sitting
+    /// on the retired floor. A strictness the user dialed themselves is left
+    /// exactly where they put it.
+    public mutating func adoptRetunedOpenHandFloor() {
+        if openHandMinOpenness == Self.retiredOpenHandMinOpenness {
+            openHandMinOpenness = PoseThresholds().openHandMinOpenness
+        }
+    }
 
     public init() {}
 

@@ -36,6 +36,14 @@ final class SettingsStore: ObservableObject {
             settings.voiceControl.enabled = false
             defaults.set(true, forKey: "PawvisMigration.voiceBetaOff")
         }
+        // v8: the open-hand floor came down after field testing. A new default
+        // alone would only reach fresh installs — every existing settings file
+        // has the old number written into it — so installs still on the
+        // retired floor follow it down, once. A dialed-in strictness stays put.
+        if !defaults.bool(forKey: "PawvisMigration.retunedOpenHandFloor") {
+            settings.gestures.poseThresholds.adoptRetunedOpenHandFloor()
+            defaults.set(true, forKey: "PawvisMigration.retunedOpenHandFloor")
+        }
     }
 
     private func persist() {
