@@ -22,6 +22,10 @@ final class TextTyper {
         "9": 25, "7": 26, "8": 28, "0": 29,
         "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97,
         "f7": 98, "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111,
+        // ANSI punctuation, for typed shortcuts (gesture actions): ⌘[ and ⌘]
+        // are browser back/forward, and ShortcutParser accepts the rest.
+        "[": 33, "]": 30, ";": 41, "'": 39, ",": 43, ".": 47, "/": 44,
+        "\\": 42, "-": 27, "=": 24, "`": 50,
     ]
 
     func perform(_ actions: [TypingAction]) {

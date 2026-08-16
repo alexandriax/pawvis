@@ -2,6 +2,32 @@ import AppKit
 import Foundation
 import PawvisCore
 
+/// A fully-jointed open hand for driving the engine (the custom-gesture
+/// smoke needs a pose that passes the strict open-hand check, which the
+/// partial hand below deliberately can't).
+private func openHand(wrist: Vec2, scale: Double = 0.15) -> Hand {
+    var joints: [HandJoint: Vec2] = [.wrist: wrist]
+    let dirs: [(Finger, Vec2, Vec2)] = [
+        (.index, Vec2(-0.25, -0.95), Vec2(0.06, -0.998)),
+        (.middle, Vec2(0, -1.0), Vec2(0, -1)),
+        (.ring, Vec2(0.22, -0.95), Vec2(-0.03, -1)),
+        (.little, Vec2(0.42, -0.85), Vec2(-0.10, -0.995)),
+    ]
+    for (finger, mcpOffset, dir) in dirs {
+        let mcp = wrist + mcpOffset * scale
+        joints[finger.mcp] = mcp
+        joints[finger.pip] = mcp + dir * (0.45 * scale)
+        joints[finger.dip] = mcp + dir * (0.70 * scale)
+        joints[finger.tip] = mcp + dir * (0.95 * scale)
+    }
+    let thumbTip = wrist + Vec2(-0.95, -0.70) * scale
+    joints[.thumbCMC] = wrist + Vec2(-0.35, -0.25) * scale
+    joints[.thumbMP] = wrist.lerp(to: thumbTip, t: 0.45)
+    joints[.thumbIP] = wrist.lerp(to: thumbTip, t: 0.72)
+    joints[.thumbTip] = thumbTip
+    return Hand(chirality: .right, confidence: 1, joints: joints)
+}
+
 /// Headless smoke test (`Pawvis --selftest`): exercises the core pipeline
 /// pieces that don't need camera/mic/permissions, so CI or a fresh checkout
 /// can verify the binary is sane without launching the UI.
@@ -57,6 +83,47 @@ func runSelfTest() -> Int32 {
     } else {
         check("settings.roundtrip", false)
     }
+
+    // Custom gestures: a bound swipe fires through the engine end to end,
+    // and the settings tree carries bindings intact.
+    var customEngineConfig = GestureConfig.default
+    customEngineConfig.controlTrigger = .anyHand
+    customEngineConfig.mirrorCamera = false
+    customEngineConfig.reachMode = .manual
+    customEngineConfig.interactionBox = InteractionBox(xMin: 0, xMax: 1, yMin: 0, yMax: 1)
+    customEngineConfig.smoothing = OneEuroFilter.Params(minCutoff: 1e9, beta: 0, dCutoff: 1e9)
+    let customEngine = GestureEngine(config: customEngineConfig)
+    var customDetection = CustomGestureDetector.Config()
+    customDetection.enabled = [.swipeRight]
+    customEngine.customConfig = customDetection
+    var swipeFired = false
+    var wrist = Vec2(0.2, 0.6)
+    var tick = 0.0
+    for i in 0..<12 {
+        if i >= 3 { wrist = wrist + Vec2(0.05, 0) }
+        let (events, _) = customEngine.process(
+            HandFrame(time: tick, hands: [openHand(wrist: wrist)]))
+        if events.contains(.customGesture(.swipeRight)) { swipeFired = true }
+        tick += 1.0 / 30
+    }
+    check("customGesture.boundSwipeFires", swipeFired)
+
+    var boundSettings = PawvisSettings.default
+    boundSettings.customGestures.bindings = [
+        CustomGestureBinding(gesture: .grabFlingLeft,
+                             action: GestureAction(kind: .windowLeftHalf)),
+    ]
+    if let data = try? JSONEncoder().encode(boundSettings),
+       let decoded = try? JSONDecoder().decode(PawvisSettings.self, from: data) {
+        check("customGesture.settingsRoundtrip", decoded == boundSettings)
+    } else {
+        check("customGesture.settingsRoundtrip", false)
+    }
+    check("customGesture.shortcutParses",
+          ShortcutParser.chord(from: "cmd+shift+t")
+          == KeyChord(key: "t", modifiers: [.command, .shift]))
+    check("customGesture.actionChordPressable",
+          GestureAction(kind: .browserBack).keyChord.map(TextTyper.canPress) == true)
 
     // Launch-at-login: on by default, and the pure reconcile rules agree.
     // (Deliberately no SMAppService call — a smoke test must not leave a login
@@ -185,9 +252,12 @@ func runSelfTest() -> Int32 {
     // no Resources to look in, and CI runs this against `build/Pawvis.app`.
     if Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" {
         // Every finger the right-click picker offers needs its own pose; the
-        // index is not one of them (it already drives the left button).
+        // index is not one of them (it already drives the left button). Every
+        // custom gesture ships a pose too — the gallery and the guide both
+        // draw them.
         let poses = ["take-control", "move", "click", "drag", "scroll", "stop-tracking"]
             + Finger.allCases.filter { $0 != .index }.map { "right-click-\($0.rawValue)" }
+            + CustomGesture.allCases.map(\.glyphName)
         for name in poses {
             check("guide.glyph.\(name)", PawvisGlyph.gesture(name, size: 40) != nil)
         }

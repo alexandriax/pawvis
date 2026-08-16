@@ -266,4 +266,38 @@ enum SyntheticHand {
                          thumbTipOffset: thumbExtendedOffset),
               wrist: wrist, scale: scale)
     }
+
+    /// Fist with the thumb standing straight up (thumbs-up) or straight down
+    /// (thumbs-down). The palm center sits ~0.75 scales above the wrist, so
+    /// the offsets put the thumb tip well clear of it, vertically.
+    static func thumbSignal(up: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+                            scale: Double = 0.15) -> Hand {
+        build(pose: Pose(fingerDirs: relaxedDirs,
+                         curled: [.index, .middle, .ring, .little],
+                         thumbTipOffset: up ? Vec2(0.0, -1.9) : Vec2(0.0, 0.42)),
+              wrist: wrist, scale: scale)
+    }
+
+    /// The grab pose for the fling: the whole hand closed. Geometrically the
+    /// fist — what makes a *grab* is the open→closed transition the detector
+    /// requires, not the shape alone.
+    static func gathered(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
+        fist(wrist: wrist, scale: scale)
+    }
+
+    /// The one-hand wiggle's oscillation: the splayed hand with every
+    /// fingertip pulled a fifth of the way toward the wrist (`contracted`) or
+    /// left fully extended. Alternating the two swings each finger's extent
+    /// far past the wiggle noise floor while the palm never moves.
+    static func wigglePhase(contracted: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+                            scale: Double = 0.15) -> Hand {
+        var hand = openSplayed(wrist: wrist, scale: scale)
+        guard contracted else { return hand }
+        for finger in Finger.allCases {
+            if let tip = hand[finger.tip] {
+                hand.setPoint(tip.lerp(to: wrist, t: 0.2), for: finger.tip)
+            }
+        }
+        return hand
+    }
 }
