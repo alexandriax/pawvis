@@ -26,6 +26,10 @@ final class PawvisController: ObservableObject {
     private let engine: GestureEngine
     private let mouse: MouseController
     private let overlay = OverlayController()
+    private let actionRunner = GestureActionRunner()
+    /// A fired custom gesture's confirmation, shown in the status pill until
+    /// its frame-time deadline (the pill is otherwise voice control's).
+    private var gestureNotice: (text: String, until: TimeInterval)?
     private var projector: ScreenProjector
     private var cancellables: Set<AnyCancellable> = []
 
@@ -35,6 +39,8 @@ final class PawvisController: ObservableObject {
         engine = GestureEngine(config: settings.gestures)
         projector = ScreenProjector(controlAllDisplays: settings.general.controlAllDisplays)
         mouse = MouseController(projector: projector)
+        actionRunner.stopTracking = { [weak self] in self?.stopTracking() }
+        actionRunner.toggleVoiceControl = { [weak self] in self?.voice.toggle() }
 
         camera.onFrame = { [weak self] sampleBuffer in
             guard let self else { return }
@@ -152,7 +158,16 @@ final class PawvisController: ObservableObject {
 
     private func processFrame(hands: [Hand], at time: TimeInterval) {
         guard trackingActive else { return }
-        let (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
+        var (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
+
+        // Fired custom gestures are commands for this controller, not mouse
+        // events: peel them off and run their bound actions.
+        for event in events {
+            if case .customGesture(let gesture) = event {
+                performCustomGesture(gesture, at: time)
+            }
+        }
+        events.removeAll { if case .customGesture = $0 { return true } else { return false } }
 
         // The criss-cross wave completed: deliver everything else this frame
         // produced (a queued release must still land), then stop tracking
@@ -167,7 +182,7 @@ final class PawvisController: ObservableObject {
         mouse.apply(events)
         overlay.render(
             overlay: overlayState,
-            voice: voice.hud,
+            voice: hudLine(at: time),
             projector: projector,
             accessibilityBlocked: !accessibilityGranted,
             diagnostics: diagnosticsLine(hands: hands, at: time))
@@ -177,6 +192,29 @@ final class PawvisController: ObservableObject {
         let anyGrab = overlayState.grabbed || overlayState.rightGrabbed
         if anyGrab != grabbing { grabbing = anyGrab }
         if overlayState.armed != controlArmed { controlArmed = overlayState.armed }
+    }
+
+    // MARK: - Custom gestures
+
+    /// How long a fired gesture's confirmation stays in the pill.
+    private static let gestureNoticeSeconds: TimeInterval = 2.5
+
+    private func performCustomGesture(_ gesture: CustomGesture, at time: TimeInterval) {
+        guard let action = settingsStore.settings.customGestures.action(for: gesture) else { return }
+        let feedback = actionRunner.perform(action)
+        Log.app.info("Custom gesture \(gesture.rawValue): \(feedback)")
+        gestureNotice = (text: "🐾 \(feedback)", until: time + Self.gestureNoticeSeconds)
+    }
+
+    /// Voice control owns the pill; a fired gesture borrows it only while
+    /// voice has nothing to say.
+    private func hudLine(at time: TimeInterval) -> VoiceHUD {
+        let voiceHUD = voice.hud
+        if case .hidden = voiceHUD, let notice = gestureNotice {
+            if time < notice.until { return .notice(notice.text) }
+            gestureNotice = nil
+        }
+        return voiceHUD
     }
 
     // MARK: - Tracking diagnostics
@@ -209,6 +247,7 @@ final class PawvisController: ObservableObject {
 
     private func apply(settings: PawvisSettings) {
         engine.config = settings.gestures
+        engine.customConfig = settings.customGestures.detectorConfig()
         overlay.setConfig(settings.overlay)
         voice.setConfig(settings.voiceControl)
         voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture

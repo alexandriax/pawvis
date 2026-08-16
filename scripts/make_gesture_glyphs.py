@@ -56,14 +56,16 @@ def finger(name, dipped=False):
     return f'M{f["x"]} {f["base"]} V{f["base"] - DIP_RISE} q0 3 2.4 3.6'
 
 
-def hand(dipped=(), extra=""):
+def hand(dipped=(), extra="", thumb=THUMB, accent_dipped=True):
     """The hand with `dipped` fingers folded. Folded fingers and the arrows
     take the accent color: on the site they are the thing to look at, and in
-    the app they flatten into the tint with everything else."""
-    parts = [path(PALM), path(THUMB)]
+    the app they flatten into the tint with everything else. The thumbs-up
+    pair passes `accent_dipped=False` (and its own `thumb`): there the thumb
+    is the story, so the folded fingers stay quiet."""
+    parts = [path(PALM), path(thumb, accent=thumb != THUMB)]
     for name in FINGERS:
         down = name in dipped
-        parts.append(path(finger(name, down), accent=down))
+        parts.append(path(finger(name, down), accent=down and accent_dipped))
     return "\n  ".join(parts) + (("\n  " + extra) if extra else "")
 
 
@@ -102,6 +104,40 @@ def cursor_dot(x, y):
     """The claw riding the palm: the cursor anchor, drawn where it really
     sits. Filled, so it survives being scaled down to a menu-sized glyph."""
     return f'<circle class="dot" cx="{x}" cy="{y}" r="1.9" fill="{HAND}" stroke="none"/>'
+
+
+def arrow(x0, y0, x1, y1):
+    """A single-headed arrow from (x0,y0) to (x1,y1), any direction — the
+    custom gestures' travel (swipes and flings radiate all eight ways)."""
+    import math
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    head, spread = 3.2, math.radians(32)
+    d = f'M{x0} {y0} L{x1} {y1}'
+    for sgn in (1, -1):
+        hx = x1 - head * (ux * math.cos(spread) - sgn * uy * math.sin(spread))
+        hy = y1 - head * (uy * math.cos(spread) + sgn * ux * math.sin(spread))
+        d += f' M{round(hx, 1)} {round(hy, 1)} L{x1} {y1}'
+    return path(d, accent=True)
+
+
+def wiggle_marks(points):
+    """Little tildes floating over the fingertips: the wiggle itself."""
+    return "\n  ".join(
+        path(f'M{x - 2.6} {y} q1.3 -2.6 2.6 0 q1.3 2.6 2.6 0', accent=True)
+        for x, y in points)
+
+
+def big_splayed(extra=""):
+    """The full-size open hand with the fingers fanned wide — the one-hand
+    wiggle pose (the small `splayed_hand` pair stays for two-hand glyphs)."""
+    parts = [path(PALM), path(THUMB),
+             path('M19 25.5 L13.5 11'),
+             path('M23.5 25 L22 8.5'),
+             path('M28 25.5 L31.5 10.5'),
+             path('M32 26.5 L37.5 15')]
+    return "\n  ".join(parts) + (("\n  " + extra) if extra else "")
 
 
 # --- the poses ------------------------------------------------------------
@@ -156,6 +192,58 @@ GLYPHS = {
              accent=True) + "\n  " +
         path('M36.5 39 C29 39 23 45.5 12 45.5 M14.5 43.5 L12 45.5 L14.5 47.5',
              accent=True)),
+
+    # ---- Custom gestures (Settings → Custom; none bound by default) ----
+
+    # Swipes: the open hand plus one long stroke of travel.
+    "swipe-left": hand(extra=arrow(42, 44.5, 8, 44.5)),
+    "swipe-right": hand(extra=arrow(8, 44.5, 42, 44.5)),
+    "swipe-up": hand(extra=arrow(41.5, 33, 41.5, 11)),
+    "swipe-down": hand(extra=arrow(41.5, 11, 41.5, 33)),
+
+    # Two-hand swipes: the splayed pair travelling together, one straight
+    # stroke (the criss-cross wave keeps its two crossing curves).
+    "swipe-two-left": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) +
+                       "\n  " + arrow(42, 42.5, 6, 42.5)),
+    "swipe-two-right": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) +
+                        "\n  " + arrow(6, 42.5, 42, 42.5)),
+
+    # The finger wiggle: fanned fingers with the wiggle floating above them.
+    "wiggle": big_splayed(wiggle_marks([(13.5, 6.5), (22, 4.5), (31.5, 6)])),
+    "wiggle-two": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) + "\n  " +
+                   wiggle_marks([(9, 7.5), (14.5, 6), (33.5, 6), (39, 7.5)])),
+
+    # Thumb signals: the fist stays quiet, the thumb (and its direction)
+    # carries the accent.
+    "thumbs-up": hand(("index", "middle", "ring", "little"),
+                      thumb='M17.5 28 C15.5 27.5 14 25.5 14 22 V15',
+                      accent_dipped=False,
+                      extra=arrow(9.5, 21, 9.5, 12)),
+    "thumbs-down": hand(("index", "middle", "ring", "little"),
+                        thumb='M17.5 32 C15.5 32.5 14 34.5 14 38 V45',
+                        accent_dipped=False,
+                        extra=arrow(9.5, 39, 9.5, 47)),
+
+    # Shaka: thumb and pinky out, middle three folded in.
+    "shaka": hand(("index", "middle", "ring")),
+
+    # Grab & fling: the gathered hand, flung toward an edge or corner.
+    "grab-left": hand(("index", "middle", "ring", "little"),
+                      extra=arrow(14, 33, 4, 33)),
+    "grab-right": hand(("index", "middle", "ring", "little"),
+                       extra=arrow(36, 33, 46, 33)),
+    "grab-up": hand(("index", "middle", "ring", "little"),
+                    extra=arrow(41.5, 30, 41.5, 12)),
+    "grab-down": hand(("index", "middle", "ring", "little"),
+                      extra=arrow(41.5, 32, 41.5, 46)),
+    "grab-up-left": hand(("index", "middle", "ring", "little"),
+                         extra=arrow(14, 24, 5, 13)),
+    "grab-up-right": hand(("index", "middle", "ring", "little"),
+                          extra=arrow(36, 24, 45, 13)),
+    "grab-down-left": hand(("index", "middle", "ring", "little"),
+                           extra=arrow(14, 38, 5, 46)),
+    "grab-down-right": hand(("index", "middle", "ring", "little"),
+                            extra=arrow(36, 38, 45, 46)),
 }
 
 # Right-click follows the setting, so every finger the picker offers gets its

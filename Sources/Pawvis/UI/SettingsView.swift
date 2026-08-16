@@ -16,7 +16,7 @@ import SwiftUI
 
 /// Wrapping secondary text. Never truncates: `fixedSize(vertical:)` lets it
 /// grow to as many lines as it needs.
-private struct CaptionText: View {
+struct CaptionText: View {
     let text: String
     init(_ text: String) { self.text = text }
 
@@ -30,7 +30,7 @@ private struct CaptionText: View {
 }
 
 /// Title above an arbitrary control, with an optional wrapping caption below.
-private struct SettingRow<Control: View>: View {
+struct SettingRow<Control: View>: View {
     let title: String
     var caption: String?
     @ViewBuilder var control: () -> Control
@@ -50,7 +50,7 @@ private struct SettingRow<Control: View>: View {
 }
 
 /// A checkbox whose label wraps instead of truncating.
-private struct SettingToggle: View {
+struct SettingToggle: View {
     let title: String
     var caption: String?
     @Binding var isOn: Bool
@@ -65,7 +65,7 @@ private struct SettingToggle: View {
     }
 }
 
-private struct LabeledSlider: View {
+struct LabeledSlider: View {
     let label: String
     let caption: String?
     @Binding var value: Double
@@ -85,7 +85,7 @@ private struct LabeledSlider: View {
 
 /// A scrolling, leading-aligned settings page. Scrolling means long pages can
 /// never be clipped vertically either.
-private struct SettingsPage<Content: View>: View {
+struct SettingsPage<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -120,6 +120,9 @@ struct SettingsView: View {
             GestureSettingsTab(store: store)
                 .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
                 .tag(SettingsTab.gestures)
+            CustomGesturesTab(store: store)
+                .tabItem { Label("Custom", systemImage: "hand.wave") }
+                .tag(SettingsTab.custom)
             VoiceControlSettingsTab(store: store)
                 .tabItem { Label("Voice (Beta)", systemImage: "mic") }
                 .tag(SettingsTab.voice)
@@ -320,6 +323,13 @@ private struct GestureSettingsTab: View {
 
     var body: some View {
         SettingsPage {
+            VStack(alignment: .leading, spacing: 5) {
+                Button("Open Gesture Guide") { GuideWindow.show() }
+                CaptionText("Every gesture, illustrated — the built-in set below plus any custom gestures you add in the Custom tab.")
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 5) {
                 Text("Click — mouse tap")
                     .font(.callout)

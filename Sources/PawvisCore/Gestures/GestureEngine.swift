@@ -68,6 +68,17 @@ public final class GestureEngine {
         }
     }
 
+    /// The bindable one-shot gestures' configuration, distilled from
+    /// `CustomGestureSettings` by the app layer. Separate from `config`
+    /// because its enabled set is derived from the bindings, not persisted
+    /// engine state. The detector resets itself when this changes.
+    public var customConfig: CustomGestureDetector.Config {
+        get { customDetector.config }
+        set { customDetector.config = newValue }
+    }
+
+    private let customDetector = CustomGestureDetector()
+
     public init(config: GestureConfig = .default) {
         self.config = config
         self.slots = [HandSlot(id: 0, params: config.smoothing),
@@ -244,6 +255,7 @@ public final class GestureEngine {
         _ = forceRelease(at: 0)
         scroll = ScrollState()
         crissCross = CrissCrossState()
+        customDetector.reset()
         for i in slots.indices { slots[i].reset() }
         primarySlotID = nil
         cursor = nil
@@ -311,6 +323,13 @@ public final class GestureEngine {
             events.append(.disableTracking)
         }
 
+        // 4¾. The bindable one-shot gestures watch every tracked hand,
+        // armed or not, exactly like the wave — a bound command must not
+        // require cursor control. Runs before the cursor step because an
+        // engaged grab parks the cursor.
+        events += processCustomGestures(tracked, at: frame.time)
+        let grabParked = customDetector.grabbingSlots.contains(primary.slotID)
+
         if armed, let pointer = pointerPoint(features) {
             // 5. Cursor follows the palm (chosen so the click gesture barely
             // moves it) — unless the scroll pose holds it parked, in which
@@ -334,6 +353,9 @@ public final class GestureEngine {
                 // sides don't fling it across the screen (the scroll park's
                 // idea). No press can exist here — engaging required none,
                 // and both buttons are blocked while the wave is engaged.
+            } else if grabParked {
+                // A grab & fling in flight: the cursor parks so the fling
+                // itself doesn't drag the pointer across the screen.
             } else if var p = press {
                 // Tap window then micro-movement suppression (see dragThreshold).
                 if p.dragging || clamped.distance(to: p.downAt) >= dragThreshold(for: p, at: frame.time) {
@@ -663,6 +685,29 @@ public final class GestureEngine {
         return true
     }
 
+    // MARK: - Custom one-shot gestures
+
+    /// Feed the custom-gesture detector one frame and wrap what it fires.
+    /// The blocking flags mirror the house rules: a press or scroll stands
+    /// everything down, and the criss-cross wave stands the motion families
+    /// down (the detector applies that distinction itself).
+    private func processCustomGestures(_ tracked: [TrackedHand],
+                                       at time: TimeInterval) -> [GestureEvent] {
+        let context = CustomGestureDetector.Context(
+            time: time,
+            thresholds: config.poseThresholds,
+            minJointConfidence: config.minJointConfidence,
+            trackingLossGrace: config.trackingLossGrace,
+            pressOrScrollActive: press != nil || leftButton.engaged
+                || rightButton.engaged || scroll.active,
+            crissCrossEngaged: crissCross.engaged)
+        let inputs = tracked.map {
+            CustomGestureDetector.HandInput(slot: $0.slotID, hand: $0.hand)
+        }
+        return customDetector.process(hands: inputs, context: context)
+            .map { .customGesture($0) }
+    }
+
     // MARK: - Right click
 
     /// The finger whose dip presses the right button, or nil when this
@@ -807,6 +852,11 @@ public final class GestureEngine {
         var events: [GestureEvent] = []
         var overlay = OverlayState()
         overlay.cursor = cursor
+
+        // The custom-gesture detector still ticks: a pending one-vs-two-hand
+        // decision must resolve even when the hand left the frame right after
+        // its sweep, and stale per-hand state expires through the same grace.
+        events += processCustomGestures([], at: time)
 
         // Within the grace window, hold all state — a one-frame dropout must
         // not release a drag (sporecaster keeps slots alive 300 ms).

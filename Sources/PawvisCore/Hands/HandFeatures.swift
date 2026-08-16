@@ -282,6 +282,75 @@ public struct HandFeatures {
         return true
     }
 
+    /// The loosened *hold* check for the shaka: the folded fingers may drift
+    /// into the neutral band without dropping the pose — the same free
+    /// hysteresis every held pose gets from the bands. The extended pair must
+    /// stay positively extended.
+    public func isShakaHeld() -> Bool {
+        guard isThumbExtended() == true,
+              isExtended(.little) == true,
+              isExtended(.index) != true,
+              isExtended(.middle) != true,
+              isExtended(.ring) != true else { return false }
+        return true
+    }
+
+    /// One fingertip's distance from the palm center, normalized by hand
+    /// scale — the per-finger openness the wiggle detector watches oscillate.
+    public func fingertipExtent(_ finger: Finger) -> Double? {
+        guard let palm = palmCenter(), let tip = point(finger.tip) else { return nil }
+        return tip.distance(to: palm) / scale
+    }
+
+    /// Where the thumb stands relative to the palm: +1 clearly above (screen
+    /// up), -1 clearly below, nil when it isn't standing clear of the palm in
+    /// a convincingly vertical direction. "Clear" is most of a hand-scale;
+    /// "vertical" keeps the sideways-thumb of a resting fist from counting.
+    public func thumbVerticalSign() -> Int? {
+        guard let palm = palmCenter(), let thumb = point(.thumbTip) else { return nil }
+        let v = (thumb - palm) / scale
+        guard v.length >= 0.85, abs(v.y) >= 1.5 * abs(v.x) else { return nil }
+        return v.y < 0 ? 1 : -1
+    }
+
+    /// The thumbs-up / thumbs-down *engage* pose: a genuine fist with the
+    /// thumb standing clear of it, vertically. Strict like every engage check:
+    /// all four fingers positively curled.
+    public func isThumbSignal(up: Bool) -> Bool {
+        guard isFist(), let sign = thumbVerticalSign() else { return false }
+        return sign == (up ? 1 : -1)
+    }
+
+    /// The loosened *hold* check for a thumb signal: fingers may drift into
+    /// the neutral band, and the thumb's vertical cone widens a little, but
+    /// no finger may re-extend and the thumb must stay clear of the palm.
+    public func isThumbSignalHeld(up: Bool) -> Bool {
+        guard Finger.allCases.allSatisfy({ isExtended($0) != true }),
+              let palm = palmCenter(), let thumb = point(.thumbTip) else { return false }
+        let v = (thumb - palm) / scale
+        guard v.length >= 0.70, abs(v.y) >= 1.1 * abs(v.x) else { return false }
+        return (v.y < 0 ? 1 : -1) == (up ? 1 : -1)
+    }
+
+    /// The grab pose: the whole hand closed, fingertips gathered onto the
+    /// thumb, read through `openness()` — the one measure a closed hand can't
+    /// fake at any orientation. No finger may stay positively extended:
+    /// three curled fingers already drag the openness mean to the floor, so
+    /// without this a shaka would read as a grab. Strict engage bound; the
+    /// fling's hold side uses `isGatherHeld`.
+    public func isGathered() -> Bool {
+        guard let open = openness() else { return false }
+        guard Finger.allCases.allSatisfy({ isExtended($0) != true }) else { return false }
+        return open <= 0.12
+    }
+
+    /// The loosened hold check for a grab in flight: fast motion blurs the
+    /// fingers, so anything still well short of an open hand keeps the grab.
+    public func isGatherHeld() -> Bool {
+        guard let open = openness() else { return false }
+        return open <= 0.35
+    }
+
     /// Index + little extended, middle + ring folded in — the scroll pose.
     /// Strict on purpose: the folded fingers must read genuinely curled, so
     /// this is the *engage* check. The thumb is ignored — the pose is

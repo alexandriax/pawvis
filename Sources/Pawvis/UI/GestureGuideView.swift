@@ -22,6 +22,7 @@ struct GestureGuideView: View {
                     .foregroundStyle(.secondary)
 
                 section("Pointing & Clicking", rows: pointingRows)
+                customGesturesSection
                 section("Voice Control", rows: voiceRows)
             }
             .padding(24)
@@ -101,6 +102,47 @@ struct GestureGuideView: View {
                 detail: "Hold up both hands open with fingers spread wide — a double high-five — and wave them across each other. Once they've traded sides \(crossings == 2 ? "twice (over and back)" : "\(crossings) times"), tracking switches off entirely. Turn it back on from the menu bar."))
         }
         return rows
+    }
+
+    /// The user's bound custom gestures, illustrated like the built-ins —
+    /// or, before any exist, a pointer at where to add them.
+    @ViewBuilder
+    private var customGesturesSection: some View {
+        let bound = store.settings.customGestures.bindings.filter { $0.action != nil }
+        if bound.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Custom Gestures").font(.title3.bold())
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Swipes, finger wiggles, thumbs and grab & fling can each run an action of your choosing: switch desktops, snap windows, press shortcuts, open apps, run commands.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Add gestures in Settings…") {
+                            SettingsRouter.shared.open(.custom)
+                        }
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                section("Custom Gestures", rows: bound.map { binding in
+                    Row(symbol: binding.gesture.symbolName,
+                        glyph: binding.gesture.glyphName,
+                        title: binding.gesture.displayName,
+                        detail: "\(binding.gesture.howTo) → \(binding.action?.summary ?? "")")
+                })
+                if !store.settings.customGestures.enabled {
+                    Text("Custom gestures are currently switched off in Settings → Custom.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private var voiceRows: [Row] {

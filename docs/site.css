@@ -438,6 +438,9 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
 }
 .glyph .accent { stroke: var(--blue-light); }
 .glyph .dot { fill: var(--purple-light); stroke: none; }
+/* A few poses side by side in one card (the custom-gestures sampler). */
+.glyph-row { display: flex; gap: 10px; }
+.glyph-row .glyph { flex: none; }
 
 @media (max-width: 980px) {
   .card-grid { grid-template-columns: repeat(2, 1fr); }

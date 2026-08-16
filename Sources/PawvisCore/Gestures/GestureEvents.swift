@@ -22,9 +22,13 @@ public enum GestureEvent: Equatable, Sendable {
     case scroll(deltaY: Double)
     /// The criss-cross tracking-off wave completed: the app should switch
     /// hand tracking off entirely (camera and all), exactly as the menu bar
-    /// toggle does. The one non-mouse event — `PawvisController` intercepts
-    /// it before the rest of the frame's events reach the mouse controller.
+    /// toggle does. `PawvisController` intercepts it before the rest of the
+    /// frame's events reach the mouse controller.
     case disableTracking
+    /// A bound custom gesture completed (one-shot). Not a mouse event:
+    /// `PawvisController` maps it to its bound action; the mouse controller
+    /// ignores it.
+    case customGesture(CustomGesture)
 }
 
 /// Per-hand overlay data: small dots for every detected fingertip.
