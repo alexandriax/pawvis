@@ -157,55 +157,56 @@ final class CustomGestureSettingsTests: XCTestCase {
     func testBoundGestureIsEnabledUnboundIsNot() {
         var settings = CustomGestureSettings()
         settings.bindings = [
-            CustomGestureBinding(gesture: .swipeRight,
+            CustomGestureBinding(gesture: .thumbsRight,
                                  action: GestureAction(kind: .desktopRight)),
-            CustomGestureBinding(gesture: .thumbsUp), // no action yet
+            CustomGestureBinding(gesture: .fingerWiggle), // no action yet
         ]
-        XCTAssertEqual(settings.detectorConfig().enabled, [.swipeRight])
-        XCTAssertEqual(settings.action(for: .swipeRight)?.kind, .desktopRight)
-        XCTAssertNil(settings.action(for: .thumbsUp))
-        XCTAssertEqual(settings.familiesInUse, [.swipe, .holdPose])
+        XCTAssertEqual(settings.detectorConfig().enabled, [.thumbsRight])
+        XCTAssertEqual(settings.action(for: .thumbsRight)?.kind, .desktopRight)
+        XCTAssertNil(settings.action(for: .fingerWiggle))
     }
 
     func testMasterSwitchDisablesDetectionAndActions() {
         var settings = CustomGestureSettings()
         settings.bindings = [CustomGestureBinding(
-            gesture: .swipeRight, action: GestureAction(kind: .desktopRight))]
+            gesture: .thumbsRight, action: GestureAction(kind: .desktopRight))]
         settings.enabled = false
         XCTAssertTrue(settings.detectorConfig().enabled.isEmpty)
-        XCTAssertNil(settings.action(for: .swipeRight))
+        XCTAssertNil(settings.action(for: .thumbsRight))
     }
 
     func testSensitivityFlowsIntoDetectorConfig() {
         var settings = CustomGestureSettings()
         settings.bindings = [CustomGestureBinding(
             gesture: .fingerWiggle, action: GestureAction(kind: .playPause))]
-        settings.swipeTravel = 0.4
         settings.wiggleReversals = 5
         settings.holdSeconds = 0.6
         settings.flingTravel = 0.25
+        settings.gatherSpread = 0.45
         let config = settings.detectorConfig()
-        XCTAssertEqual(config.swipeTravel, 0.4)
         XCTAssertEqual(config.wiggleReversals, 5)
         XCTAssertEqual(config.holdSeconds, 0.6)
         XCTAssertEqual(config.flingTravel, 0.25)
+        XCTAssertEqual(config.gatherSpread, 0.45)
     }
 
     func testUnknownBindingDropsAloneAndDuplicatesCollapse() throws {
+        // "swipeRight" is a real retired gesture: saved swipe bindings must
+        // drop exactly like unknown future ones.
         let json = Data("""
         {"enabled": true, "bindings": [
+            {"gesture": "fingerWiggle", "action": {"kind": "missionControl", "argument": ""}},
             {"gesture": "swipeRight", "action": {"kind": "desktopRight", "argument": ""}},
-            {"gesture": "moonwalk", "action": {"kind": "desktopLeft", "argument": ""}},
             {"gesture": "thumbsUp", "action": {"kind": "portalGun", "argument": ""}},
-            {"gesture": "swipeRight", "action": {"kind": "desktopLeft", "argument": ""}}
+            {"gesture": "fingerWiggle", "action": {"kind": "desktopLeft", "argument": ""}}
         ]}
         """.utf8)
         let settings = try JSONDecoder().decode(CustomGestureSettings.self, from: json)
-        XCTAssertEqual(settings.bindings.map(\.gesture), [.swipeRight, .thumbsUp])
+        XCTAssertEqual(settings.bindings.map(\.gesture), [.fingerWiggle, .thumbsUp])
         // The unknown *action* keeps its binding, unbound.
         XCTAssertNil(settings.binding(for: .thumbsUp)?.action)
         // The duplicate keeps the first occurrence.
-        XCTAssertEqual(settings.binding(for: .swipeRight)?.action?.kind, .desktopRight)
+        XCTAssertEqual(settings.binding(for: .fingerWiggle)?.action?.kind, .missionControl)
     }
 
     func testSettingsTreeRoundTripsWithBindings() throws {

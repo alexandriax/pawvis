@@ -195,19 +195,6 @@ GLYPHS = {
 
     # ---- Custom gestures (Settings → Custom; none bound by default) ----
 
-    # Swipes: the open hand plus one long stroke of travel.
-    "swipe-left": hand(extra=arrow(42, 44.5, 8, 44.5)),
-    "swipe-right": hand(extra=arrow(8, 44.5, 42, 44.5)),
-    "swipe-up": hand(extra=arrow(41.5, 33, 41.5, 11)),
-    "swipe-down": hand(extra=arrow(41.5, 11, 41.5, 33)),
-
-    # Two-hand swipes: the splayed pair travelling together, one straight
-    # stroke (the criss-cross wave keeps its two crossing curves).
-    "swipe-two-left": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) +
-                       "\n  " + arrow(42, 42.5, 6, 42.5)),
-    "swipe-two-right": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) +
-                        "\n  " + arrow(6, 42.5, 42, 42.5)),
-
     # The finger wiggle: fanned fingers with the wiggle floating above them.
     "wiggle": big_splayed(wiggle_marks([(13.5, 6.5), (22, 4.5), (31.5, 6)])),
     "wiggle-two": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) + "\n  " +
@@ -223,6 +210,15 @@ GLYPHS = {
                         thumb='M17.5 32 C15.5 32.5 14 34.5 14 38 V45',
                         accent_dipped=False,
                         extra=arrow(9.5, 39, 9.5, 47)),
+
+    "thumbs-left": hand(("index", "middle", "ring", "little"),
+                        thumb='M17.5 29.5 C15.5 29.5 13 29.5 9.5 29.5',
+                        accent_dipped=False,
+                        extra=arrow(13, 23.5, 4.5, 23.5)),
+    "thumbs-right": hand(("index", "middle", "ring", "little"),
+                         thumb='M33.5 29.5 C35.5 29.5 38 29.5 41.5 29.5',
+                         accent_dipped=False,
+                         extra=arrow(38, 23.5, 46.5, 23.5)),
 
     # Shaka: thumb and pinky out, middle three folded in.
     "shaka": hand(("index", "middle", "ring")),

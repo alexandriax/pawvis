@@ -3,113 +3,62 @@ import SwiftUI
 
 // MARK: - The Custom tab
 //
-// Extra one-shot gestures, each bound to an action. The page stays calm by
-// construction: it shows only what the user has added (plus one Add button),
-// and the sensitivity sliders appear only for gesture families actually in
-// use. Everything is built from the shared SettingRow/SettingToggle/
-// CaptionText helpers per the AGENTS.md settings-UI rules.
+// Every bindable gesture, listed — no add/remove ceremony. A gesture with no
+// action simply isn't listened to, so the list itself is the whole mental
+// model: pick an action to turn a gesture on, set it back to "Not assigned"
+// to turn it off. Each row carries a collapsed Tuning accordion with its
+// family's thresholds, which is also the debugging story: when a gesture
+// won't trigger (or triggers too easily), the dials for exactly that
+// behavior are on the gesture itself. Built from the shared SettingRow/
+// SettingToggle/CaptionText helpers per the AGENTS.md settings-UI rules.
 
 struct CustomGesturesTab: View {
     @ObservedObject var store: SettingsStore
-    @State private var showGallery = false
 
-    private var settings: CustomGestureSettings { store.settings.customGestures }
+    private static let familyOrder: [CustomGesture.Family] = [.wiggle, .holdPose, .grabFling]
 
     var body: some View {
         SettingsPage {
-            CaptionText("Bind extra one-shot gestures — swipes, finger wiggles, thumbs, grab & fling — to actions: switch desktops, snap windows, press shortcuts, open apps, run commands. Nothing is active until you add it here and give it an action.")
+            CaptionText("Every gesture below can run an action of your choice: switch desktops, snap windows, press shortcuts, open apps, run commands. A gesture without an action is ignored entirely — assign one to switch it on. Tuning for each lives in its row.")
 
-            HStack(spacing: 12) {
-                Button("Add a gesture…") { showGallery = true }
-                if !settings.bindings.isEmpty {
-                    Toggle("Enabled", isOn: $store.settings.customGestures.enabled)
-                }
-            }
+            SettingToggle(
+                title: "Enable custom gestures",
+                caption: "Off pauses all of them without losing your setup.",
+                isOn: $store.settings.customGestures.enabled)
 
-            if settings.bindings.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("No custom gestures yet")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    CaptionText("Add one to see it here with its picture, then choose what it does. The Gesture Guide shows everything you've bound, illustrated.")
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
-            }
-
-            ForEach(settings.bindings) { binding in
-                CustomBindingRow(store: store, gesture: binding.gesture)
-            }
-            .opacity(settings.enabled ? 1 : 0.5)
-
-            if !settings.familiesInUse.isEmpty {
+            ForEach(Self.familyOrder, id: \.self) { family in
                 Divider()
-                sensitivitySection
+                familySection(family)
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 5) {
                 Button("Open Gesture Guide") { GuideWindow.show() }
-                CaptionText("Your custom gestures appear there too, alongside the built-in set.")
+                CaptionText("Gestures you've assigned appear there too, illustrated alongside the built-in set.")
             }
-        }
-        .sheet(isPresented: $showGallery) {
-            GestureGallerySheet(store: store)
         }
     }
 
-    // MARK: Sensitivity
-
-    @ViewBuilder
-    private var sensitivitySection: some View {
-        Text("Sensitivity")
-            .font(.callout)
-
-        if settings.familiesInUse.contains(.swipe) {
-            LabeledSlider(
-                label: "Swipe length",
-                caption: "How far the sweep must travel. Left: a shorter flick fires. Right: a longer, more deliberate sweep.",
-                value: $store.settings.customGestures.swipeTravel,
-                range: 0.20...0.45)
-        }
-        if settings.familiesInUse.contains(.wiggle) {
-            SettingRow(
-                title: "Wiggle vigor",
-                caption: "How many times each finger must change direction. More = a longer, more emphatic wiggle."
-            ) {
-                HStack(spacing: 10) {
-                    Text("\(store.settings.customGestures.wiggleReversals)×")
-                        .font(.callout)
-                        .monospacedDigit()
-                    Stepper("", value: $store.settings.customGestures.wiggleReversals, in: 2...5)
-                }
+    private func familySection(_ family: CustomGesture.Family) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(family.displayName).font(.title3.bold())
+            CaptionText(family.blurb)
+            ForEach(CustomGesture.allCases.filter { $0.family == family }, id: \.self) { gesture in
+                CustomGestureRow(store: store, gesture: gesture)
+                    .opacity(store.settings.customGestures.enabled ? 1 : 0.5)
             }
         }
-        if settings.familiesInUse.contains(.holdPose) {
-            LabeledSlider(
-                label: "Hold time",
-                caption: String(format: "Held poses (thumbs, shaka) fire after %.1f s.",
-                                store.settings.customGestures.holdSeconds),
-                value: $store.settings.customGestures.holdSeconds,
-                range: 0.2...0.8)
-        }
-        if settings.familiesInUse.contains(.grabFling) {
-            LabeledSlider(
-                label: "Fling distance",
-                caption: "How far the grabbed hand must travel. Left: a small tug fires. Right: a full fling.",
-                value: $store.settings.customGestures.flingTravel,
-                range: 0.10...0.30)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// MARK: - One binding
+// MARK: - One gesture
 
-private struct CustomBindingRow: View {
+private struct CustomGestureRow: View {
     @ObservedObject var store: SettingsStore
     let gesture: CustomGesture
+    @State private var showTuning = false
 
     private var action: GestureAction? {
         store.settings.customGestures.binding(for: gesture)?.action
@@ -119,23 +68,15 @@ private struct CustomBindingRow: View {
         HStack(alignment: .top, spacing: 12) {
             GestureGlyphView(gesture: gesture, size: 40)
                 .frame(width: 44)
+                .opacity(action == nil ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(gesture.displayName).font(.headline)
-                    Spacer()
-                    Button {
-                        remove()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Remove this gesture")
-                }
+                Text(gesture.displayName)
+                    .font(.headline)
+                    .foregroundStyle(action == nil ? .secondary : .primary)
                 CaptionText(gesture.howTo)
 
                 Picker("", selection: kindSelection) {
-                    Text("Choose an action…").tag(GestureAction.Kind?.none)
+                    Text("Not assigned").tag(GestureAction.Kind?.none)
                     ForEach(GestureAction.Category.allCases, id: \.self) { category in
                         Section(category.displayName) {
                             ForEach(kinds(in: category), id: \.self) { kind in
@@ -156,12 +97,63 @@ private struct CustomBindingRow: View {
                         CaptionText(hint)
                     }
                 }
+
+                DisclosureGroup(isExpanded: $showTuning) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        tuning
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Tuning")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
     }
+
+    // MARK: Tuning (family-wide dials, surfaced on every member)
+
+    @ViewBuilder
+    private var tuning: some View {
+        switch gesture.family {
+        case .wiggle:
+            SettingRow(
+                title: "Wiggle vigor",
+                caption: "Direction changes each finger must make. Left: a brief flutter fires. Right: a longer, more emphatic wiggle. Shared by both wiggle gestures."
+            ) {
+                HStack(spacing: 10) {
+                    Text("\(store.settings.customGestures.wiggleReversals)×")
+                        .font(.callout)
+                        .monospacedDigit()
+                    Stepper("", value: $store.settings.customGestures.wiggleReversals, in: 2...5)
+                }
+            }
+        case .holdPose:
+            LabeledSlider(
+                label: "Hold time",
+                caption: String(format: "The pose must dwell %.1f s before it fires. Shared by all held poses.",
+                                store.settings.customGestures.holdSeconds),
+                value: $store.settings.customGestures.holdSeconds,
+                range: 0.2...0.8)
+        case .grabFling:
+            LabeledSlider(
+                label: "Grab tightness",
+                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight pinch. Right: a looser bunch counts — try moving this right if grabs won't register.",
+                value: $store.settings.customGestures.gatherSpread,
+                range: 0.22...0.50)
+            LabeledSlider(
+                label: "Fling distance",
+                caption: "How far the grabbed bunch must travel. Left: a small tug fires. Right: a full fling. Both dials are shared by all grab & fling directions.",
+                value: $store.settings.customGestures.flingTravel,
+                range: 0.10...0.30)
+        }
+    }
+
+    // MARK: Action plumbing
 
     private func kinds(in category: GestureAction.Category) -> [GestureAction.Kind] {
         GestureAction.Kind.allCases.filter { $0.category == category }
@@ -219,118 +211,17 @@ private struct CustomBindingRow: View {
     }
 
     private func setAction(_ newAction: GestureAction?) {
-        guard let index = store.settings.customGestures.bindings.firstIndex(
-            where: { $0.gesture == gesture }) else { return }
-        store.settings.customGestures.bindings[index].action = newAction
-    }
-
-    private func remove() {
-        store.settings.customGestures.bindings.removeAll { $0.gesture == gesture }
-    }
-}
-
-// MARK: - The gallery sheet
-
-private struct GestureGallerySheet: View {
-    @ObservedObject var store: SettingsStore
-    @Environment(\.dismiss) private var dismiss
-
-    private static let familyOrder: [CustomGesture.Family] = [.swipe, .wiggle, .holdPose, .grabFling]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Add a gesture")
-                    .font(.title3.bold())
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+        var bindings = store.settings.customGestures.bindings
+        if let newAction {
+            if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
+                bindings[index].action = newAction
+            } else {
+                bindings.append(CustomGestureBinding(gesture: gesture, action: newAction))
             }
-            .padding(16)
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(Self.familyOrder, id: \.self) { family in
-                        let available = gestures(in: family)
-                        if !available.isEmpty {
-                            familySection(family, gestures: available)
-                        }
-                    }
-                    if Self.familyOrder.allSatisfy({ gestures(in: $0).isEmpty }) {
-                        CaptionText("Every gesture has been added — configure them in the list, or remove one to re-add it.")
-                    }
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        } else {
+            bindings.removeAll { $0.gesture == gesture }
         }
-        .frame(width: 560, height: 600)
-        .tint(PawvisTheme.accentUI)
-    }
-
-    private func gestures(in family: CustomGesture.Family) -> [CustomGesture] {
-        let added = Set(store.settings.customGestures.bindings.map(\.gesture))
-        return CustomGesture.allCases.filter { $0.family == family && !added.contains($0) }
-    }
-
-    private func familyBlurb(_ family: CustomGesture.Family) -> String {
-        switch family {
-        case .swipe:
-            return "A fast, straight sweep with an open hand. Quick and directional — the desktop-switching classic."
-        case .wiggle:
-            return "Hand up, fingers spread, fingers wiggling while the hand stays put. Unmistakable on camera."
-        case .holdPose:
-            return "An unambiguous shape, held for a beat."
-        case .grabFling:
-            return "Close your open hand into a grab, then fling it toward an edge or corner. The cursor parks while you hold the grab."
-        }
-    }
-
-    private func familySection(_ family: CustomGesture.Family,
-                               gestures: [CustomGesture]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(family.displayName).font(.headline)
-            CaptionText(familyBlurb(family))
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
-                      alignment: .leading, spacing: 8) {
-                ForEach(gestures, id: \.self) { gesture in
-                    galleryCard(gesture)
-                }
-            }
-        }
-    }
-
-    private func galleryCard(_ gesture: CustomGesture) -> some View {
-        Button {
-            store.settings.customGestures.bindings
-                .append(CustomGestureBinding(gesture: gesture))
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                GestureGlyphView(gesture: gesture, size: 34)
-                    .frame(width: 36)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(gesture.displayName)
-                        .font(.callout.weight(.semibold))
-                        .multilineTextAlignment(.leading)
-                    Text(gesture.howTo)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(.tint)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
-            .contentShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .help("Add \(gesture.displayName)")
+        store.settings.customGestures.bindings = bindings
     }
 }
 

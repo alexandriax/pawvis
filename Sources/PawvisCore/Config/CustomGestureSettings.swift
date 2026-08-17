@@ -30,24 +30,28 @@ public struct CustomGestureBinding: Codable, Equatable, Sendable, Identifiable {
 }
 
 /// The Settings → Custom section: which extra gestures are bound to which
-/// actions, plus the per-family sensitivity tuning. Nothing here is on by
-/// default — an empty `bindings` list means the detector never runs.
+/// actions, plus the family tuning. Nothing here is on by default — a
+/// gesture without an action is never detected. (Bindings for retired
+/// gestures — the swipes — fail to decode and drop silently, which is the
+/// whole retirement path.)
 public struct CustomGestureSettings: Codable, Equatable, Sendable {
     /// Master switch: off keeps every binding but stops detection.
     public var enabled: Bool = true
     /// The user's gestures, in the order they added them.
     public var bindings: [CustomGestureBinding] = []
 
-    // Sensitivity, in the detector's own units (the sliders map onto these
-    // ranges directly).
-    /// Screen-normalized distance an open hand must sweep to swipe.
-    public var swipeTravel: Double = 0.32
+    // Tuning, in the detector's own units (the sliders map onto these
+    // ranges directly). Family-wide: every gesture of a family shares its
+    // machine, so its tuning too.
     /// Per-finger direction reversals that count as wiggling.
     public var wiggleReversals: Int = 3
     /// How long a held pose must dwell before it fires, in seconds.
     public var holdSeconds: Double = 0.35
     /// Screen-normalized displacement that completes a grab & fling.
     public var flingTravel: Double = 0.16
+    /// How tightly the fingertips must bunch to read as a grab (mean tip
+    /// distance to the bunch center, in hand scales). Larger = looser.
+    public var gatherSpread: Double = 0.32
 
     public init() {}
 
@@ -62,28 +66,22 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
         return binding(for: gesture)?.action
     }
 
-    /// The families that currently have at least one added gesture — the
-    /// sensitivity sliders only show for these.
-    public var familiesInUse: Set<CustomGesture.Family> {
-        Set(bindings.map(\.gesture.family))
-    }
-
     /// What the engine's detector should watch: only gestures whose binding
     /// has an action, and nothing at all while the master switch is off.
     public func detectorConfig() -> CustomGestureDetector.Config {
         var config = CustomGestureDetector.Config()
         guard enabled else { return config }
         config.enabled = Set(bindings.compactMap { $0.action != nil ? $0.gesture : nil })
-        config.swipeTravel = swipeTravel
         config.wiggleReversals = wiggleReversals
         config.holdSeconds = holdSeconds
         config.flingTravel = flingTravel
+        config.gatherSpread = gatherSpread
         return config
     }
 
     enum CodingKeys: String, CodingKey {
         case enabled, bindings
-        case swipeTravel, wiggleReversals, holdSeconds, flingTravel
+        case wiggleReversals, holdSeconds, flingTravel, gatherSpread
     }
 
     /// Field-tolerant decoding, like every settings section; the bindings
@@ -97,10 +95,10 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
             var seen: Set<CustomGesture> = []
             bindings = v.compactMap(\.value).filter { seen.insert($0.gesture).inserted }
         }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .swipeTravel) { swipeTravel = v }
         if let v = try? c.decodeIfPresent(Int.self, forKey: .wiggleReversals) { wiggleReversals = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .holdSeconds) { holdSeconds = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .flingTravel) { flingTravel = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .gatherSpread) { gatherSpread = v }
     }
 }
 

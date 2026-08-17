@@ -267,15 +267,23 @@ enum SyntheticHand {
               wrist: wrist, scale: scale)
     }
 
-    /// Fist with the thumb standing straight up (thumbs-up) or straight down
-    /// (thumbs-down). The palm center sits ~0.75 scales above the wrist, so
-    /// the offsets put the thumb tip well clear of it, vertically.
-    static func thumbSignal(up: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+    /// Fist with the thumb standing clear in one of the four directions.
+    /// The palm center sits ~0.75 scales above the wrist, so the offsets put
+    /// the thumb tip well clear of it along the intended axis.
+    static func thumbSignal(_ direction: HandFeatures.ThumbDirection,
+                            wrist: Vec2 = Vec2(0.5, 0.7),
                             scale: Double = 0.15) -> Hand {
-        build(pose: Pose(fingerDirs: relaxedDirs,
-                         curled: [.index, .middle, .ring, .little],
-                         thumbTipOffset: up ? Vec2(0.0, -1.9) : Vec2(0.0, 0.42)),
-              wrist: wrist, scale: scale)
+        let offset: Vec2
+        switch direction {
+        case .up: offset = Vec2(0.0, -1.9)
+        case .down: offset = Vec2(0.0, 0.42)
+        case .left: offset = Vec2(-1.3, -0.65)
+        case .right: offset = Vec2(1.3, -0.65)
+        }
+        return build(pose: Pose(fingerDirs: relaxedDirs,
+                                curled: [.index, .middle, .ring, .little],
+                                thumbTipOffset: offset),
+                     wrist: wrist, scale: scale)
     }
 
     /// The grab pose for the fling: the whole hand closed. Geometrically the
@@ -283,6 +291,21 @@ enum SyntheticHand {
     /// requires, not the shape alone.
     static func gathered(wrist: Vec2 = Vec2(0.5, 0.7), scale: Double = 0.15) -> Hand {
         fist(wrist: wrist, scale: scale)
+    }
+
+    /// The forward gather: every fingertip (thumb included) bunched at one
+    /// point standing well away from the palm — the real-world grab the
+    /// palm-relative measures missed. Finger chains stay nearly straight
+    /// (the camera-facing projection), so only the tip bunch gives it away.
+    static func gatheredForward(wrist: Vec2 = Vec2(0.5, 0.7),
+                                scale: Double = 0.15) -> Hand {
+        var hand = openRelaxed(wrist: wrist, scale: scale)
+        let bunch = wrist + Vec2(-0.35, -1.55) * scale
+        let tips: [HandJoint] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
+        for (i, tip) in tips.enumerated() {
+            hand.setPoint(bunch + Vec2(Double(i) * 0.02 - 0.04, 0.0) * scale, for: tip)
+        }
+        return hand
     }
 
     /// The one-hand wiggle's oscillation: the splayed hand with every

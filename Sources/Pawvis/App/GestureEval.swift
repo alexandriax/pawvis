@@ -80,12 +80,12 @@ private func evalVideo(at url: URL, verbose: Bool) -> Bool {
            let features = HandFeatures(hand: hand, thresholds: PoseThresholds(),
                                        minJointConfidence: 0.25) {
             let openness = features.openness().map { String(format: "%.2f", $0) } ?? "–"
-            let splay = features.splayAmount().map { String(format: "%.2f", $0) } ?? "–"
-            let palm = features.pointerPoint(.palmCenter)
+            let spread = features.fingertipGatherSpread().map { String(format: "%.2f", $0) } ?? "–"
+            let point = features.gatherPoint()
                 .map { String(format: "(%.2f,%.2f)", $0.x, $0.y) } ?? "–"
-            print(String(format: "  %6.2fs  hands=%d open=%@ splay=%@ palm=%@ thumbV=%@",
-                         time, hands.count, openness, splay, palm,
-                         features.thumbVerticalSign().map(String.init) ?? "–"))
+            print(String(format: "  %6.2fs  hands=%d open=%@ spread=%@ bunch=%@ thumb=%@",
+                         time, hands.count, openness, spread, point,
+                         features.thumbDirection()?.rawValue ?? "–"))
         }
     }
 
