@@ -1,15 +1,20 @@
 import PawvisCore
 import SwiftUI
 
-/// A reference card for the (deliberately small) gesture set.
+/// A reference card for the whole gesture set.
 ///
-/// Each pointing row is illustrated by a posed hand from
-/// `docs/assets/gestures` rather than an SF Symbol, because the symbols were
-/// quietly teaching the wrong gesture: the click wore `hand.pinch.fill` when
-/// the click is an index *tap*, move wore a pointing finger when the cursor
-/// rides an open palm, and right-click wore a sideways hand that said nothing
-/// about which finger dips. The drawings show the actual pose, down to which
-/// finger is folded — including the one the right-click setting picked.
+/// Every gesture row leads with a drawn *panel* of the full gesture — the
+/// before-and-after of a click, the gather-then-fling of a grab, the
+/// drumming fingers of a wiggle — from the same generated art set as the
+/// small posed-hand icons (`docs/assets/gestures`, via
+/// `scripts/make_gesture_glyphs.py`). Panels replaced both the SF Symbols
+/// (which taught poses the engine doesn't implement) and the single posed
+/// hands (which showed the shape but not the motion).
+///
+/// The custom gestures are all listed, bound or not: the guide is where you
+/// find out what the app can watch for, and a bound row also says what its
+/// gesture is currently set to do. The old empty-state pitch box is gone —
+/// the library itself is the pitch.
 struct GestureGuideView: View {
     @ObservedObject var store: SettingsStore
 
@@ -32,23 +37,28 @@ struct GestureGuideView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 520, minHeight: 480)
+        .frame(minWidth: 560, minHeight: 480)
         .tint(PawvisTheme.accentUI)
     }
 
     private struct Row {
         let symbol: String
-        /// The posed-hand glyph, when the gesture has one. `symbol` is the
-        /// fallback: the bare binary has no bundle to load art from.
-        var glyph: String?
+        /// The whole-gesture panel (`full-*`), when the gesture has one.
+        /// `symbol` is the fallback: the bare binary has no bundle to load
+        /// art from.
+        var panel: String?
         let title: String
         let detail: String
+        /// "This variant → what it's bound to" lines, for the custom rows.
+        var bindings: [String] = []
 
-        init(symbol: String, glyph: String? = nil, title: String, detail: String) {
+        init(symbol: String, panel: String? = nil, title: String,
+             detail: String, bindings: [String] = []) {
             self.symbol = symbol
-            self.glyph = glyph
+            self.panel = panel
             self.title = title
             self.detail = detail
+            self.bindings = bindings
         }
     }
 
@@ -57,21 +67,21 @@ struct GestureGuideView: View {
         if store.settings.gestures.controlTrigger == .openHand {
             rows.append(Row(
                 symbol: "hand.raised.fill",
-                glyph: "take-control",
+                panel: "full-take-control",
                 title: "Take control",
                 detail: "Show the camera an open hand — all four fingers up — and the claw brightens: you have the cursor. Pawvis keeps watching while you type or rest, but the cursor stays parked until you show the trigger. Make a brief fist to park it again."))
         }
         rows += [
             Row(symbol: "hand.raised.fill",
-                glyph: "move",
+                panel: "full-move",
                 title: "Move",
                 detail: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm. The ring around the claw tightens as the click gesture forms."),
             Row(symbol: "hand.point.up.left.fill",
-                glyph: "click",
+                panel: "full-click",
                 title: "Click",
                 detail: "Dip your index finger down, like tapping a mouse button (keep your other fingers up). Release quickly for a clean click — small wobbles are ignored. Twice quickly = double-click, three times = triple."),
             Row(symbol: "hand.draw.fill",
-                glyph: "drag",
+                panel: "full-drag",
                 title: "Drag / hold",
                 detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you lift your index finger. (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
@@ -81,7 +91,7 @@ struct GestureGuideView: View {
             let fingerName = finger == .little ? "pinky" : finger.rawValue
             rows.append(Row(
                 symbol: "hand.point.right.fill",
-                glyph: "right-click-\(finger.rawValue)",
+                panel: "full-right-click-\(finger.rawValue)",
                 title: "Right-click",
                 detail: "Dip your \(fingerName) finger the same way — the claw turns blue while it's down. Hold it to right-drag."))
         }
@@ -92,7 +102,7 @@ struct GestureGuideView: View {
                 : "Move your hand up to scroll up and down to scroll down."
             rows.append(Row(
                 symbol: "arrow.up.arrow.down.circle.fill",
-                glyph: "scroll",
+                panel: "full-scroll",
                 title: "Scroll",
                 detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
         }
@@ -101,7 +111,7 @@ struct GestureGuideView: View {
             let crossings = store.settings.gestures.crissCrossDisableCrossings
             rows.append(Row(
                 symbol: "hand.raised.fingers.spread.fill",
-                glyph: "stop-tracking",
+                panel: "full-stop-tracking",
                 title: "Stop tracking",
                 detail: "Hold up both hands open with fingers spread wide — a double high-five — and wave them across each other. Once they've traded sides \(crossings == 2 ? "twice (over and back)" : "\(crossings) times"), tracking switches off entirely. Turn it back on from the menu bar."))
         }
@@ -128,37 +138,19 @@ struct GestureGuideView: View {
         }
     }
 
-    /// The user's bound custom gestures, illustrated like the built-ins —
-    /// or, before any exist, a pointer at where to add them.
-    @ViewBuilder
+    /// The custom-gesture library, every motion illustrated whether bound
+    /// or not, with each variant's current action listed on its row.
     private var customGesturesSection: some View {
-        let bound = store.settings.customGestures.bindings.filter { $0.action != nil }
-        if bound.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Custom Gestures").font(.title3.bold())
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Finger wiggles, thumb signals, the shaka and grab & fling can each run an action of your choosing: switch desktops, snap windows, press shortcuts, open apps, run commands.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Add gestures in Settings…") {
-                            SettingsRouter.shared.open(.gestures)
-                        }
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Custom Gestures").font(.title3.bold())
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Each of these can run an action of your choosing: switch desktops, snap windows, press shortcuts, open apps, run commands. A gesture without an action is ignored entirely.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Assign actions in Settings…") {
+                    SettingsRouter.shared.open(.gestures)
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                section("Custom Gestures", rows: bound.map { binding in
-                    Row(symbol: binding.gesture.symbolName,
-                        glyph: binding.gesture.glyphName,
-                        title: binding.gesture.displayName,
-                        detail: "\(binding.gesture.howTo) → \(binding.action?.summary ?? "")")
-                })
                 if !store.settings.customGestures.enabled {
                     Text("Custom gestures are currently switched off in Settings → Gestures.")
                         .font(.caption)
@@ -166,7 +158,52 @@ struct GestureGuideView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            ForEach(customRows, id: \.title) { row in
+                rowView(row)
+            }
         }
+    }
+
+    private var customRows: [Row] {
+        let custom = store.settings.customGestures
+        func bound(_ pairs: [(String, CustomGesture)]) -> [String] {
+            pairs.compactMap { label, gesture in
+                (custom.binding(for: gesture)?.action?.summary).map { "\(label) → \($0)" }
+            }
+        }
+        return [
+            Row(symbol: "hand.raised.fingers.spread.fill",
+                panel: "full-wiggle",
+                title: "Raised finger wiggle",
+                detail: CustomGesture.fingerWiggle.howTo + " Both hands at once is its own gesture.",
+                bindings: bound([("One hand", .fingerWiggle),
+                                 ("Both hands", .twoHandFingerWiggle)])),
+            Row(symbol: "hand.point.left.fill",
+                panel: "full-wiggle-pointed",
+                title: "Pointed finger wiggle",
+                detail: CustomGesture.pointedWiggle.howTo + " Both hands at once is its own gesture.",
+                bindings: bound([("One hand", .pointedWiggle),
+                                 ("Both hands", .twoHandPointedWiggle)])),
+            Row(symbol: "hand.thumbsup.fill",
+                panel: "full-thumbs",
+                title: "Thumb signals",
+                detail: "Make a fist with your thumb out — up, down, or tilted to point straight left or right — and hold it for a beat. Each direction is its own gesture.",
+                bindings: bound([("Thumbs up", .thumbsUp), ("Thumbs down", .thumbsDown),
+                                 ("Thumb left", .thumbsLeft), ("Thumb right", .thumbsRight)])),
+            Row(symbol: "hands.and.sparkles.fill",
+                panel: "full-shaka",
+                title: "Shaka",
+                detail: CustomGesture.shaka.howTo,
+                bindings: bound([("Shaka", .shaka)])),
+            Row(symbol: "hand.pinch.fill",
+                panel: "full-grab",
+                title: "Grab & fling",
+                detail: "Bunch all your fingertips onto your thumb, then fling the bunch toward any edge or corner — eight directions, each its own gesture. The cursor parks while you hold the grab.",
+                bindings: bound([("Left", .grabFlingLeft), ("Right", .grabFlingRight),
+                                 ("Up", .grabFlingUp), ("Down", .grabFlingDown),
+                                 ("Up-left", .grabFlingUpLeft), ("Up-right", .grabFlingUpRight),
+                                 ("Down-left", .grabFlingDownLeft), ("Down-right", .grabFlingDownRight)])),
+        ]
     }
 
     private var voiceRows: [Row] {
@@ -188,32 +225,47 @@ struct GestureGuideView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.title3.bold())
             ForEach(rows, id: \.title) { row in
-                HStack(alignment: .top, spacing: 12) {
-                    icon(for: row)
-                        .foregroundStyle(.tint)
-                        .frame(width: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(row.title).font(.headline)
-                        Text(row.detail)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
+                rowView(row)
             }
         }
     }
 
+    private func rowView(_ row: Row) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            art(for: row)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title).font(.headline)
+                Text(row.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(row.bindings, id: \.self) { line in
+                    Text(line)
+                        .font(.callout.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
+    }
+
+    /// The whole-gesture panel when the bundle has it, the SF Symbol when
+    /// not (bare `swift run`). Voice rows have no panel and keep the symbol.
     @ViewBuilder
-    private func icon(for row: Row) -> some View {
-        if let glyph = row.glyph, let art = GestureArt.image(glyph) {
-            Image(nsImage: art)
+    private func art(for row: Row) -> some View {
+        if let panel = row.panel, let image = GestureArt.panel(panel) {
+            Image(nsImage: image)
                 .renderingMode(.template)
+                .foregroundStyle(.tint)
+                .frame(width: GestureArt.panelWidth, alignment: .leading)
         } else {
             Image(systemName: row.symbol)
                 .font(.title2)
+                .foregroundStyle(.tint)
+                .frame(width: 44)
         }
     }
 }
@@ -238,18 +290,18 @@ enum GuideWindow {
     }
 }
 
-/// The posed hands, loaded once each. `PawvisGlyph` hands out fresh images on
-/// purpose (callers resize them), but every row here draws at one size, and
-/// the guide's body re-runs on each settings change — no reason to re-read
-/// the files every time a slider moves.
+/// The guide panels, loaded once each. `PawvisGlyph` hands out fresh images
+/// on purpose (callers resize them), but every row here draws at one size,
+/// and the guide's body re-runs on each settings change — no reason to
+/// re-read the files every time a slider moves.
 @MainActor
 private enum GestureArt {
-    private static let size: CGFloat = 40
+    static let panelWidth: CGFloat = 108
     private static var cache: [String: NSImage?] = [:]
 
-    static func image(_ name: String) -> NSImage? {
+    static func panel(_ name: String) -> NSImage? {
         if let cached = cache[name] { return cached }
-        let image = PawvisGlyph.gesture(name, size: size)
+        let image = PawvisGlyph.guidePanel(name, width: panelWidth)
         cache[name] = image
         return image
     }

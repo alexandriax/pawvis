@@ -21,6 +21,11 @@ struct CustomGesturesTab: View {
         SettingsPage {
             CaptionText("Every gesture below can run an action of your choice: switch desktops, snap windows, press shortcuts, open apps, run commands. A gesture without an action is ignored entirely — assign one to switch it on. Tuning for each lives in its row.")
 
+            VStack(alignment: .leading, spacing: 5) {
+                Button("Open Gesture Guide") { GuideWindow.show() }
+                CaptionText("Every gesture illustrated in full, with what it's currently set to do.")
+            }
+
             SettingToggle(
                 title: "Enable custom gestures",
                 caption: "Off pauses all of them without losing your setup.",
@@ -29,13 +34,6 @@ struct CustomGesturesTab: View {
             ForEach(Self.familyOrder, id: \.self) { family in
                 Divider()
                 familySection(family)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 5) {
-                Button("Open Gesture Guide") { GuideWindow.show() }
-                CaptionText("Gestures you've assigned appear there too, illustrated alongside the mouse set.")
             }
         }
     }

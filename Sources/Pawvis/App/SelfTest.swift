@@ -278,6 +278,15 @@ func runSelfTest() -> Int32 {
         for name in poses {
             check("guide.glyph.\(name)", PawvisGlyph.gesture(name, size: 40) != nil)
         }
+        // The guide's whole-gesture panels (`full-*`), one per row it can
+        // show — same fallback story, same reason to assert.
+        let panels = ["full-take-control", "full-move", "full-click", "full-drag",
+                      "full-scroll", "full-stop-tracking", "full-wiggle",
+                      "full-wiggle-pointed", "full-thumbs", "full-shaka", "full-grab"]
+            + Finger.allCases.filter { $0 != .index }.map { "full-right-click-\($0.rawValue)" }
+        for name in panels {
+            check("guide.panel.\(name)", PawvisGlyph.guidePanel(name, width: 108) != nil)
+        }
     }
 
     print(failures == 0 ? "SELFTEST OK (\(checks) checks)" : "SELFTEST FAILED (\(failures) failures)")
