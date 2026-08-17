@@ -90,9 +90,19 @@ public final class CustomGestureDetector {
 
     /// Wiggle: reversals older than this fall out of the count.
     private static let wiggleWindow: TimeInterval = 1.2
-    /// Extent change (in hand scales) that counts as a finger moving; smaller
-    /// is landmark shimmer.
+    /// Raised wiggle: extent change (in hand scales) that counts as a finger
+    /// moving; smaller is landmark shimmer.
     private static let wiggleNoiseFloor = 0.045
+    /// Pointed wiggle: fingertip-drop change (in knuckle-span units) that
+    /// counts as a finger drumming. Its own floor because the two measures
+    /// have different units — and the pointed pose's landmarks shimmer more,
+    /// with the fingers foreshortened toward the lens.
+    private static let pointedWiggleNoiseFloor = 0.10
+    /// Consecutive frames of the *opposite* orientation before the machine
+    /// switches poses (and restarts its buffers): the drop measure sweeps
+    /// through both bands during vigorous curls, and one frame of the other
+    /// pose must not throw away an in-flight wiggle.
+    private static let wiggleOrientationFrames = 4
     /// The palm may drift this far (screen-normalized) while wiggling; more
     /// means the hand is travelling, not wiggling in place.
     private static let wigglePalmStill = 0.10
@@ -139,6 +149,11 @@ public final class CustomGestureDetector {
     // MARK: - State
 
     private struct WiggleState {
+        /// Which wiggle this hand is performing — adopted from the first
+        /// confident pose read, switched only after a debounced run of the
+        /// opposite pose. The buffers below are in this orientation's units.
+        var orientation: HandFeatures.WiggleOrientation?
+        var switchFrames = 0
         var lastExtent: [Double?] = Array(repeating: nil, count: Finger.allCases.count)
         var lastSign: [Int] = Array(repeating: 0, count: Finger.allCases.count)
         var reversals: [[TimeInterval]] = Array(repeating: [], count: Finger.allCases.count)
@@ -146,6 +161,14 @@ public final class CustomGestureDetector {
         var closedFrames = 0
         var satisfiedAt: TimeInterval = -.infinity
         var pendingAt: TimeInterval = -.infinity
+
+        /// The gestures this state's orientation fires.
+        var singleGesture: CustomGesture {
+            orientation == .pointed ? .pointedWiggle : .fingerWiggle
+        }
+        var twoHandGesture: CustomGesture {
+            orientation == .pointed ? .twoHandPointedWiggle : .twoHandFingerWiggle
+        }
 
         mutating func clearMotion() {
             lastExtent = Array(repeating: nil, count: Finger.allCases.count)
@@ -301,15 +324,47 @@ public final class CustomGestureDetector {
             return
         }
         guard let loose else { return } // missing hand geometry holds state
-        guard let openness = loose.openness() else { return }
-        if openness < Self.wiggleOpennessFloor {
-            wiggle.closedFrames += 1
-            if wiggle.closedFrames >= Self.wiggleClosedFrames {
-                wiggle.clearMotion()
-                return
+
+        // Raised or pointed decides which measure the buffers count and
+        // which gestures a satisfied wiggle fires. Switching poses restarts
+        // the buffers, so the two measures (different units) never mix and
+        // a wiggle begun raised can never finish as a pointed one. A frame
+        // of the *opposite* pose feeds neither machine — the old one must
+        // not count the wild measure swing of the pose change itself, and
+        // the new one hasn't been confirmed yet.
+        var opposedFrame = false
+        if let seen = loose.wiggleOrientation() {
+            if wiggle.orientation == nil {
+                wiggle.orientation = seen
+            } else if seen != wiggle.orientation {
+                wiggle.switchFrames += 1
+                if wiggle.switchFrames >= Self.wiggleOrientationFrames {
+                    wiggle.clearMotion()
+                    wiggle.orientation = seen
+                    wiggle.switchFrames = 0
+                } else {
+                    opposedFrame = true
+                }
+            } else {
+                wiggle.switchFrames = 0
             }
-        } else {
-            wiggle.closedFrames = 0
+        }
+        // A hand that never commits to either pose doesn't wiggle at all.
+        guard let orientation = wiggle.orientation, !opposedFrame else { return }
+
+        if orientation == .raised {
+            // The resting-fist clear is a raised-pose idea: a pointed hand's
+            // openness rides the collapsed hand scale and means nothing.
+            guard let openness = loose.openness() else { return }
+            if openness < Self.wiggleOpennessFloor {
+                wiggle.closedFrames += 1
+                if wiggle.closedFrames >= Self.wiggleClosedFrames {
+                    wiggle.clearMotion()
+                    return
+                }
+            } else {
+                wiggle.closedFrames = 0
+            }
         }
         if let palm = loose.pointerPoint(.palmCenter) {
             if let origin = wiggle.palmOrigin, palm.distance(to: origin) > Self.wigglePalmStill {
@@ -321,20 +376,24 @@ public final class CustomGestureDetector {
             }
         }
 
+        let noiseFloor = orientation == .pointed
+            ? Self.pointedWiggleNoiseFloor : Self.wiggleNoiseFloor
         for (i, finger) in Finger.allCases.enumerated() {
-            guard let extent = loose.fingertipExtent(finger) else { continue }
+            let measure = orientation == .pointed
+                ? loose.fingertipDrop(finger) : loose.fingertipExtent(finger)
+            guard let measure else { continue }
             guard let last = wiggle.lastExtent[i] else {
-                wiggle.lastExtent[i] = extent
+                wiggle.lastExtent[i] = measure
                 continue
             }
-            let delta = extent - last
-            guard abs(delta) >= Self.wiggleNoiseFloor else { continue }
+            let delta = measure - last
+            guard abs(delta) >= noiseFloor else { continue }
             let sign = delta > 0 ? 1 : -1
             if wiggle.lastSign[i] != 0, sign != wiggle.lastSign[i] {
                 wiggle.reversals[i].append(time)
             }
             wiggle.lastSign[i] = sign
-            wiggle.lastExtent[i] = extent
+            wiggle.lastExtent[i] = measure
         }
         for i in wiggle.reversals.indices {
             wiggle.reversals[i].removeAll { time - $0 > Self.wiggleWindow }
@@ -344,18 +403,18 @@ public final class CustomGestureDetector {
         guard wigglingFingers >= Self.wiggleMinFingers else { return }
         wiggle.satisfiedAt = time
 
-        guard config.enabled.contains(.twoHandFingerWiggle) else {
-            if fire(.fingerWiggle, at: time, into: &fired) {
+        guard config.enabled.contains(wiggle.twoHandGesture) else {
+            if fire(wiggle.singleGesture, at: time, into: &fired) {
                 wiggle.clearMotion()
                 clearPartnerWiggle(of: slot)
             }
             return
         }
         // Two-hand version is bound: fire it the moment both hands are
-        // wiggling; a lone hand waits out the pair window first.
-        if let partner = partnerWiggle(of: slot),
+        // wiggling the same way; a lone hand waits out the pair window first.
+        if let partner = partnerWiggle(of: slot, matching: orientation),
            time - partner.state.satisfiedAt <= Self.wigglePairWindow {
-            if fire(.twoHandFingerWiggle, at: time, into: &fired) {
+            if fire(wiggle.twoHandGesture, at: time, into: &fired) {
                 wiggle.clearMotion()
                 clearPartnerWiggle(of: slot)
             }
@@ -366,8 +425,14 @@ public final class CustomGestureDetector {
         }
     }
 
-    private func partnerWiggle(of slot: Int) -> (slot: Int, state: WiggleState)? {
-        for (other, state) in slots where other != slot {
+    /// The other slot's wiggle, but only in the same orientation: a raised
+    /// hand and a pointed hand wiggling together are two different gestures
+    /// happening at once, not a pair.
+    private func partnerWiggle(of slot: Int,
+                               matching orientation: HandFeatures.WiggleOrientation)
+        -> (slot: Int, state: WiggleState)? {
+        for (other, state) in slots
+        where other != slot && state.wiggle.orientation == orientation {
             return (other, state.wiggle)
         }
         return nil
@@ -388,7 +453,7 @@ public final class CustomGestureDetector {
             let pendingAt = state.wiggle.pendingAt
             guard pendingAt > -.infinity, time - pendingAt >= Self.wigglePairWindow else { continue }
             state.wiggle.pendingAt = -.infinity
-            if fire(.fingerWiggle, at: time, into: &fired) {
+            if fire(state.wiggle.singleGesture, at: time, into: &fired) {
                 state.wiggle.clearMotion()
                 state.wiggle.satisfiedAt = -.infinity
                 slots[slot] = state

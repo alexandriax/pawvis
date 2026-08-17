@@ -323,4 +323,35 @@ enum SyntheticHand {
         }
         return hand
     }
+
+    /// A hand pointed at the screen (palm down, the desk posture), as the
+    /// camera above the screen projects it: the wrist→knuckle axis lies along
+    /// the view direction and compresses to a third of its length, the
+    /// knuckle line keeps its width, and the foreshortened fingers put their
+    /// tips *below* the knuckles. `struck` is the down-beat of the drum —
+    /// tips dropped well under the knuckle line; lifted, they hover just past
+    /// it. Alternating the two swings each finger's drop far past the
+    /// pointed noise floor while the palm never moves.
+    static func pointedHand(struck: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+                            scale: Double = 0.15,
+                            chirality: Hand.Chirality = .right) -> Hand {
+        var joints: [HandJoint: Vec2] = [:]
+        joints[.wrist] = wrist
+        for finger in Finger.allCases {
+            let spread = mcpOffset(finger)
+            let mcp = wrist + Vec2(spread.x, spread.y * 0.32) * scale
+            joints[finger.mcp] = mcp
+            let drop = struck ? 0.45 : 0.12
+            joints[finger.pip] = mcp + Vec2(0.01, drop * 0.35) * scale
+            joints[finger.dip] = mcp + Vec2(0.02, drop * 0.70) * scale
+            joints[finger.tip] = mcp + Vec2(0.03, drop) * scale
+        }
+        // The thumb rides low beside the index, mostly hidden by the hand.
+        let thumbTip = wrist + Vec2(-0.50, -0.10) * scale
+        joints[.thumbCMC] = wrist + Vec2(-0.30, -0.10) * scale
+        joints[.thumbMP] = wrist.lerp(to: thumbTip, t: 0.45)
+        joints[.thumbIP] = wrist.lerp(to: thumbTip, t: 0.72)
+        joints[.thumbTip] = thumbTip
+        return Hand(chirality: chirality, confidence: 1.0, joints: joints)
+    }
 }

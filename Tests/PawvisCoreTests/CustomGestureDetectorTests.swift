@@ -96,6 +96,92 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(wiggle(frames: 12, crissCross: true), [.fingerWiggle])
     }
 
+    // MARK: - Pointed wiggle
+
+    @discardableResult
+    private func pointedWiggle(slot: Int = 0, wrist: Vec2 = Vec2(0.5, 0.7), frames: Int,
+                               moving delta: Vec2 = .zero,
+                               startAt t0: TimeInterval = 0) -> [CustomGesture] {
+        var fired: [CustomGesture] = []
+        var w = wrist
+        for i in 0..<frames {
+            fired += feed([(slot, SyntheticHand.pointedHand(struck: i % 2 == 1, wrist: w))],
+                          at: t0 + Double(i) / 30)
+            w = w + delta
+        }
+        return fired
+    }
+
+    func testPointedWiggleFires() {
+        enable(.pointedWiggle)
+        XCTAssertEqual(pointedWiggle(frames: 12), [.pointedWiggle])
+    }
+
+    func testPointedMotionNeverFiresTheRaisedGesture() {
+        // Only the raised wiggle is bound: drumming a pointed hand is a
+        // different gesture and must stay silent.
+        enable(.fingerWiggle)
+        XCTAssertEqual(pointedWiggle(frames: 30), [])
+    }
+
+    func testRaisedMotionNeverFiresThePointedGesture() {
+        enable(.pointedWiggle)
+        XCTAssertEqual(wiggle(frames: 30), [])
+    }
+
+    func testTravellingPointedHandDoesNotWiggle() {
+        enable(.pointedWiggle)
+        XCTAssertEqual(pointedWiggle(frames: 14, moving: Vec2(0.03, 0)), [])
+    }
+
+    func testTwoHandPointedWiggleFires() {
+        enable(.pointedWiggle, .twoHandPointedWiggle)
+        var fired: [CustomGesture] = []
+        for i in 0..<14 {
+            let struck = i % 2 == 1
+            fired += feed(
+                [(0, SyntheticHand.pointedHand(struck: struck, wrist: Vec2(0.3, 0.7))),
+                 (1, SyntheticHand.pointedHand(struck: struck, wrist: Vec2(0.7, 0.7)))],
+                at: Double(i) / 30)
+        }
+        XCTAssertEqual(fired, [.twoHandPointedWiggle])
+    }
+
+    func testMixedOrientationsDoNotPair() {
+        // One hand raised and wiggling, the other pointed and drumming:
+        // two different gestures at once, not a two-hand pair. Exactly one
+        // single fires (the family refractory holds the other back).
+        enable(.fingerWiggle, .twoHandFingerWiggle, .pointedWiggle, .twoHandPointedWiggle)
+        var fired: [CustomGesture] = []
+        for i in 0..<25 {
+            let phase = i % 2 == 1
+            fired += feed(
+                [(0, SyntheticHand.wigglePhase(contracted: phase, wrist: Vec2(0.3, 0.7))),
+                 (1, SyntheticHand.pointedHand(struck: phase, wrist: Vec2(0.7, 0.7)))],
+                at: Double(i) / 30)
+        }
+        XCTAssertEqual(fired.count, 1)
+        XCTAssertFalse(fired.contains(.twoHandFingerWiggle))
+        XCTAssertFalse(fired.contains(.twoHandPointedWiggle))
+    }
+
+    func testOrientationSwitchRestartsTheCount() {
+        // A few raised phases, then the hand drops into the pointed pose:
+        // the buffers restart with the pose, so only the pointed wiggle
+        // fires — and only from pointed-pose motion.
+        enable(.fingerWiggle, .pointedWiggle)
+        var fired: [CustomGesture] = []
+        for i in 0..<4 {
+            fired += feed([(0, SyntheticHand.wigglePhase(contracted: i % 2 == 1))],
+                          at: Double(i) / 30)
+        }
+        for i in 4..<22 {
+            fired += feed([(0, SyntheticHand.pointedHand(struck: i % 2 == 1))],
+                          at: Double(i) / 30)
+        }
+        XCTAssertEqual(fired, [.pointedWiggle])
+    }
+
     // MARK: - Held poses
 
     private func holdPose(_ hand: @autoclosure () -> Hand, frames: Int,
@@ -445,6 +531,33 @@ final class CustomPoseFeatureTests: XCTestCase {
             XCTAssertNotNil(a)
             XCTAssertNotNil(b)
             XCTAssertGreaterThan(a! - b!, 0.045, "wiggle swing must clear the noise floor")
+        }
+    }
+
+    func testWiggleOrientationSeparatesThePoses() {
+        // Raised through both wiggle phases; pointed through both drum
+        // phases — the classification must hold across the whole motion,
+        // not just its stillest frame.
+        XCTAssertEqual(features(SyntheticHand.wigglePhase(contracted: false)).wiggleOrientation(), .raised)
+        XCTAssertEqual(features(SyntheticHand.wigglePhase(contracted: true)).wiggleOrientation(), .raised)
+        XCTAssertEqual(features(SyntheticHand.openRelaxed()).wiggleOrientation(), .raised)
+        XCTAssertEqual(features(SyntheticHand.pointedHand(struck: false)).wiggleOrientation(), .pointed)
+        XCTAssertEqual(features(SyntheticHand.pointedHand(struck: true)).wiggleOrientation(), .pointed)
+        // A fist commits to neither pose: its curled tips sit in the gap
+        // between the bands, and a pose that isn't clearly one wiggle or
+        // the other must not feed either machine.
+        XCTAssertNil(features(SyntheticHand.fist()).wiggleOrientation())
+    }
+
+    func testFingertipDropSwingClearsThePointedNoiseFloor() {
+        let lifted = features(SyntheticHand.pointedHand(struck: false))
+        let struck = features(SyntheticHand.pointedHand(struck: true))
+        for finger in Finger.allCases {
+            let a = lifted.fingertipDrop(finger)
+            let b = struck.fingertipDrop(finger)
+            XCTAssertNotNil(a)
+            XCTAssertNotNil(b)
+            XCTAssertGreaterThan(b! - a!, 0.10, "drum swing must clear the pointed noise floor")
         }
     }
 }
