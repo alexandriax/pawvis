@@ -297,6 +297,26 @@ question is how they were fixed. Do not retune these from intuition:
 - **Thumb signals are cones with a gap.** Each of the four directions
   demands 1.5× axis dominance from the thumb-tip vector, so the in-between
   angles of a rotating (or resting) thumb match nothing.
+- **The thumb-signal fist is read by its collapsed tips, not its angles.**
+  The natural thumbs-up faces its knuckles at the camera, where the curled
+  chains project as straight lines — the angle-band `isFist` never
+  matches, and thumb signals simply didn't engage on real hands.
+  `isClosedHand` (openness ≤ 0.15, thumb excluded) is the
+  orientation-proof fist read; both engage and hold accept either. The
+  *pointed* hand also collapses its tips while its thumb juts sideways —
+  a phantom thumb signal — so the hold family stands down whenever
+  `wiggleOrientation()` reads pointed.
+- **A pointed hand parks the mouse.** Off-beat drumming swings the
+  index-vs-middle tap differential exactly like index taps (measured: the
+  pointed wiggle clicked on whatever was under the cursor), so the engine
+  keeps a debounced pointed-pose park: cursor holds still, neither button
+  may *engage*, in-flight presses still drag and release. Enter fast
+  (2 frames), leave deliberately (4) — the first strikes of a drum land
+  immediately, and a lift at the top of the beat must not unpark.
+- **Hold poses show a countdown.** A pose that must dwell for a beat is
+  invisible until it fires, and invisible reads as broken: the detector
+  exposes `holdProgress` (gesture + seconds remaining), the engine
+  surfaces it, and the pill paints a live countdown while the dwell runs.
 - **A sweeping palm can't begin a press** (`pressEngageMaxSpeed`): fast
   motion blur fakes finger dips (two phantom clicks in one seven-second
   clip). Engage-only, like every such gate — a held press still drags and
@@ -335,7 +355,12 @@ none of this:
   feature, every switch verified against `SLSGetActiveSpace`, and reporting
   honestly ("Desktop switching isn't available on this macOS") if a future
   macOS removes the symbols. Nothing else may grow a SkyLight dependency
-  casually.
+  casually. The ring `SLSCopyManagedDisplaySpaces` returns mixes user
+  desktops (type 0) with full-screen app spaces (type 4);
+  `neighborDesktop` steps across the full-screen ones — landing on
+  someone's full-screen window reads as window shuffling, not desktop
+  switching (measured: the reported symptom) — and exits *from* a
+  full-screen space to the nearest desktop on that side.
 - **Window placement is AX geometry** (`WindowPlacer` applying
   `WindowPlacement`'s unit-tested rect math), the same Accessibility
   permission the mouse already needs. Fire-and-forget actions (the desktop
