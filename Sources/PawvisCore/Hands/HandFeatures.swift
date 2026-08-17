@@ -302,56 +302,118 @@ public struct HandFeatures {
         return tip.distance(to: palm) / scale
     }
 
-    /// Where the thumb stands relative to the palm: +1 clearly above (screen
-    /// up), -1 clearly below, nil when it isn't standing clear of the palm in
-    /// a convincingly vertical direction. "Clear" is most of a hand-scale;
-    /// "vertical" keeps the sideways-thumb of a resting fist from counting.
-    public func thumbVerticalSign() -> Int? {
-        guard let palm = palmCenter(), let thumb = point(.thumbTip) else { return nil }
-        let v = (thumb - palm) / scale
-        guard v.length >= 0.85, abs(v.y) >= 1.5 * abs(v.x) else { return nil }
-        return v.y < 0 ? 1 : -1
+    /// The direction a thumb-signal fist points its thumb, on screen: which
+    /// way the thumb tip stands relative to the palm, when it stands clear
+    /// (most of a hand-scale) and decisively along one axis. The axis
+    /// dominance is what keeps the in-between angles of a rotating or
+    /// resting thumb from counting. nil when the thumb isn't standing clear
+    /// or sits between the cones.
+    public enum ThumbDirection: String, CaseIterable, Sendable {
+        case up, down, left, right
     }
 
-    /// The thumbs-up / thumbs-down *engage* pose: a genuine fist with the
-    /// thumb standing clear of it, vertically. Strict like every engage check:
-    /// all four fingers positively curled.
-    public func isThumbSignal(up: Bool) -> Bool {
-        guard isFist(), let sign = thumbVerticalSign() else { return false }
-        return sign == (up ? 1 : -1)
+    public func thumbDirection() -> ThumbDirection? {
+        guard let palm = palmCenter(), let thumb = point(.thumbTip) else { return nil }
+        let v = (thumb - palm) / scale
+        guard v.length >= 0.85 else { return nil }
+        if abs(v.y) >= 1.5 * abs(v.x) {
+            return v.y < 0 ? .up : .down
+        }
+        if abs(v.x) >= 1.5 * abs(v.y) {
+            return v.x < 0 ? .left : .right
+        }
+        return nil
+    }
+
+    /// The thumb-signal *engage* pose: a genuine fist with the thumb
+    /// standing clear of it in the given direction. Strict like every engage
+    /// check: all four fingers positively curled.
+    public func isThumbSignal(_ direction: ThumbDirection) -> Bool {
+        guard isFist() else { return false }
+        return thumbDirection() == direction
     }
 
     /// The loosened *hold* check for a thumb signal: fingers may drift into
-    /// the neutral band, and the thumb's vertical cone widens a little, but
-    /// no finger may re-extend and the thumb must stay clear of the palm.
-    public func isThumbSignalHeld(up: Bool) -> Bool {
+    /// the neutral band, and the thumb's cone widens a little, but no finger
+    /// may re-extend and the thumb must stay clear of the palm on the same
+    /// side.
+    public func isThumbSignalHeld(_ direction: ThumbDirection) -> Bool {
         guard Finger.allCases.allSatisfy({ isExtended($0) != true }),
               let palm = palmCenter(), let thumb = point(.thumbTip) else { return false }
         let v = (thumb - palm) / scale
-        guard v.length >= 0.70, abs(v.y) >= 1.1 * abs(v.x) else { return false }
-        return (v.y < 0 ? 1 : -1) == (up ? 1 : -1)
+        guard v.length >= 0.70 else { return false }
+        switch direction {
+        case .up: return v.y < 0 && abs(v.y) >= 1.1 * abs(v.x)
+        case .down: return v.y > 0 && abs(v.y) >= 1.1 * abs(v.x)
+        case .left: return v.x < 0 && abs(v.x) >= 1.1 * abs(v.y)
+        case .right: return v.x > 0 && abs(v.x) >= 1.1 * abs(v.y)
+        }
     }
 
-    /// The grab pose: the whole hand closed, fingertips gathered onto the
-    /// thumb, read through `openness()` alone — the one measure a closed
-    /// hand can't fake at any orientation. Deliberately NOT a
-    /// finger-extension or splay check: a hand gathered *toward the camera*
-    /// projects straight finger chains and scattered tips (measured on real
-    /// video, where both guards silently vetoed the real gesture). The
-    /// look-alikes are excluded where the context lives, in the detector:
-    /// a shaka or thumb signal carries an extended thumb, which the grab's
-    /// engage refuses. Strict engage bound; the fling's hold side uses
-    /// `isGatherHeld`.
-    public func isGathered() -> Bool {
-        guard let open = openness() else { return false }
-        return open <= 0.12
+    /// All five fingertips (thumb included), where tracked.
+    private func trackedTips() -> [Vec2] {
+        let ids: [HandJoint] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
+        return ids.compactMap { point($0) }
+    }
+
+    /// How tightly all five fingertips bunch: mean distance to their own
+    /// centroid, normalized by hand scale. Small when the fingers gather
+    /// onto the thumb — *wherever* that bunch forms, in front of the palm
+    /// included — and large whenever any tip (the thumb above all) stands
+    /// apart. Needs at least four tracked tips; nil otherwise.
+    public func fingertipGatherSpread() -> Double? {
+        let tips = trackedTips()
+        guard tips.count >= 4 else { return nil }
+        let center = centroid(of: tips)
+        return tips.reduce(0.0) { $0 + $1.distance(to: center) } / Double(tips.count) / scale
+    }
+
+    /// The point a gathered hand is *at*: the fingertip bunch itself, falling
+    /// back to the palm. The fling is tracked from here rather than the palm
+    /// — a forward gather stands well away from the palm anchor, and the
+    /// bunch is the part of the hand the camera actually sees.
+    public func gatherPoint() -> Vec2? {
+        let tips = trackedTips()
+        if tips.count >= 3 { return centroid(of: tips) }
+        return pointerPoint(.palmCenter)
+    }
+
+    /// The grab pose, two ways of seeing one thing (either counts):
+    ///
+    /// - the fingertip bunch: all five tips within `spreadLimit` of their
+    ///   centroid. Orientation-proof, works for the forward gather where the
+    ///   bunch stands away from the palm, and — because the thumb is one of
+    ///   the five — inherently refuses every thumb-out look-alike (thumb
+    ///   signals, the shaka, an open hand).
+    /// - the closed fist read through `openness()`, with the thumb not
+    ///   extended: covers palm-on gathers whose bunched tips Vision can't
+    ///   separate well enough to measure a spread.
+    ///
+    /// Deliberately NOT a finger-extension or splay check: a hand gathered
+    /// toward the camera projects straight finger chains (measured on real
+    /// video, where an extension guard silently vetoed the real gesture).
+    /// Strict engage bound; the fling's hold side uses `isGatherHeld`.
+    public func isGathered(spreadLimit: Double) -> Bool {
+        if let spread = fingertipGatherSpread(), spread <= spreadLimit {
+            return true
+        }
+        if let open = openness(), open <= 0.12, isThumbExtended() == false {
+            return true
+        }
+        return false
     }
 
     /// The loosened hold check for a grab in flight: fast motion blurs the
-    /// fingers, so anything still well short of an open hand keeps the grab.
-    public func isGatherHeld() -> Bool {
-        guard let open = openness() else { return false }
-        return open <= 0.35
+    /// fingers, so anything still well short of an open hand — by either
+    /// measure — keeps the grab. Returns nil when neither measure is
+    /// readable this frame (blur): the caller holds state, as everywhere.
+    public func isGatherHeld(spreadLimit: Double) -> Bool? {
+        let spread = fingertipGatherSpread()
+        let open = openness()
+        if spread == nil, open == nil { return nil }
+        if let spread, spread <= spreadLimit * 1.5 { return true }
+        if let open, open <= 0.35 { return true }
+        return false
     }
 
     /// Index + little extended, middle + ring folded in — the scroll pose.

@@ -38,21 +38,21 @@ final class CustomGestureEngineTests: XCTestCase {
         }
     }
 
-    func testSwipeSurfacesAsEvent() {
-        enable(.swipeRight)
+    func testFlingSurfacesAsEvent() {
+        enable(.grabFlingRight)
         var events: [GestureEvent] = []
         var t = 0.0
-        var wrist = Vec2(0.2, 0.6)
+        var wrist = Vec2(0.4, 0.55)
         for _ in 0..<3 {
             events += engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed(wrist: wrist)])).events
             t += 1.0 / 30
         }
-        for _ in 0..<9 {
-            wrist = wrist + Vec2(0.05, 0)
-            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed(wrist: wrist)])).events
+        for i in 0..<12 {
+            if i >= 3 { wrist = wrist + Vec2(0.03, 0) }
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.gathered(wrist: wrist)])).events
             t += 1.0 / 30
         }
-        XCTAssertEqual(customFires(events), [.swipeRight])
+        XCTAssertEqual(customFires(events), [.grabFlingRight])
     }
 
     func testGrabParksCursorUntilRelease() {
@@ -82,25 +82,6 @@ final class CustomGestureEngineTests: XCTestCase {
             t += 1.0 / 30
         }
         XCTAssertFalse(moves(released).isEmpty, "release must unpark the cursor")
-    }
-
-    func testHeldButtonBlocksCustomGestures() {
-        enable(.swipeRight)
-        var t = 0.0
-        var wrist = Vec2(0.2, 0.6)
-        // Establish the press (index dipped, held)…
-        for _ in 0..<5 {
-            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: true, wrist: wrist)]))
-            t += 1.0 / 30
-        }
-        // …then drag fast: exactly the motion that must never read as a swipe.
-        var events: [GestureEvent] = []
-        for _ in 0..<9 {
-            wrist = wrist + Vec2(0.05, 0)
-            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: true, wrist: wrist)])).events
-            t += 1.0 / 30
-        }
-        XCTAssertEqual(customFires(events), [])
     }
 
     func testSweepingPalmBlocksClickEngage() {
@@ -134,13 +115,13 @@ final class CustomGestureEngineTests: XCTestCase {
         enable(.thumbsUp)
         var t = 0.0
         for _ in 0..<8 {
-            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.thumbSignal(up: true)]))
+            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.thumbSignal(.up)]))
             t += 1.0 / 30
         }
         engine.reset()
         var events: [GestureEvent] = []
         for _ in 0..<6 { // under the dwell, counted from scratch after reset
-            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.thumbSignal(up: true)])).events
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.thumbSignal(.up)])).events
             t += 1.0 / 30
         }
         XCTAssertEqual(customFires(events), [])

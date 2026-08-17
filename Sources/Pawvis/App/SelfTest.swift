@@ -28,6 +28,18 @@ private func openHand(wrist: Vec2, scale: Double = 0.15) -> Hand {
     return Hand(chirality: .right, confidence: 1, joints: joints)
 }
 
+/// The grab pose: every fingertip (thumb included) bunched at one point in
+/// front of the palm — the fling smoke's gathered hand.
+private func gatheredHand(wrist: Vec2, scale: Double = 0.15) -> Hand {
+    var hand = openHand(wrist: wrist, scale: scale)
+    let bunch = wrist + Vec2(-0.3, -1.5) * scale
+    let tips: [HandJoint] = [.thumbTip, .indexTip, .middleTip, .ringTip, .littleTip]
+    for (i, tip) in tips.enumerated() {
+        hand.setPoint(bunch + Vec2(Double(i) * 0.02 - 0.04, 0) * scale, for: tip)
+    }
+    return hand
+}
+
 /// Headless smoke test (`Pawvis --selftest`): exercises the core pipeline
 /// pieces that don't need camera/mic/permissions, so CI or a fresh checkout
 /// can verify the binary is sane without launching the UI.
@@ -84,8 +96,8 @@ func runSelfTest() -> Int32 {
         check("settings.roundtrip", false)
     }
 
-    // Custom gestures: a bound swipe fires through the engine end to end,
-    // and the settings tree carries bindings intact.
+    // Custom gestures: a bound grab & fling fires through the engine end to
+    // end, and the settings tree carries bindings intact.
     var customEngineConfig = GestureConfig.default
     customEngineConfig.controlTrigger = .anyHand
     customEngineConfig.mirrorCamera = false
@@ -94,19 +106,24 @@ func runSelfTest() -> Int32 {
     customEngineConfig.smoothing = OneEuroFilter.Params(minCutoff: 1e9, beta: 0, dCutoff: 1e9)
     let customEngine = GestureEngine(config: customEngineConfig)
     var customDetection = CustomGestureDetector.Config()
-    customDetection.enabled = [.swipeRight]
+    customDetection.enabled = [.grabFlingRight]
     customEngine.customConfig = customDetection
-    var swipeFired = false
-    var wrist = Vec2(0.2, 0.6)
+    var flingFired = false
+    var wrist = Vec2(0.4, 0.55)
     var tick = 0.0
-    for i in 0..<12 {
-        if i >= 3 { wrist = wrist + Vec2(0.05, 0) }
-        let (events, _) = customEngine.process(
-            HandFrame(time: tick, hands: [openHand(wrist: wrist)]))
-        if events.contains(.customGesture(.swipeRight)) { swipeFired = true }
+    for i in 0..<16 {
+        let hand: Hand
+        if i < 3 {
+            hand = openHand(wrist: wrist) // pause open: the deliberate transition
+        } else {
+            if i >= 6 { wrist = wrist + Vec2(0.03, 0) } // gather at rest, then fling
+            hand = gatheredHand(wrist: wrist)
+        }
+        let (events, _) = customEngine.process(HandFrame(time: tick, hands: [hand]))
+        if events.contains(.customGesture(.grabFlingRight)) { flingFired = true }
         tick += 1.0 / 30
     }
-    check("customGesture.boundSwipeFires", swipeFired)
+    check("customGesture.boundFlingFires", flingFired)
 
     var boundSettings = PawvisSettings.default
     boundSettings.customGestures.bindings = [

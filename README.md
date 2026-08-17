@@ -76,21 +76,23 @@ Gestures**.
   sides twice (over and back), hand tracking switches off entirely, the same
   as the menu bar switch. Optional, on by default; the number of crossings is
   a setting under **Settings → Tracking**.
-- **Custom gestures**: **Settings → Custom** carries a library of extra
-  one-shot gestures, none of them live until you bind one. Swipe an open hand
-  left, right, up or down (one hand, or both hands together), point your
-  hands at the camera and wiggle your fingers, hold a thumbs up, a thumbs
-  down or a shaka for a beat, or gather your fingers into a grab and fling it
-  toward any edge or corner, eight directions in all. Each gesture you add is
-  assigned an action of your choice: move between virtual desktops, open
-  Mission Control or App Exposé, show the desktop, snap the focused window
-  (halves, thirds, two-thirds, quarters, center, maximize, minimize, next
-  display), press Return or Escape, go back or forward, switch tabs,
-  play/pause, stop tracking, toggle voice control, open any app, press any
-  keyboard shortcut, or run a shell command you provide (it runs exactly as
-  typed, as you). Sensitivity is tunable per gesture family, the pill at the
-  top of the screen confirms every fire, and the Gesture Guide illustrates
-  whatever you have bound.
+- **Custom gestures**: **Settings → Custom** lists a library of extra
+  one-shot gestures, every one of them visible and none of them live until
+  you give it an action. Point a hand (or both) at the camera and wiggle
+  your fingers, hold a fist with your thumb up, down, or tilted to point
+  straight left or right, hold a shaka, or bunch all your fingertips onto
+  your thumb and fling the bunch toward any edge or corner, eight directions
+  in all. A gesture's action can be anything from the catalog: move between
+  virtual desktops, open Mission Control or App Exposé, show the desktop,
+  snap the focused window (halves, thirds, two-thirds, quarters, center,
+  maximize, minimize, next display), press Return or Escape, go back or
+  forward, switch tabs, play/pause, stop tracking, toggle voice control,
+  open any app, press any keyboard shortcut, or run a shell command you
+  provide (it runs exactly as typed, as you). Every gesture row carries its
+  own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
+  fling distance), so a gesture that won't trigger, or triggers too easily,
+  can be dialed in on the spot. The pill at the top of the screen confirms
+  every fire, and the Gesture Guide illustrates whatever you have bound.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a
@@ -223,7 +225,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 460 unit tests
+swift test          # 453 unit tests
 swift build         # debug build
 ```
 
@@ -246,7 +248,7 @@ Sources/
     Geometry/          Vec2 · One Euro filter · interaction-box mapper
     Hands/             21-landmark model · pinch/dip/curl metrics
     Gestures/          GestureEngine: frames → clicks, drags, scrolls, cursor moves
-                       + the custom one-shot gestures (swipes, wiggle, poses, flings)
+                       + the custom one-shot gestures (wiggles, held poses, flings)
     Actions/           gesture actions · typed-shortcut parsing · window placement math
     VoiceControl/      wake-word + command parser · spoken URLs & key chords
     Update/            semantic versions · check / offer / notify policy

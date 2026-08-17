@@ -257,38 +257,43 @@ band, tracking loss, and the guards. Copy lives in `SettingsView` and
 reaching for an SF Symbol, because the symbols are what taught the wrong
 gesture last time.
 
-**The custom one-shot gestures** (`CustomGestureDetector`; bound in
-Settings → Custom, none live by default) follow the same rules plus a few
-that only real video could teach — every one below was a measured failure
-first, and `--gesture-eval` over the clips in question is how they were
-fixed. Do not retune these from intuition:
+**The custom one-shot gestures** (`CustomGestureDetector`; every gesture
+listed in Settings → Custom, none live until given an action) follow the
+same rules plus a few that only real video could teach — every one below
+was a measured failure first, and `--gesture-eval` over the clips in
+question is how they were fixed. Do not retune these from intuition:
 
-- **Motion gestures are judged by endpoints, not per-frame continuity.**
-  Vision drops or blurs frames exactly during the fast part of a sweep; a
-  model that demanded consecutive fast frames never fired once on real
-  video. A swipe is displacement from a *launch pad* (where the open hand
-  last sat settled) covered within a window with one genuinely fast sample
-  along the way; a mid-flight dropout doesn't matter.
-- **Openness beats finger-extension checks for closed poses.** A hand
-  gathered toward the camera projects straight finger chains and scattered
-  tips (the trigger's foreshortening lesson again) — extension and splay
-  guards on the grab both silently vetoed the real gesture. `openness()` is
-  the one measure a closed hand can't fake; the shaka/thumbs look-alikes
-  are excluded by the thumb instead (a grab folds the thumb in; they stand
-  it out).
-- **Real swipes close at the end and return closed.** The relaxing
-  follow-through must not kill a mostly-banked sweep, and the curled
-  return stroke must never count as one — hence the closed-kill rule keyed
-  on how much travel was banked while still open, and the grab's engage
-  stillness gate (a real grab closes from rest; the return stroke closes
-  mid-flight).
-- **Unreadable openness holds, like every other missing signal.** The first
-  frames of a fling blur the fingertips into nothing; treating nil as
-  "opened" released a real grab right before its fling.
-- **A sweeping palm can't begin a press** (`pressEngageMaxSpeed`): mid-sweep
-  blur fakes finger dips (two phantom clicks in one seven-second clip), and
-  each one killed the swipe it rode on. Engage-only, like every such gate —
-  a held press still drags and releases at any speed.
+- **The grab is the fingertip bunch, not the palm's shape.** A real gather
+  forms its bunch *in front of* the palm, so palm-relative measures
+  (openness, extension bands, splay) all misread it at some orientation —
+  each was tried and each silently vetoed a real grab. `isGathered` reads
+  the mean spread of all five tips around their own centroid (the thumb
+  being one of the five is what excludes every thumb-out look-alike:
+  thumb signals, the shaka, open hands), with a closed-fist openness
+  fallback for palm-on gathers; the fling is tracked at `gatherPoint()` —
+  the bunch — not the palm. "Grab tightness" in the tuning row is the
+  spread ceiling.
+- **A grab closes from rest.** The engage stillness gate is what separates
+  it from a relaxed closed hand travelling through the frame (the measured
+  false-fling); the fling comes *after* the gather, not with it.
+- **Unreadable geometry holds, like every other missing signal.** The first
+  frames of a fling blur the fingertips into nothing; treating that as
+  "opened" released a real grab right before its fling. `isGatherHeld`
+  returns nil when neither measure is readable, and the caller holds.
+- **Thumb signals are cones with a gap.** Each of the four directions
+  demands 1.5× axis dominance from the thumb-tip vector, so the in-between
+  angles of a rotating (or resting) thumb match nothing.
+- **A sweeping palm can't begin a press** (`pressEngageMaxSpeed`): fast
+  motion blur fakes finger dips (two phantom clicks in one seven-second
+  clip). Engage-only, like every such gate — a held press still drags and
+  releases at any speed.
+- **The open-palm swipes were retired.** Real sweeps blur into dropped
+  frames, close mid-arc, and mirror themselves on the return stroke; even
+  the endpoint model that finally fired on clean clips was never going to
+  be trustworthy live. Their code lives in git history, and the tolerant
+  decoders drop saved swipe bindings on sight — the standard retirement
+  path. Re-introducing them means beating those failure modes on
+  `--gesture-eval` clips first.
 
 ## Gesture actions
 
