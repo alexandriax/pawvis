@@ -29,7 +29,7 @@ public struct CustomGestureBinding: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// The Settings → Custom section: which extra gestures are bound to which
+/// The Settings → Gestures section: which extra gestures are bound to which
 /// actions, plus the family tuning. Nothing here is on by default — a
 /// gesture without an action is never detected. (Bindings for retired
 /// gestures — the swipes — fail to decode and drop silently, which is the

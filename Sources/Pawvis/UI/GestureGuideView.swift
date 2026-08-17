@@ -21,7 +21,11 @@ struct GestureGuideView: View {
                 Text("Face the camera with one hand up. The claw is your cursor; the dots are your fingertips.")
                     .foregroundStyle(.secondary)
 
-                section("Pointing & Clicking", rows: pointingRows)
+                if store.settings.gestures.controlTrigger == .gesturesOnly {
+                    pointingOffNote
+                } else {
+                    section("Pointing & Clicking", rows: pointingRows)
+                }
                 customGesturesSection
                 section("Voice Control", rows: voiceRows)
             }
@@ -104,6 +108,26 @@ struct GestureGuideView: View {
         return rows
     }
 
+    /// Gestures-only mode: the mouse set is off, and saying so beats listing
+    /// gestures that would do nothing.
+    private var pointingOffNote: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Pointing & Clicking").font(.title3.bold())
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Mouse control is off: you chose “custom gestures only” under Settings → Tracking. Your hands never move the cursor — they only trigger the gestures below (and the stop-tracking wave).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Change in Settings…") {
+                    SettingsRouter.shared.open(.tracking)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
+        }
+    }
+
     /// The user's bound custom gestures, illustrated like the built-ins —
     /// or, before any exist, a pointer at where to add them.
     @ViewBuilder
@@ -114,12 +138,12 @@ struct GestureGuideView: View {
                 Text("Custom Gestures").font(.title3.bold())
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Swipes, finger wiggles, thumbs and grab & fling can each run an action of your choosing: switch desktops, snap windows, press shortcuts, open apps, run commands.")
+                        Text("Finger wiggles, thumb signals, the shaka and grab & fling can each run an action of your choosing: switch desktops, snap windows, press shortcuts, open apps, run commands.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Button("Add gestures in Settings…") {
-                            SettingsRouter.shared.open(.custom)
+                            SettingsRouter.shared.open(.gestures)
                         }
                     }
                 }
@@ -136,7 +160,7 @@ struct GestureGuideView: View {
                         detail: "\(binding.gesture.howTo) → \(binding.action?.summary ?? "")")
                 })
                 if !store.settings.customGestures.enabled {
-                    Text("Custom gestures are currently switched off in Settings → Custom.")
+                    Text("Custom gestures are currently switched off in Settings → Gestures.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

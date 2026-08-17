@@ -52,11 +52,13 @@ into a fist for a moment, or take it out of view, to park the cursor again;
 the claw fades while it's parked. That keeps a hand that's merely visible
 (resting, typing, gesturing) from dragging the cursor around. **Settings →
 Tracking** switches back to "Any detected hand" if you'd rather have no
-trigger at all.
+trigger at all, or all the way to **"Never — custom gestures only"**, which
+keeps the mouse untouched entirely: your hands become a remote that only
+fires the gestures you've assigned.
 
 Once you have it, your hand is the mouse: the cursor rides your palm, and your
 fingers are the buttons. Everything below is tunable in **Settings →
-Gestures**.
+Mouse**.
 
 - **Move**: hold your hand open, fingers up, and move it.
 - **Click**: dip your **index finger**, like tapping a mouse button.
@@ -76,7 +78,7 @@ Gestures**.
   sides twice (over and back), hand tracking switches off entirely, the same
   as the menu bar switch. Optional, on by default; the number of crossings is
   a setting under **Settings → Tracking**.
-- **Custom gestures**: **Settings → Custom** lists a library of extra
+- **Custom gestures**: **Settings → Gestures** lists a library of extra
   one-shot gestures, every one of them visible and none of them live until
   you give it an action. Point a hand (or both) at the camera and wiggle
   your fingers, hold a fist with your thumb up, down, or tilted to point

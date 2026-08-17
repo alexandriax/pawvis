@@ -12,11 +12,16 @@ public enum ControlTrigger: String, Codable, CaseIterable, Sendable {
     /// Any tracked hand controls the cursor immediately (the original
     /// behavior).
     case anyHand
+    /// The cursor is never taken: no pointing, no clicks, no scrolling.
+    /// Hands are still tracked and the custom gestures (and the tracking-off
+    /// wave) still fire — the hands-as-a-remote mode.
+    case gesturesOnly
 
     public var displayName: String {
         switch self {
         case .openHand: return "Open hand"
         case .anyHand: return "Any detected hand"
+        case .gesturesOnly: return "Never — custom gestures only"
         }
     }
 }

@@ -152,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // nobody and the Install button does nothing.
         updateNotifier.start()
 
-        // PAWVIS_OPEN_SETTINGS=<general|tracking|gestures|voice|about> opens
+        // PAWVIS_OPEN_SETTINGS=<general|tracking|mouse|gestures|voice|about> opens
         // Settings on that tab right after launch. This exists for eyes-on UI
         // verification (AGENTS.md requires looking at the tabs after settings
         // changes, and SwiftUI offers no headless render of them) and it
