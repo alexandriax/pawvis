@@ -61,6 +61,32 @@ final class SpaceSwitcher {
 
     private var busy = false
 
+    /// One space in a display's ring: its window-server id and whether it
+    /// is a user desktop (`type == 0`) rather than a full-screen app's
+    /// space (`type == 4`).
+    struct Space: Equatable {
+        let id: UInt64
+        let isDesktop: Bool
+    }
+
+    /// The neighboring *desktop* in the given direction, skipping the
+    /// full-screen app spaces that share the ring: the action is named
+    /// "desktop", and landing on someone's full-screen window reads as
+    /// window shuffling, not desktop switching. Works from a full-screen
+    /// space too (you flung mid-movie): the scan just continues to the
+    /// nearest desktop on that side. nil when there is none.
+    nonisolated static func neighborDesktop(in spaces: [Space], active: UInt64,
+                                            direction: Direction) -> UInt64? {
+        guard let current = spaces.firstIndex(where: { $0.id == active }) else { return nil }
+        let step = direction == .left ? -1 : 1
+        var target = current + step
+        while target >= 0 && target < spaces.count {
+            if spaces[target].isDesktop { return spaces[target].id }
+            target += step
+        }
+        return nil
+    }
+
     /// Perform the switch; the returned line is the status-pill outcome.
     func switchDesktop(_ direction: Direction) async -> String {
         guard !busy else { return "Still switching…" }
@@ -77,20 +103,24 @@ final class SpaceSwitcher {
         }
         for display in displays {
             guard let identifier = display["Display Identifier"] as? String,
-                  let spaces = display["Spaces"] as? [[String: Any]] else { continue }
-            let ids = spaces.compactMap { ($0["id64"] as? NSNumber)?.uint64Value }
-            guard let current = ids.firstIndex(of: active) else { continue }
+                  let spaceDicts = display["Spaces"] as? [[String: Any]] else { continue }
+            let spaces = spaceDicts.compactMap { dict -> Space? in
+                guard let id = (dict["id64"] as? NSNumber)?.uint64Value else { return nil }
+                return Space(id: id, isDesktop: ((dict["type"] as? NSNumber)?.intValue ?? 0) == 0)
+            }
+            guard spaces.contains(where: { $0.id == active }) else { continue }
 
-            let target = direction == .left ? current - 1 : current + 1
-            guard target >= 0 else { return "No desktop to the left" }
-            guard target < ids.count else { return "No desktop to the right" }
+            guard let target = Self.neighborDesktop(in: spaces, active: active,
+                                                    direction: direction) else {
+                return direction == .left ? "No desktop to the left" : "No desktop to the right"
+            }
 
-            sky.setSpace(sky.connection, identifier as CFString, ids[target])
+            sky.setSpace(sky.connection, identifier as CFString, target)
 
             // Verified, not assumed: poll the active space briefly.
             for _ in 0..<8 {
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                if sky.activeSpace(sky.connection) == ids[target] {
+                if sky.activeSpace(sky.connection) == target {
                     return direction == .left ? "Desktop left" : "Desktop right"
                 }
             }

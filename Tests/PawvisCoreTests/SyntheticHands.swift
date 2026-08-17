@@ -354,4 +354,42 @@ enum SyntheticHand {
         joints[.thumbTip] = thumbTip
         return Hand(chirality: chirality, confidence: 1.0, joints: joints)
     }
+
+    /// The pointed hand drumming off-beat: middle/ring/little struck while
+    /// the index stays lifted. In the index-vs-middle tap differential this
+    /// projects exactly like a deep index dip — the pattern that made real
+    /// pointed drumming click on whatever was under the cursor.
+    static func pointedOffbeat(struck: Bool, wrist: Vec2 = Vec2(0.5, 0.7),
+                               scale: Double = 0.15) -> Hand {
+        var hand = pointedHand(struck: struck, wrist: wrist, scale: scale)
+        guard struck else { return hand }
+        let mcp = hand[Finger.index.mcp]!
+        hand.setPoint(mcp + Vec2(0.01, 0.12 * 0.35) * scale, for: Finger.index.pip)
+        hand.setPoint(mcp + Vec2(0.02, 0.12 * 0.70) * scale, for: Finger.index.dip)
+        hand.setPoint(mcp + Vec2(0.03, 0.12) * scale, for: Finger.index.tip)
+        return hand
+    }
+
+    /// A thumb signal the way people actually make it: knuckles at the
+    /// camera. The curled chains project as straight lines (the angle bands
+    /// read them "extended") while the tips collapse onto the palm — only
+    /// the closed-hand openness read sees this fist. The thumb stands clear
+    /// along the given direction, as in `thumbSignal`.
+    static func thumbSignalTowardCamera(_ direction: HandFeatures.ThumbDirection,
+                                        wrist: Vec2 = Vec2(0.5, 0.7),
+                                        scale: Double = 0.15) -> Hand {
+        var hand = curledTowardCamera(wrist: wrist, scale: scale)
+        let offset: Vec2
+        switch direction {
+        case .up: offset = Vec2(0.0, -1.9)
+        case .down: offset = Vec2(0.0, 0.42)
+        case .left: offset = Vec2(-1.3, -0.65)
+        case .right: offset = Vec2(1.3, -0.65)
+        }
+        let thumbTip = wrist + offset * scale
+        hand.setPoint(thumbTip, for: .thumbTip)
+        hand.setPoint(wrist.lerp(to: thumbTip, t: 0.72), for: .thumbIP)
+        hand.setPoint(wrist.lerp(to: thumbTip, t: 0.45), for: .thumbMP)
+        return hand
+    }
 }

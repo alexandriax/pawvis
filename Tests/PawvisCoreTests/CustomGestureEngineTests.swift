@@ -146,6 +146,49 @@ final class CustomGestureEngineTests: XCTestCase {
         XCTAssertEqual(customFires(events), [.thumbsUp])
     }
 
+    func testPointedDrummingNeverClicksAndParksTheCursor() {
+        // Off-beat drumming swings the index-vs-middle differential exactly
+        // like index taps; the pointed-pose park must bar both buttons and
+        // hold the cursor still even with control armed.
+        var t = 0.0
+        for _ in 0..<4 {
+            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed()]))
+            t += 1.0 / 30
+        }
+        var early: [GestureEvent] = []
+        var parked: [GestureEvent] = []
+        for i in 0..<30 {
+            let events = engine.process(
+                HandFrame(time: t, hands: [SyntheticHand.pointedOffbeat(struck: i % 2 == 1)])).events
+            if i < 3 { early += events } else { parked += events }
+            t += 1.0 / 30
+        }
+        let all = early + parked
+        XCTAssertFalse(all.contains { if case .buttonDown = $0 { return true } else { return false } },
+                       "a drumming pointed hand must never click")
+        XCTAssertEqual(moves(parked), [], "the cursor parks while the hand is pointed")
+    }
+
+    func testRaisedHandRecoversTheCursorAfterPointedPark() {
+        var t = 0.0
+        for _ in 0..<4 {
+            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed()]))
+            t += 1.0 / 30
+        }
+        for i in 0..<10 {
+            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.pointedOffbeat(struck: i % 2 == 1)]))
+            t += 1.0 / 30
+        }
+        var events: [GestureEvent] = []
+        var wrist = Vec2(0.5, 0.7)
+        for _ in 0..<10 {
+            wrist = wrist + Vec2(0.02, 0)
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed(wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+        XCTAssertFalse(moves(events).isEmpty, "an upright hand takes the cursor back")
+    }
+
     func testEngineResetClearsDetector() {
         enable(.thumbsUp)
         var t = 0.0

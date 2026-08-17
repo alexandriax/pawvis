@@ -268,8 +268,24 @@ public struct HandFeatures {
 
     /// All four fingers genuinely curled (tight hand). The neutral band between
     /// curled and extended keeps a relaxed hand from reading as a fist.
+    /// Angle-band based, so it only sees fists shown broadside — see
+    /// `isClosedHand` for the orientation-proof read.
     public func isFist() -> Bool {
         Finger.allCases.allSatisfy { isCurled($0) == true }
+    }
+
+    /// The closed hand read the way foreshortening can't fake: every
+    /// non-thumb tip collapsed onto the palm. A fist facing the camera —
+    /// the natural thumbs-up orientation — projects its curled chains as
+    /// straight lines, so the angle bands read it as anything but a fist
+    /// (measured: thumb signals never engaged on real hands). Openness is
+    /// the same signal the open-hand trigger uses, from the other side:
+    /// a fist reads ~0.0 at any orientation, against ~0.19 for even a
+    /// half-curl. The thumb is not part of `openness()`, so a thumb
+    /// standing clear doesn't lift it.
+    public func isClosedHand() -> Bool {
+        guard let open = openness() else { return false }
+        return open <= 0.15
     }
 
     /// Thumb + little finger extended, middle three folded ("shaka" / hang loose).
@@ -379,19 +395,24 @@ public struct HandFeatures {
     }
 
     /// The thumb-signal *engage* pose: a genuine fist with the thumb
-    /// standing clear of it in the given direction. Strict like every engage
-    /// check: all four fingers positively curled.
+    /// standing clear of it in the given direction. Strict like every
+    /// engage check — but the fist may be read either way: by the angle
+    /// bands (broadside) or by the collapsed tips (`isClosedHand`), because
+    /// the natural thumbs-up faces its knuckles at the camera, where the
+    /// angle bands are blind.
     public func isThumbSignal(_ direction: ThumbDirection) -> Bool {
-        guard isFist() else { return false }
+        guard isFist() || isClosedHand() else { return false }
         return thumbDirection() == direction
     }
 
     /// The loosened *hold* check for a thumb signal: fingers may drift into
     /// the neutral band, and the thumb's cone widens a little, but no finger
     /// may re-extend and the thumb must stay clear of the palm on the same
-    /// side.
+    /// side. A knuckles-on fist projects its curled chains straight — the
+    /// bands call that "extended" — so the collapsed-tips read keeps the
+    /// hold alive at that orientation too.
     public func isThumbSignalHeld(_ direction: ThumbDirection) -> Bool {
-        guard Finger.allCases.allSatisfy({ isExtended($0) != true }),
+        guard Finger.allCases.allSatisfy({ isExtended($0) != true }) || isClosedHand(),
               let palm = palmCenter(), let thumb = point(.thumbTip) else { return false }
         let v = (thumb - palm) / scale
         guard v.length >= 0.70 else { return false }

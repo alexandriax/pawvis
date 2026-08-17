@@ -236,6 +236,24 @@ func runSelfTest() -> Int32 {
     check("autopilot.noProgressAborts",
           AutopilotPolicy.shouldAbortNoProgress([stuck, stuck, stuck]))
 
+    // Desktop switching steps between *desktops*: the window server's ring
+    // mixes user desktops (type 0) with full-screen app spaces (type 4),
+    // and stepping into someone's full-screen window reads as window
+    // shuffling, not desktop switching (measured: the reported symptom).
+    let ring: [SpaceSwitcher.Space] = [
+        .init(id: 1, isDesktop: true), .init(id: 40, isDesktop: false),
+        .init(id: 2, isDesktop: true), .init(id: 41, isDesktop: false),
+        .init(id: 3, isDesktop: true),
+    ]
+    check("spaces.rightSkipsFullscreen",
+          SpaceSwitcher.neighborDesktop(in: ring, active: 1, direction: .right) == 2)
+    check("spaces.leftSkipsFullscreen",
+          SpaceSwitcher.neighborDesktop(in: ring, active: 3, direction: .left) == 2)
+    check("spaces.fullscreenExitsToNearestDesktop",
+          SpaceSwitcher.neighborDesktop(in: ring, active: 41, direction: .left) == 2)
+    check("spaces.edgeReportsNoNeighbor",
+          SpaceSwitcher.neighborDesktop(in: ring, active: 1, direction: .left) == nil)
+
     // Menu chips stay readable in both appearances. These sit on translucent
     // menu material where a too-light fill has washed out before, so the
     // check is on the numbers rather than on someone remembering to look:
