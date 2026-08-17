@@ -79,6 +79,13 @@ public final class GestureEngine {
         set { customDetector.config = newValue }
     }
 
+    /// The hold pose currently dwelling toward its fire (a thumb signal,
+    /// the shaka), with the seconds left to hold — surfaced from the
+    /// detector for the countdown pill. Valid after `process`.
+    public var customHoldProgress: (gesture: CustomGesture, remaining: TimeInterval)? {
+        customDetector.holdProgress
+    }
+
     private let customDetector = CustomGestureDetector()
 
     public init(config: GestureConfig = .default) {
@@ -212,6 +219,22 @@ public final class GestureEngine {
     private var armFrames = 0
     private var disarmFrames = 0
 
+    /// Confirmed pointed frames to enter the pointed-pose park. Short on
+    /// purpose: the first strikes of a drum land within a few frames of the
+    /// pose forming, and a click that sneaks in before the park does is
+    /// the whole bug.
+    private static let pointedParkEnterFrames = 2
+    /// Confirmed raised frames to leave it — the detector's orientation
+    /// debounce, so a lift at the top of a drum doesn't unpark mid-wiggle.
+    private static let pointedParkExitFrames = 4
+    /// The primary hand is pointed at the screen (tips below the knuckle
+    /// line): the cursor parks and neither button may engage. A pointed
+    /// hand is never the pointing pose, and its drumming fingers swing the
+    /// index-vs-middle differential exactly like index taps (measured: the
+    /// pointed wiggle clicked on whatever was under the cursor).
+    private var pointedParked = false
+    private var pointedFrames = 0
+
     private var cursor: Vec2?
     /// At most one press exists at a time, whichever button owns it.
     private var press: PressState?
@@ -267,6 +290,8 @@ public final class GestureEngine {
         armFrames = 0
         disarmFrames = 0
         lastPalmSample = nil
+        pointedParked = false
+        pointedFrames = 0
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -312,6 +337,12 @@ public final class GestureEngine {
 
         // 3. The control trigger decides whether this hand gets the cursor.
         updateTrigger(features, hand: primary.hand)
+
+        // 3½. A hand pointed at the screen parks the cursor and blocks the
+        // buttons — the pointed wiggle's finger drum reads as index taps
+        // otherwise. Presses always win: an in-flight press still drags
+        // and releases; only *engaging* is barred.
+        updatePointedPose(features)
 
         // 4. The scroll pose's own arm/park state machine. Before the cursor
         // step because an active scroll parks the cursor.
@@ -372,6 +403,11 @@ public final class GestureEngine {
                         events.append(.drag(p.button, to: clamped))
                     }
                 }
+            } else if pointedParked {
+                // Pointed at the screen: the cursor parks so drumming
+                // fingers don't smear it around. After the press branch —
+                // a press begun upright finishes normally if the hand
+                // droops mid-drag.
             } else if cursor.map({ clamped.distance(to: $0) >= config.jitterDeadband / 2 }) ?? true {
                 cursor = clamped
                 events.append(.move(to: clamped))
@@ -399,14 +435,15 @@ public final class GestureEngine {
                          engage: config.engageRatio, release: config.releaseRatio,
                          confident: engageConfident(primary.hand),
                          blocked: rightHeld || scroll.active || crissCross.engaged
-                             || sweeping,
+                             || sweeping || pointedParked,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
                          confident: rightEngageConfident(primary.hand),
                          blocked: leftHeld || scroll.active || crissCross.engaged
-                             || scrollPoseBlocksRightClick(features) || sweeping,
+                             || scrollPoseBlocksRightClick(features) || sweeping
+                             || pointedParked,
                          at: frame.time, events: &events)
         }
 
@@ -498,6 +535,25 @@ public final class GestureEngine {
             armFrames = 0
             armed = true
         }
+    }
+
+    /// The pointed-pose park's state machine: confirmed pointed frames
+    /// enter it (quickly), confirmed raised frames leave it (deliberately).
+    /// Neutral or unreadable frames hold the state (never flap it) — a
+    /// drumming pointed hand passes through the neutral band at the top of
+    /// every lift.
+    private func updatePointedPose(_ features: HandFeatures?) {
+        guard let orientation = features?.wiggleOrientation() else { return }
+        let toggling = (orientation == .pointed) != pointedParked
+        guard toggling else {
+            pointedFrames = 0
+            return
+        }
+        pointedFrames += 1
+        let needed = pointedParked ? Self.pointedParkExitFrames : Self.pointedParkEnterFrames
+        guard pointedFrames >= needed else { return }
+        pointedParked.toggle()
+        pointedFrames = 0
     }
 
     // MARK: - Click gesture

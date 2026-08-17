@@ -214,10 +214,18 @@ public final class CustomGestureDetector {
     /// across the screen on its way out (the scroll park's idea).
     public private(set) var grabbingSlots: Set<Int> = []
 
+    /// The hold pose currently dwelling toward its fire (a thumb signal,
+    /// the shaka), with the seconds left to hold. Recomputed every
+    /// `process` call; nil when nothing is dwelling. The app layer reads
+    /// this for the countdown pill — a pose you must hold for a beat is
+    /// invisible until it fires, and invisible reads as broken.
+    public private(set) var holdProgress: (gesture: CustomGesture, remaining: TimeInterval)?
+
     public func reset() {
         slots = [:]
         lastFire = [:]
         grabbingSlots = []
+        holdProgress = nil
     }
 
     // MARK: - Per-frame entry
@@ -286,6 +294,15 @@ public final class CustomGestureDetector {
 
             slots[input.slot] = state
         }
+
+        // The dwell in progress, if any — the one furthest along when both
+        // hands are somehow holding poses at once.
+        holdProgress = slots.values
+            .compactMap { state -> (CustomGesture, TimeInterval)? in
+                guard let gesture = state.hold.gesture, !state.hold.fired else { return nil }
+                return (gesture, max(0, config.holdSeconds - (context.time - state.hold.start)))
+            }
+            .min { $0.1 < $1.1 }
 
         return fired
     }
@@ -472,6 +489,11 @@ public final class CustomGestureDetector {
 
     private func strictHoldGesture(_ features: HandFeatures?) -> CustomGesture? {
         guard let features else { return nil }
+        // A hand pointed at the screen collapses its tips onto the palm
+        // (the closed-hand read matches) while the thumb naturally juts
+        // sideways — a phantom thumb signal. Pointed hands belong to the
+        // pointed wiggle; the hold family stands down.
+        guard features.wiggleOrientation() != .pointed else { return nil }
         for (gesture, direction) in Self.thumbSignals
         where config.enabled.contains(gesture) && features.isThumbSignal(direction) {
             return gesture

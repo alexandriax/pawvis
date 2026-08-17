@@ -165,6 +165,50 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertFalse(fired.contains(.twoHandPointedWiggle))
     }
 
+    func testPointedHandNeverReadsAsThumbSignal() {
+        // The pointed hand's tips collapse onto the palm (the closed-hand
+        // read matches) and its thumb juts sideways — without the
+        // orientation guard, drumming at the screen dwells a phantom
+        // thumbs-left.
+        enable(.thumbsLeft)
+        XCTAssertEqual(pointedWiggle(frames: 30), [])
+    }
+
+    func testThumbSignalFiresFacingTheCamera() {
+        // A knuckles-on fist: the curled chains project straight, so the
+        // angle-band fist never matches — the collapsed-tips read is what
+        // lets the natural thumbs-up engage.
+        enable(.thumbsUp)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        for _ in 0..<20 {
+            fired += feed([(0, SyntheticHand.thumbSignalTowardCamera(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp])
+    }
+
+    func testHoldProgressCountsDownAndClears() {
+        enable(.thumbsUp)
+        var t = 0.0
+        for _ in 0..<4 {
+            _ = feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        guard let progress = detector.holdProgress else {
+            return XCTFail("a dwelling hold must be visible")
+        }
+        XCTAssertEqual(progress.gesture, .thumbsUp)
+        XCTAssertEqual(progress.remaining, 0.35 - 3.0 / 30, accuracy: 0.02)
+
+        // Fires at the dwell; a fired hold no longer counts down.
+        for _ in 0..<10 {
+            _ = feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertNil(detector.holdProgress)
+    }
+
     func testOrientationSwitchRestartsTheCount() {
         // A few raised phases, then the hand drops into the pointed pose:
         // the buffers restart with the pose, so only the pointed wiggle
