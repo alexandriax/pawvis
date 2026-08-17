@@ -333,14 +333,17 @@ public struct HandFeatures {
     }
 
     /// The grab pose: the whole hand closed, fingertips gathered onto the
-    /// thumb, read through `openness()` — the one measure a closed hand can't
-    /// fake at any orientation. No finger may stay positively extended:
-    /// three curled fingers already drag the openness mean to the floor, so
-    /// without this a shaka would read as a grab. Strict engage bound; the
-    /// fling's hold side uses `isGatherHeld`.
+    /// thumb, read through `openness()` alone — the one measure a closed
+    /// hand can't fake at any orientation. Deliberately NOT a
+    /// finger-extension or splay check: a hand gathered *toward the camera*
+    /// projects straight finger chains and scattered tips (measured on real
+    /// video, where both guards silently vetoed the real gesture). The
+    /// look-alikes are excluded where the context lives, in the detector:
+    /// a shaka or thumb signal carries an extended thumb, which the grab's
+    /// engage refuses. Strict engage bound; the fling's hold side uses
+    /// `isGatherHeld`.
     public func isGathered() -> Bool {
         guard let open = openness() else { return false }
-        guard Finger.allCases.allSatisfy({ isExtended($0) != true }) else { return false }
         return open <= 0.12
     }
 

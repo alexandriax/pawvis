@@ -154,6 +154,101 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(fired, [.swipeRight])
     }
 
+    func testSwipeSurvivesTrackingDropout() {
+        // Vision drops frames exactly during the fast part of a sweep; the
+        // launch-pad model judges endpoints, so a mid-flight gap must not
+        // matter (this is the measured real-video failure of the old model).
+        enable(.swipeRight)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        var w = Vec2(0.2, 0.6)
+        for _ in 0..<4 { // settle open: the launch pad
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<2 { // take off
+            w = w + Vec2(0.06, 0)
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<4 { // the blur gap: no hands at all
+            fired += feed([], at: t)
+            t += 1.0 / 30
+        }
+        w = w + Vec2(0.28, 0) // reacquired far along the sweep
+        fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+        XCTAssertEqual(fired, [.swipeRight])
+    }
+
+    func testSwipeFollowThroughClosingStillFires() {
+        // A real swipe relaxes closed at the end of its arc; closing late in
+        // the travel is follow-through, not a different gesture (measured:
+        // the closed-kill rule stopped a real swipe at 84% of its travel).
+        enable(.swipeRight)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        var w = Vec2(0.2, 0.6)
+        for _ in 0..<4 {
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<4 { // open flight: banks over half the travel
+            w = w + Vec2(0.06, 0)
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<3 { // hand curls while the arm finishes the sweep
+            w = w + Vec2(0.06, 0)
+            fired += feed([(0, SyntheticHand.fist(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.swipeRight])
+    }
+
+    func testClosedReturnStrokeDoesNotSwipe() {
+        // The recovery stroke after a swipe: hand pauses open for a moment,
+        // then travels back closed. Closing with nothing banked kills the
+        // launch (measured false-fire on real video).
+        enable(.swipeLeft, .swipeRight)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        var w = Vec2(0.7, 0.6)
+        for _ in 0..<3 { // brief open pause lays an anchor
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<9 { // closed hand sweeps back across the frame
+            w = w + Vec2(-0.05, 0)
+            fired += feed([(0, SyntheticHand.fist(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [])
+    }
+
+    func testGatherTowardCameraFlings() {
+        // Fingers gathered toward the lens project as straight chains and
+        // scattered tips; only openness sees the truth. The measured real
+        // gather that extension/splay guards silently vetoed.
+        enable(.grabFlingRight)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        var w = Vec2(0.4, 0.55)
+        for _ in 0..<3 {
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<3 { // gather at rest, fingers at the camera
+            fired += feed([(0, SyntheticHand.curledTowardCamera(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<8 { // fling
+            w = w + Vec2(0.03, 0)
+            fired += feed([(0, SyntheticHand.curledTowardCamera(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.grabFlingRight])
+    }
+
     func testPressBlocksSwipe() {
         enable(.swipeRight)
         let fired = sweep(from: Vec2(0.2, 0.6), delta: Vec2(0.05, 0), steps: 9, press: true)
@@ -351,6 +446,25 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(grabFling(delta: Vec2(0.03, 0), openFirst: false), [])
     }
 
+    func testShakaMotionDoesNotFling() {
+        // A held shaka drifting across the frame must not read as a grab &
+        // fling: its extended thumb refuses the grab engage.
+        enable(.grabFlingRight, .shaka)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        var w = Vec2(0.4, 0.55)
+        for _ in 0..<3 {
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        for _ in 0..<12 {
+            fired += feed([(0, SyntheticHand.shaka(wrist: w))], at: t)
+            w = w + Vec2(0.02, 0)
+            t += 1.0 / 30
+        }
+        XCTAssertFalse(fired.contains(.grabFlingRight))
+    }
+
     func testThumbSignalMotionDoesNotFling() {
         enable(.grabFlingRight, .thumbsUp)
         var fired: [CustomGesture] = []
@@ -449,8 +563,10 @@ final class CustomPoseFeatureTests: XCTestCase {
         XCTAssertTrue(features(SyntheticHand.gathered()).isGatherHeld())
         XCTAssertFalse(features(SyntheticHand.openRelaxed()).isGathered())
         XCTAssertFalse(features(SyntheticHand.openRelaxed()).isGatherHeld())
-        // The shaka's extended pinky keeps it out of the gather.
-        XCTAssertFalse(features(SyntheticHand.shaka()).isGathered())
+        // A shaka's extended thumb is what keeps it from *grabbing* — that
+        // exclusion lives in the detector's engage, not in the pose (three
+        // curled fingers drag the openness mean to the floor regardless).
+        XCTAssertEqual(features(SyntheticHand.shaka()).isThumbExtended(), true)
     }
 
     func testFistHasNoVerticalThumb() {

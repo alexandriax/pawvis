@@ -76,13 +76,13 @@ public struct GestureAction: Codable, Equatable, Sendable {
 
     // MARK: - Key chords
 
-    /// The chord this action presses, when it is a key action. Desktops ride
-    /// the stock Mission Control shortcuts; navigation rides the near-universal
-    /// app conventions. nil for everything performed another way.
+    /// The chord this action presses, when it is a key action. Mission
+    /// Control's own shortcuts and the near-universal app conventions. nil
+    /// for everything performed another way — including the desktop switch,
+    /// which macOS refuses to perform for synthetic ⌃←/⌃→ (the app drives
+    /// Mission Control's spaces bar instead; see `SpaceSwitcher`).
     public var keyChord: KeyChord? {
         switch kind {
-        case .desktopLeft: return KeyChord(key: "left", modifiers: [.control])
-        case .desktopRight: return KeyChord(key: "right", modifiers: [.control])
         case .missionControl: return KeyChord(key: "up", modifiers: [.control])
         case .appWindows: return KeyChord(key: "down", modifiers: [.control])
         case .showDesktop: return KeyChord(key: "f11", modifiers: [])

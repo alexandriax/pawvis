@@ -103,6 +103,33 @@ final class CustomGestureEngineTests: XCTestCase {
         XCTAssertEqual(customFires(events), [])
     }
 
+    func testSweepingPalmBlocksClickEngage() {
+        // A dip that appears while the palm is sweeping is motion blur, not a
+        // click (measured: two phantom clicks in one clip of swipes). Engage
+        // waits until the hand settles; the dip then lands normally.
+        var t = 0.0
+        var wrist = Vec2(0.2, 0.6)
+        for _ in 0..<4 {
+            _ = engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: false, wrist: wrist)]))
+            t += 1.0 / 30
+        }
+        var sweeping: [GestureEvent] = []
+        for _ in 0..<8 { // index dipped the whole way through a fast sweep
+            wrist = wrist + Vec2(0.05, 0)
+            sweeping += engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: true, wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+        XCTAssertFalse(sweeping.contains { if case .buttonDown = $0 { return true } else { return false } },
+                       "no press may begin mid-sweep")
+        var settled: [GestureEvent] = []
+        for _ in 0..<4 { // hand stops, dip still held: now it's a real press
+            settled += engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: true, wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+        XCTAssertTrue(settled.contains { if case .buttonDown = $0 { return true } else { return false } },
+                      "the press lands once the palm settles")
+    }
+
     func testEngineResetClearsDetector() {
         enable(.thumbsUp)
         var t = 0.0

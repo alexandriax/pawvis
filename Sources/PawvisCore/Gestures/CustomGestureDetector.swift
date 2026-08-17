@@ -87,23 +87,45 @@ public final class CustomGestureDetector {
     /// engine's `engageConfidenceFloor`: guessed joints must not start things.
     private static let engageConfidenceFloor = 0.40
 
-    /// Swipe: how fast the palm must already be moving (screen-normalized
-    /// per second) for a sweep to begin accumulating.
-    private static let swipeMinSpeed = 1.1
-    /// A sweep that hasn't covered the distance in this long isn't a swipe.
+    /// Swipe: the launch-pad model. Vision drops or degrades frames exactly
+    /// during the fast part of a sweep (measured on real video: the original
+    /// per-frame continuity model never fired once), so a swipe is judged by
+    /// its endpoints instead: displacement from where the hand last sat
+    /// *settled and open* (the anchor), reached within the window, with at
+    /// least one genuinely fast frame along the way. Mid-flight dropouts
+    /// simply don't matter.
+    ///
+    /// While the palm moves slower than this, it counts as settled and the
+    /// anchor keeps refreshing under it — which is also what keeps ordinary
+    /// cursor drift from ever accumulating swipe travel.
+    private static let swipeRestSpeed = 0.5
+    /// At least one frame of the sweep must clock this speed
+    /// (screen-normalized per second): distance alone, covered slowly, is
+    /// cursor work, not a swipe.
+    private static let swipePeakSpeed = 0.9
+    /// The full travel must complete within this long of leaving the anchor.
     private static let swipeMaxDuration: TimeInterval = 0.6
+    /// After a fire (or an ambiguous reject) the hand must drop back under
+    /// this speed before another sweep may launch, so one long motion can't
+    /// fire twice.
+    private static let swipeRearmSpeed = 0.4
     /// The dominant axis must beat the other by this factor, or the sweep is
-    /// an ambiguous diagonal and deliberately rejected.
-    private static let swipeAxisDominance = 1.6
-    /// Cos of the allowed drift from the sweep's initial direction.
-    private static let swipeDirectionCos = 0.75
-    /// Fraction of `swipeMinSpeed` below which a finished (or aborted) hand
-    /// re-arms, so one long sweep can't fire twice.
-    private static let swipeRearmFraction = 0.35
-    /// Fraction of `swipeMinSpeed` below which an accumulating sweep aborts.
-    private static let swipeContinueFraction = 0.45
-    /// Consecutive strict-open frames a hand needs before its next fast frame
-    /// may begin a sweep (motion blur ruins the strict check mid-sweep).
+    /// an ambiguous diagonal and deliberately rejected. Real sweeps arc hard
+    /// (a deliberate horizontal swipe measured ~38° of vertical drift by its
+    /// end), so this cone is generous — the other gates carry the safety.
+    private static let swipeAxisDominance = 1.25
+    /// If the hand goes positively closed with less than this fraction of
+    /// the travel banked, the launch dies: it became something else (a
+    /// gather, or the curled return stroke after a swipe — the measured
+    /// false-fire). Closing *late* in the travel is the natural relaxing
+    /// follow-through of a real swipe, and keeps the sweep alive.
+    private static let swipeClosedKillFraction = 0.5
+    /// Openness at or above this counts toward the launch pad. Deliberately
+    /// looser than the strict open-hand pose: a comfortably open resting
+    /// hand measures ~0.4 openness on real video, and the strict
+    /// extension-band check flickers there. Below `0.3` reads as closed.
+    private static let swipeOpenFloor = 0.33
+    /// Consecutive open frames before the hand qualifies as a launch pad.
     private static let swipeOpenFrames = 2
     /// How long a one-hand candidate waits for its partner before deciding
     /// the swipe was one-handed after all.
@@ -142,6 +164,12 @@ public final class CustomGestureDetector {
 
     /// Grab & fling: consecutive gathered frames to engage.
     private static let flingEngageFrames = 2
+    /// The palm must be no faster than this (screen-normalized per second)
+    /// while gathering. A real grab closes from rest and *then* flings; the
+    /// relaxed, closed hand travelling back after a swipe closes mid-flight
+    /// — the measured false-fling on real video — and this is what tells
+    /// them apart.
+    private static let flingEngageMaxSpeed = 0.6
     /// The hand must have been strictly open within this long of gathering —
     /// the transition is what makes a grab deliberate; a hand that was simply
     /// resting closed can never fling.
@@ -162,14 +190,17 @@ public final class CustomGestureDetector {
         var lastPalm: Vec2?
         var lastTime: TimeInterval = -.infinity
         var openFrames = 0
+        var closedFrames = 0
+        /// The launch pad: where the hand last sat settled and open.
         var anchor: Vec2?
         var anchorTime: TimeInterval = -.infinity
-        var dir: Vec2 = .zero
+        /// Fastest frame since the anchor froze.
+        var peakSpeed: Double = 0
         /// Fired or aborted: the hand must slow down before another sweep.
         var mustSlow = false
         /// Crossed the threshold and waiting on the partner hand.
         var pending: (gesture: CustomGesture, twoHand: CustomGesture, at: TimeInterval)?
-        /// Travel so far, for the partner check.
+        /// Displacement from the anchor this frame, for the partner check.
         var travel: Double = 0
     }
 
@@ -200,6 +231,9 @@ public final class CustomGestureDetector {
 
     private struct GrabState {
         var lastOpenTime: TimeInterval = -.infinity
+        var openFrames = 0
+        var lastPalm: Vec2?
+        var lastTime: TimeInterval = -.infinity
         var gatherFrames = 0
         var active = false
         var anchor: Vec2 = .zero
@@ -283,7 +317,7 @@ public final class CustomGestureDetector {
                     if context.crissCrossEngaged {
                         state.swipe = SwipeState()
                     } else {
-                        updateSwipe(&state.swipe, slot: input.slot, strict: strict,
+                        updateSwipe(&state.swipe, slot: input.slot,
                                     loose: loose, at: context.time, fired: &fired)
                     }
                 }
@@ -348,17 +382,23 @@ public final class CustomGestureDetector {
     }
 
     private func updateSwipe(_ swipe: inout SwipeState, slot: Int,
-                             strict: HandFeatures?, loose: HandFeatures?,
+                             loose: HandFeatures?,
                              at time: TimeInterval, fired: inout [CustomGesture]) {
-        defer {
-            // The strict-open streak feeds the *next* frame's start check:
-            // by the time the hand is sweeping, motion blur has ruined the
-            // strict pose, so eligibility comes from the frames just before.
-            if strict?.isOpenHand() == true {
+        // Openness bookkeeping first. Open-enough frames build the launch
+        // eligibility; positively-closed frames build toward invalidating
+        // the anchor (the hand became something else — a grab, a fist).
+        // Low-confidence frames hold both, as everywhere else.
+        if let open = loose?.openness() {
+            if open >= Self.swipeOpenFloor {
                 swipe.openFrames += 1
-            } else if let open = loose?.openness(), open < 0.3 {
+                swipe.closedFrames = 0
+            } else if open < 0.3 {
+                swipe.closedFrames += 1
                 swipe.openFrames = 0
-            } // low-confidence frames hold the streak, as everywhere else
+            }
+        }
+        if swipe.closedFrames >= 2, swipe.travel < config.swipeTravel * Self.swipeClosedKillFraction {
+            swipe.anchor = nil
         }
 
         guard let palm = loose?.pointerPoint(.palmCenter) else { return }
@@ -367,53 +407,43 @@ public final class CustomGestureDetector {
             swipe.lastTime = time
         }
         guard let lastPalm = swipe.lastPalm else { return }
+        // Speed is a sample, not a requirement: across a short tracking gap
+        // there is simply no sample, and the sweep is judged by its
+        // endpoints. (A long gap expires the whole slot via the grace.)
         let dt = time - swipe.lastTime
-        guard dt > 0, dt <= 0.2 else {
-            swipe.anchor = nil
-            return
-        }
-        let speed = palm.distance(to: lastPalm) / dt
+        let speed: Double? = (dt > 0 && dt <= 0.25) ? palm.distance(to: lastPalm) / dt : nil
 
         if swipe.mustSlow {
-            if speed < Self.swipeMinSpeed * Self.swipeRearmFraction { swipe.mustSlow = false }
+            if let speed, speed < Self.swipeRearmSpeed { swipe.mustSlow = false }
             swipe.anchor = nil
             return
         }
 
-        if swipe.anchor == nil {
-            // A sweep begins on a fast frame from a hand that was just
-            // confidently open.
-            guard speed >= Self.swipeMinSpeed, swipe.openFrames >= Self.swipeOpenFrames else { return }
-            swipe.anchor = lastPalm
-            swipe.anchorTime = swipe.lastTime
-            swipe.dir = (palm - lastPalm) / max(palm.distance(to: lastPalm), 1e-9)
+        // The launch pad: while the open hand sits settled, the anchor
+        // keeps refreshing under it. Once the hand takes off, the anchor
+        // freezes where the sweep began.
+        if let speed, speed <= Self.swipeRestSpeed, swipe.openFrames >= Self.swipeOpenFrames {
+            swipe.anchor = palm
+            swipe.anchorTime = time
+            swipe.peakSpeed = 0
             swipe.travel = 0
         }
 
         guard let anchor = swipe.anchor else { return }
         if time - swipe.anchorTime > Self.swipeMaxDuration {
+            // Never covered the distance in time; wait for the next settle.
             swipe.anchor = nil
             return
         }
-        if let open = loose?.openness(), open < 0.3 {
-            // The hand closed mid-sweep — it became something else (a grab).
-            swipe.anchor = nil
-            return
-        }
-        if speed < Self.swipeMinSpeed * Self.swipeContinueFraction {
-            swipe.anchor = nil
-            return
+        if let speed {
+            swipe.peakSpeed = max(swipe.peakSpeed, speed)
         }
         let offset = palm - anchor
         swipe.travel = offset.length
-        if swipe.travel >= 0.04,
-           offset.dot(swipe.dir) / max(swipe.travel, 1e-9) < Self.swipeDirectionCos {
-            swipe.anchor = nil // curved away from the sweep's own direction
-            return
-        }
-        guard swipe.travel >= config.swipeTravel else { return }
+        guard swipe.travel >= config.swipeTravel,
+              swipe.peakSpeed >= Self.swipePeakSpeed else { return }
 
-        // Threshold crossed: this hand is done either way.
+        // Threshold crossed: this launch is done either way.
         swipe.anchor = nil
         swipe.mustSlow = true
         guard let (one, two) = Self.swipeGesture(dx: offset.x, dy: offset.y) else { return }
@@ -425,11 +455,12 @@ public final class CustomGestureDetector {
         // Two-hand version is bound: fire it if the partner hand is sweeping
         // along (or already waiting); otherwise hold the decision briefly.
         if var partner = partnerSwipe(of: slot) {
-            let partnerHere = partner.state.pending?.gesture == one
-                || (partner.state.anchor != nil
-                    && partner.state.travel >= config.swipeTravel * Self.swipePartnerFraction
-                    && Self.swipeGesture(dx: partner.state.dir.x, dy: partner.state.dir.y)?.one == one)
-            if partnerHere {
+            let partnerAlong = partner.state.anchor != nil
+                && partner.state.travel >= config.swipeTravel * Self.swipePartnerFraction
+                && partner.state.lastPalm.map({ Self.swipeGesture(
+                    dx: ($0 - partner.state.anchor!).x,
+                    dy: ($0 - partner.state.anchor!).y)?.one == one }) == true
+            if partner.state.pending?.gesture == one || partnerAlong {
                 partner.state.pending = nil
                 partner.state.anchor = nil
                 partner.state.mustSlow = true
@@ -438,9 +469,7 @@ public final class CustomGestureDetector {
                 return
             }
         }
-        if config.enabled.contains(one) || config.enabled.contains(two) {
-            swipe.pending = (gesture: one, twoHand: two, at: time)
-        }
+        swipe.pending = (gesture: one, twoHand: two, at: time)
     }
 
     private func partnerSwipe(of slot: Int) -> (slot: Int, state: SwipeState)? {
@@ -634,17 +663,42 @@ public final class CustomGestureDetector {
     private func updateGrab(_ grab: inout GrabState, slot: Int,
                             strict: HandFeatures?, loose: HandFeatures?,
                             at time: TimeInterval, fired: inout [CustomGesture]) {
-        if strict?.isOpenHand() == true {
-            grab.lastOpenTime = time
+        // "Recently open" at the swipe launch's loose standard: a real hand
+        // pausing open before a grab measures ~0.4 openness, where the
+        // strict extension-band pose flickers (measured — the strict check
+        // silently vetoed a real grab video).
+        if let open = loose?.openness() {
+            if open >= Self.swipeOpenFloor {
+                grab.openFrames += 1
+                if grab.openFrames >= 2 { grab.lastOpenTime = time }
+            } else {
+                grab.openFrames = 0
+            }
+        }
+        // Palm speed sample, for the engage stillness gate.
+        var palmSpeed: Double?
+        if let palm = loose?.pointerPoint(.palmCenter) {
+            let dt = time - grab.lastTime
+            if let last = grab.lastPalm, dt > 0, dt <= 0.25 {
+                palmSpeed = palm.distance(to: last) / dt
+            }
+            grab.lastPalm = palm
+            grab.lastTime = time
         }
 
         if !grab.active {
             grabbingSlots.remove(slot)
             // Engaging requires the open→gathered transition (a resting fist
-            // was never open) and a thumb that is *not* standing vertically —
-            // that shape is the thumbs-up/down pose, whose held motion must
-            // not fling.
-            guard let loose, loose.isGathered(), loose.thumbVerticalSign() == nil else {
+            // was never open), from a hand that is roughly still (a real
+            // grab closes from rest; the relaxed closed hand travelling back
+            // after a swipe closes mid-flight), with a thumb positively
+            // folded into the grab. The thumb guard separates a grab from
+            // everything else closed-ish with the thumb out: the
+            // thumbs-up/down poses (including the rotation into them) read
+            // gathered for a frame or two — a measured cross-fire on real
+            // video.
+            guard let loose, loose.isGathered(), loose.isThumbExtended() == false,
+                  (palmSpeed ?? .infinity) <= Self.flingEngageMaxSpeed else {
                 grab.gatherFrames = 0
                 return
             }
@@ -661,9 +715,12 @@ public final class CustomGestureDetector {
             return
         }
 
-        // Release: the hand opened back up (debounced). Missing geometry
-        // holds, like everywhere else; a truly lost hand expires with its slot.
-        if let loose {
+        // Release: the hand opened back up (debounced). Unreadable openness
+        // holds, like everywhere else — the first frames of a fast fling
+        // blur the fingertips into nothing, and that must not read as
+        // "opened" (measured: it ended a real grab right before its fling).
+        // A truly lost hand expires with its slot.
+        if let loose, loose.openness() != nil {
             if loose.isGatherHeld() {
                 grab.releaseFrames = 0
             } else {

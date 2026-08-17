@@ -264,6 +264,7 @@ public final class GestureEngine {
         armed = config.controlTrigger == .anyHand
         armFrames = 0
         disarmFrames = 0
+        lastPalmSample = nil
     }
 
     public func process(_ frame: HandFrame) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -381,20 +382,29 @@ public final class GestureEngine {
         // active scroll locks out both. Disarmed, the buttons stay untouched
         // (they are at rest — disarming resets them), so no press can ever
         // begin on a parked cursor.
+        //
+        // A sweeping palm blocks *engage* on both buttons: motion blur makes
+        // the finger extents flap, and real clicks begin from a hand that is
+        // at least roughly still (measured: two phantom clicks in a 7-second
+        // clip of open-palm swipes, each killing the swipe it rode on).
+        // Engage only — blocked never releases a held press, and a press
+        // already down drags at any speed.
+        let sweeping = palmSweeping(features, at: frame.time)
         let ratio = armed ? clickRatio(features) : nil
         if armed {
             let rightHeld = isHeld(.right)
             updateButton(.left, state: &leftButton, ratio: ratio,
                          engage: config.engageRatio, release: config.releaseRatio,
                          confident: engageConfident(primary.hand),
-                         blocked: rightHeld || scroll.active || crissCross.engaged,
+                         blocked: rightHeld || scroll.active || crissCross.engaged
+                             || sweeping,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
                          confident: rightEngageConfident(primary.hand),
                          blocked: leftHeld || scroll.active || crissCross.engaged
-                             || scrollPoseBlocksRightClick(features),
+                             || scrollPoseBlocksRightClick(features) || sweeping,
                          at: frame.time, events: &events)
         }
 
@@ -510,6 +520,26 @@ public final class GestureEngine {
         [HandJoint.indexTip, .indexMCP, .middleTip, .middleMCP].allSatisfy {
             hand.confidence(for: $0) >= Self.engageConfidenceFloor
         }
+    }
+
+    /// Palm speed (screen-normalized per second) above which a press may not
+    /// *begin*. Fast enough that deliberate move-and-click never feels gated
+    /// (the hand decelerates well under this before a real dip lands), slow
+    /// enough to catch the mid-sweep blur that fakes finger dips.
+    private static let pressEngageMaxSpeed = 1.0
+
+    private var lastPalmSample: (point: Vec2, time: TimeInterval)?
+
+    /// Whether the palm is currently travelling too fast for a press to
+    /// begin. Sampled from the same smoothed pointer the cursor rides.
+    private func palmSweeping(_ features: HandFeatures?, at time: TimeInterval) -> Bool {
+        guard let point = pointerPoint(features) else { return false }
+        defer { lastPalmSample = (point, time) }
+        guard let last = lastPalmSample, time > last.time, time - last.time <= 0.2 else {
+            return false
+        }
+        let speed = point.distance(to: last.point) / (time - last.time)
+        return speed > Self.pressEngageMaxSpeed
     }
 
     // MARK: - Scroll

@@ -13,9 +13,13 @@ final class GestureActionRunner {
     /// Pawvis itself rather than out into the system.
     var stopTracking: (() -> Void)?
     var toggleVoiceControl: (() -> Void)?
+    /// A long-running action finished after `perform` returned: the outcome
+    /// line replaces the provisional one in the pill.
+    var onFollowUp: ((String) -> Void)?
 
     private let typer = TextTyper()
     private let placer = WindowPlacer()
+    private let spaces = SpaceSwitcher()
 
     /// Perform the action; the return value is what the status pill flashes.
     func perform(_ action: GestureAction) -> String {
@@ -23,6 +27,17 @@ final class GestureActionRunner {
         case .playPause:
             typer.press(MediaKey.playPause)
             return action.feedback
+
+        case .desktopLeft, .desktopRight:
+            // Not a key press: macOS ignores synthetic ⌃←/⌃→ for Spaces
+            // (see SpaceSwitcher for the measured story and the mechanism).
+            let direction: SpaceSwitcher.Direction =
+                action.kind == .desktopLeft ? .left : .right
+            Task { [weak self] in
+                guard let self else { return }
+                self.onFollowUp?(await self.spaces.switchDesktop(direction))
+            }
+            return action.kind == .desktopLeft ? "Desktop left…" : "Desktop right…"
 
         case .windowLeftHalf, .windowRightHalf, .windowTopHalf, .windowBottomHalf,
              .windowLeftTwoThirds, .windowRightTwoThirds, .windowLeftThird, .windowRightThird,
