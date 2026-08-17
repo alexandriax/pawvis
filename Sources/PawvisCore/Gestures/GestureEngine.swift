@@ -56,13 +56,15 @@ public final class GestureEngine {
             if config.controlTrigger != oldValue.controlTrigger {
                 armFrames = 0
                 disarmFrames = 0
-                if config.controlTrigger == .openHand {
-                    // The hand on screen never showed the trigger, so it does
-                    // not get to keep the cursor — or a press — it holds.
+                switch config.controlTrigger {
+                case .openHand, .gesturesOnly:
+                    // The hand on screen never showed the (new) trigger, so
+                    // it does not get to keep the cursor — or a press — it
+                    // holds. `.gesturesOnly` simply never re-arms.
                     pendingEvents = forceRelease(at: lastHandTime)
                     armed = false
-                } else {
-                    armed = true // .anyHand: an in-flight press carries on
+                case .anyHand:
+                    armed = true // an in-flight press carries on
                 }
             }
         }
@@ -459,7 +461,9 @@ public final class GestureEngine {
     /// AGENTS.md; only the *arming* of cursor control is.)
     private func updateTrigger(_ features: HandFeatures?, hand: Hand) {
         guard config.controlTrigger == .openHand else {
-            armed = true
+            // `.anyHand` is always armed; `.gesturesOnly` never is — the
+            // hand is a remote for the custom gestures, never a mouse.
+            armed = config.controlTrigger == .anyHand
             armFrames = 0
             disarmFrames = 0
             return

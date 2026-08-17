@@ -5,7 +5,7 @@ import SwiftUI
 /// The Settings window's tabs, named so that code outside SwiftUI can ask for
 /// one by name.
 enum SettingsTab: String, Hashable {
-    case general, tracking, gestures, custom, voice, about
+    case general, tracking, mouse, gestures, voice, about
 }
 
 /// Opens the Settings window on a chosen tab from places that have no SwiftUI

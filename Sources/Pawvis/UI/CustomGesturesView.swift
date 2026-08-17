@@ -35,7 +35,7 @@ struct CustomGesturesTab: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Button("Open Gesture Guide") { GuideWindow.show() }
-                CaptionText("Gestures you've assigned appear there too, illustrated alongside the built-in set.")
+                CaptionText("Gestures you've assigned appear there too, illustrated alongside the mouse set.")
             }
         }
     }

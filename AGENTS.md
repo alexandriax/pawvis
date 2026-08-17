@@ -83,7 +83,7 @@ the right — both invisible in code review and obvious to the user.
    There is no headless render: SwiftUI's `ImageRenderer` produces blank
    output for these views without a running app. But the window *can* be
    opened programmatically now — `PAWVIS_OPEN_SETTINGS=<tab>` (general,
-   tracking, gestures, voice, about) opens Settings on that tab right after
+   tracking, mouse, gestures, voice, about) opens Settings on that tab right after
    launch, so `make app` + launch + `screencapture` covers it without
    hand-clicking. Pay attention to the longest strings (the Voice control and
    Tracking tabs have them).
@@ -258,7 +258,9 @@ reaching for an SF Symbol, because the symbols are what taught the wrong
 gesture last time.
 
 **The custom one-shot gestures** (`CustomGestureDetector`; every gesture
-listed in Settings → Custom, none live until given an action) follow the
+listed in Settings → Gestures, none live until given an action; the
+Tracking tab's "custom gestures only" trigger keeps the mouse untouched
+while these still fire) follow the
 same rules plus a few that only real video could teach — every one below
 was a measured failure first, and `--gesture-eval` over the clips in
 question is how they were fixed. Do not retune these from intuition:

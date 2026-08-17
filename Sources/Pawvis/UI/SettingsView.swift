@@ -117,22 +117,38 @@ struct SettingsView: View {
             TrackingSettingsTab(store: store)
                 .tabItem { Label("Tracking", systemImage: "cursorarrow.motionlines") }
                 .tag(SettingsTab.tracking)
-            GestureSettingsTab(store: store)
-                .tabItem { Label("Gestures", systemImage: "hand.point.up.left") }
-                .tag(SettingsTab.gestures)
+            MouseSettingsTab(store: store)
+                .tabItem { Label("Mouse", systemImage: "computermouse") }
+                .tag(SettingsTab.mouse)
             CustomGesturesTab(store: store)
-                .tabItem { Label("Custom", systemImage: "hand.wave") }
-                .tag(SettingsTab.custom)
+                .tabItem { Label("Gestures", systemImage: "hand.wave") }
+                .tag(SettingsTab.gestures)
             VoiceControlSettingsTab(store: store)
                 .tabItem { Label("Voice (Beta)", systemImage: "mic") }
                 .tag(SettingsTab.voice)
             AboutTab(updater: updater)
-                .tabItem { Label("About", systemImage: "pawprint") }
+                .tabItem {
+                    // The real claw, same as the menu bar — not the generic
+                    // SF pawprint. Template, so it tints with the tab
+                    // selection like its SF neighbors; the symbol stays as
+                    // the bare-binary fallback (no bundle, no art).
+                    if let claw = Self.tabClaw {
+                        Image(nsImage: claw)
+                        Text("About")
+                    } else {
+                        Label("About", systemImage: "pawprint")
+                    }
+                }
                 .tag(SettingsTab.about)
         }
         .frame(width: 620, height: 580)
         .tint(PawvisTheme.accentUI)
     }
+
+    /// Loaded once: the body re-runs on every settings change, and
+    /// `PawvisGlyph` hands out fresh images on purpose (same reasoning as
+    /// the menu header's claw).
+    private static let tabClaw = PawvisGlyph.claw(size: 24)
 }
 
 // MARK: - General
@@ -312,20 +328,22 @@ private struct TrackingSettingsTab: View {
             return "Your hands are tracked whenever tracking is on, but the cursor only follows after you show an open hand — all four fingers up, thumb free. Close your hand into a fist for a moment — or take it out of view — to park the cursor again. A click or drag in progress never lets go, and the claw dims while control is parked."
         case .anyHand:
             return "Any hand the camera sees moves the cursor immediately — no trigger gesture."
+        case .gesturesOnly:
+            return "The mouse is never touched: no pointing, no clicks, no scrolling. Your hands become a remote — only the gestures you've assigned in the Gestures tab (and the stop-tracking wave) do anything."
         }
     }
 }
 
-// MARK: - Gestures
+// MARK: - Mouse
 
-private struct GestureSettingsTab: View {
+private struct MouseSettingsTab: View {
     @ObservedObject var store: SettingsStore
 
     var body: some View {
         SettingsPage {
             VStack(alignment: .leading, spacing: 5) {
                 Button("Open Gesture Guide") { GuideWindow.show() }
-                CaptionText("Every gesture, illustrated — the built-in set below plus any custom gestures you add in the Custom tab.")
+                CaptionText("Every gesture, illustrated — the mouse set below plus anything you assign in the Gestures tab.")
             }
 
             Divider()
