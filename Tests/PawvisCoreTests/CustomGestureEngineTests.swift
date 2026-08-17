@@ -111,6 +111,41 @@ final class CustomGestureEngineTests: XCTestCase {
                       "the press lands once the palm settles")
     }
 
+    func testGesturesOnlyModeFiresGesturesWithoutMouse() {
+        // The hands-as-a-remote mode: the trigger never arms, so nothing
+        // reaches the mouse — while the custom gestures fire exactly as
+        // they would with control armed.
+        var config = engine.config
+        config.controlTrigger = .gesturesOnly
+        engine.config = config
+        enable(.thumbsUp)
+
+        var events: [GestureEvent] = []
+        var t = 0.0
+        var wrist = Vec2(0.3, 0.6)
+        for _ in 0..<6 { // an open hand travelling: would move the cursor
+            wrist = wrist + Vec2(0.03, 0)
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed(wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+        for _ in 0..<8 { // a held index dip: would click
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.mouseTap(indexDown: true, wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+        for _ in 0..<15 { // the bound gesture still works
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.thumbSignal(.up, wrist: wrist)])).events
+            t += 1.0 / 30
+        }
+
+        XCTAssertFalse(events.contains { event in
+            switch event {
+            case .move, .drag, .buttonDown, .buttonUp, .scroll: return true
+            default: return false
+            }
+        }, "gestures-only must never emit a mouse event")
+        XCTAssertEqual(customFires(events), [.thumbsUp])
+    }
+
     func testEngineResetClearsDetector() {
         enable(.thumbsUp)
         var t = 0.0

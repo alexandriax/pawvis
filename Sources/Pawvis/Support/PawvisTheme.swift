@@ -62,6 +62,16 @@ enum PawvisTheme {
         text: dynamic(light: 0x0B0912, dark: 0xEFECF8),
         border: dynamic(light: 0x0B0912, dark: 0xFFFFFF, alpha: 0.18))
 
+    /// The disabled chip: the quiet fill with muted (but still AA-clearing)
+    /// type, at full opacity. Disabled must never be an alpha wash — a
+    /// half-transparent chip over the menu's vibrancy reads as a rendering
+    /// bug, not as "off" (measured: the voice Start chip while voice
+    /// control is switched off in Settings). Hue-less is the affordance.
+    static let chipDisabled = Chip(
+        fill: dynamic(light: 0xE8E8ED, dark: 0x3A3A42),
+        text: dynamic(light: 0x515157, dark: 0xAEAEB6),
+        border: dynamic(light: 0x0B0912, dark: 0xFFFFFF, alpha: 0.12))
+
     /// Type on the saturated chips: white in light mode, the site's ink in
     /// dark, since those fills invert.
     private static let chipInk = dynamic(light: 0xFFFFFF, dark: 0x0B0912)
@@ -71,6 +81,7 @@ enum PawvisTheme {
     static let allChips: [(name: String, chip: Chip)] = [
         ("purple", chipPurple), ("blue", chipBlue),
         ("fuchsia", chipFuchsia), ("quiet", chipQuiet),
+        ("disabled", chipDisabled),
     ]
 
     /// A color that resolves per appearance, so chips flip with the OS

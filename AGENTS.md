@@ -282,6 +282,18 @@ question is how they were fixed. Do not retune these from intuition:
   frames of a fling blur the fingertips into nothing; treating that as
   "opened" released a real grab right before its fling. `isGatherHeld`
   returns nil when neither measure is readable, and the caller holds.
+- **The wiggle is two gestures, told apart by orientation.** Raised (palm
+  to the camera) counts fingertip-extent oscillation; pointed (hand flat,
+  fingers at the screen) counts fingertip *drop* below the knuckle line,
+  normalized by the knuckle span because the wrist→knuckle scale collapses
+  in exactly that pose (and openness, riding that scale, means nothing
+  there — don't gate the pointed wiggle on it). One machine per hand with a
+  dominant orientation: switching requires a debounced run of the opposite
+  pose and restarts the buffers, and an opposed frame feeds *neither*
+  machine — the measure swing of the pose change itself once completed the
+  old machine's count. The pointed thresholds are geometry-derived
+  defaults, newer than the rest of this list: retune them the same
+  `--gesture-eval` way, not by intuition.
 - **Thumb signals are cones with a gap.** Each of the four directions
   demands 1.5× axis dominance from the thumb-tip vector, so the in-between
   angles of a rotating (or resting) thumb match nothing.
@@ -344,6 +356,11 @@ python3 scripts/make_gesture_glyphs.py
   and `make_app.sh` copies them into the bundle as `gesture-*.svg`, where
   `PawvisGlyph.gesture` loads them. A pose can't disagree between the app and
   the page because there is only one of it.
+- **Two formats from one kit.** The 48×48 icons pose one hand (Settings
+  rows, the site's grid); the 104×48 `full-*` panels draw the *whole*
+  gesture — before-and-after frames, motion arrows — and lead every
+  Gesture Guide row (`PawvisGlyph.guidePanel`). A new gesture adds both,
+  and `--selftest` asserts each is in the bundle.
 - **The app tints them, so the colors inside don't matter to it.** They are
   loaded as template images (`NSImage` renders SVG as a vector rep, and
   template rendering keys off alpha alone), which is also why the hand and the

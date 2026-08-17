@@ -22,6 +22,13 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
     // error-proof.
     case fingerWiggle, twoHandFingerWiggle
 
+    // The same wiggle from the desk posture: hand flat, palm down, fingers
+    // pointed at the screen, drumming on invisible keys. A different gesture
+    // from the raised wiggle on purpose — the two orientations are told
+    // apart by where the fingertips stand relative to the knuckle line, and
+    // each can carry its own action.
+    case pointedWiggle, twoHandPointedWiggle
+
     // Held poses: unmistakable shapes dwelled on for a beat. The thumb
     // signals cover all four directions — a fist with the thumb up, down,
     // or tilted to point straight left or right.
@@ -51,7 +58,7 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
         public var blurb: String {
             switch self {
             case .wiggle:
-                return "Hand up, fingers spread, fingers wiggling while the hand stays put. Unmistakable on camera."
+                return "Fingers wiggling while the hand stays put — hand raised with the palm to the camera, or pointed flat at the screen. Two orientations, two separate gestures."
             case .holdPose:
                 return "An unambiguous shape, held for a beat."
             case .grabFling:
@@ -62,7 +69,7 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
 
     public var family: Family {
         switch self {
-        case .fingerWiggle, .twoHandFingerWiggle:
+        case .fingerWiggle, .twoHandFingerWiggle, .pointedWiggle, .twoHandPointedWiggle:
             return .wiggle
         case .thumbsUp, .thumbsDown, .thumbsLeft, .thumbsRight, .shaka:
             return .holdPose
@@ -74,8 +81,10 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .fingerWiggle: return "Finger wiggle"
-        case .twoHandFingerWiggle: return "Two-hand finger wiggle"
+        case .fingerWiggle: return "Raised finger wiggle"
+        case .twoHandFingerWiggle: return "Two-hand raised wiggle"
+        case .pointedWiggle: return "Pointed finger wiggle"
+        case .twoHandPointedWiggle: return "Two-hand pointed wiggle"
         case .thumbsUp: return "Thumbs up"
         case .thumbsDown: return "Thumbs down"
         case .thumbsLeft: return "Thumb to the left"
@@ -96,9 +105,13 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
     public var howTo: String {
         switch self {
         case .fingerWiggle:
-            return "Hold one open hand up, fingers spread, and wiggle your fingers while the hand stays put."
+            return "Hold one open hand up, palm to the camera, fingers spread, and wiggle your fingers while the hand stays put."
         case .twoHandFingerWiggle:
-            return "Hold both open hands up, fingers spread, and wiggle all your fingers at once."
+            return "Hold both open hands up, palms to the camera, and wiggle all your fingers at once."
+        case .pointedWiggle:
+            return "Point one hand at the screen, palm down, and wiggle your fingers up and down, drumming on invisible keys, while the hand stays put."
+        case .twoHandPointedWiggle:
+            return "Point both hands at the screen, palms down, and wiggle all your fingers at once."
         case .thumbsUp:
             return "Make a fist with your thumb pointing up and hold it for a beat."
         case .thumbsDown:
@@ -134,6 +147,8 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
         switch self {
         case .fingerWiggle: return "wiggle"
         case .twoHandFingerWiggle: return "wiggle-two"
+        case .pointedWiggle: return "wiggle-pointed"
+        case .twoHandPointedWiggle: return "wiggle-pointed-two"
         case .thumbsUp: return "thumbs-up"
         case .thumbsDown: return "thumbs-down"
         case .thumbsLeft: return "thumbs-left"
@@ -153,7 +168,11 @@ public enum CustomGesture: String, Codable, CaseIterable, Sendable {
     /// SF Symbol fallback for runs without a bundle (bare `swift run`).
     public var symbolName: String {
         switch family {
-        case .wiggle: return "hand.raised.fingers.spread.fill"
+        case .wiggle:
+            switch self {
+            case .pointedWiggle, .twoHandPointedWiggle: return "hand.point.left.fill"
+            default: return "hand.raised.fingers.spread.fill"
+            }
         case .holdPose:
             switch self {
             case .thumbsUp, .thumbsLeft, .thumbsRight: return "hand.thumbsup.fill"

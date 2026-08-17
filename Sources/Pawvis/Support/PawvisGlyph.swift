@@ -33,6 +33,17 @@ enum PawvisGlyph {
         return image
     }
 
+    /// A whole-gesture guide panel (the `full-*` set), same pipeline as
+    /// `gesture` but in the panels' wide 104x48 format, so the height
+    /// follows the width instead of assuming a square.
+    static func guidePanel(_ name: String, width: CGFloat) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "gesture-\(name)", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        image.size = NSSize(width: width, height: width * 48 / 104)
+        return image
+    }
+
     /// The photoreal sloth paw from the README — the About pane's portrait.
     /// Not a template: it's a photograph, not a glyph.
     static func pawPhoto() -> NSImage? {

@@ -1,20 +1,31 @@
 #!/usr/bin/env python3
-"""Draws the gesture guide's hand glyphs into docs/assets/gestures/*.svg.
+"""Draws the gesture hand glyphs into docs/assets/gestures/*.svg.
 
-One hand, posed. Every glyph is the same palm-forward hand with the fingers
-the gesture actually moves folded down and an arrow through the column they
-vacated, so the picture says which finger to move rather than gesturing at
-"input" in the abstract. That is the whole point of generating them: the poses
-have to agree with each other and with the engine (an index dip is the click,
-a pinky dip is the right click, middle + ring fold in to scroll), and eight
-hand-drawn files drift apart the first time a knuckle line moves.
+Two sets from one drawing kit, so the poses can never disagree:
 
-The same files are used twice: the site inlines them as <img> in the gestures
-grid, and scripts/make_app.sh copies them into the app bundle, where the
-Gesture Guide draws them as template images. Template rendering keys off alpha
-alone, so the app ignores the colors baked in here and tints the whole glyph
-with the menu accent; the colors below are the site's own (violet-300 for the
-hand, sky-300 for whatever is moving), matching `.glyph` in site.css.
+- The 48x48 *icons* (`click.svg`, `wiggle-pointed.svg`, ...): one posed hand
+  per gesture, used by the Settings rows and the site's gestures grid.
+- The 104x48 *guide panels* (`full-*.svg`): the whole gesture, not just its
+  end pose — the before-and-after of a click, the gather-then-fling of a
+  grab, the drumming fingers of a wiggle — drawn as one or two panels with
+  motion arrows. The Gesture Guide leads every row with one of these.
+
+Every glyph is built from the same palm-forward hand (or the side-view hand
+for the pointed wiggle) with the fingers the gesture actually moves folded
+down and an arrow through the column they vacated, so the picture says which
+finger to move rather than gesturing at "input" in the abstract. That is the
+whole point of generating them: the poses have to agree with each other and
+with the engine (an index dip is the click, a pinky dip is the right click,
+middle + ring fold in to scroll), and dozens of hand-drawn files drift apart
+the first time a knuckle line moves.
+
+The same files are used twice: the site inlines icons as <img> in the
+gestures grid, and scripts/make_app.sh copies everything into the app bundle,
+where Settings and the Gesture Guide draw them as template images. Template
+rendering keys off alpha alone, so the app ignores the colors baked in here
+and tints the whole glyph with the menu accent; the colors below are the
+site's own (violet-300 for the hand, sky-300 for whatever is moving),
+matching `.glyph` in site.css.
 
 Run it by hand after changing a pose, like scripts/make_banner.sh:
 
@@ -140,6 +151,93 @@ def big_splayed(extra=""):
     return "\n  ".join(parts) + (("\n  " + extra) if extra else "")
 
 
+SPLAYED_FINGERS = [((19, 25.5), (13.5, 11)), ((23.5, 25), (22, 8.5)),
+                   ((28, 25.5), (31.5, 10.5)), ((32, 26.5), (37.5, 15))]
+
+
+def big_splayed_curled(extra=""):
+    """The splayed hand mid-wiggle: every finger at half reach, hooking
+    toward the palm — the guide's second wiggle frame."""
+    parts = [path(PALM), path(THUMB)]
+    for (bx, by), (tx, ty) in SPLAYED_FINGERS:
+        dx, dy = tx - bx, ty - by
+        length = (dx * dx + dy * dy) ** 0.5
+        ux, uy = dx / length, dy / length
+        mx, my = bx + 0.58 * dx, by + 0.58 * dy
+        # Perpendicular chosen to point back toward the palm center.
+        px, py = -uy, ux
+        if px * (25.5 - mx) + py * (31 - my) < 0:
+            px, py = -px, -py
+        cx, cy = mx + ux * 3.2, my + uy * 3.2
+        ex, ey = mx + ux * 1.6 + px * 4.6, my + uy * 1.6 + py * 4.6
+        parts.append(path(
+            f'M{bx} {by} L{round(mx, 1)} {round(my, 1)} '
+            f'Q{round(cx, 1)} {round(cy, 1)} {round(ex, 1)} {round(ey, 1)}'))
+    return "\n  ".join(parts) + (("\n  " + extra) if extra else "")
+
+
+def pointed_profile(extra=""):
+    """The pointed wiggle's hand, seen from the side: flat, palm down,
+    fingers toward the screen (drawn pointing right). The one glyph not
+    built on the palm-forward hand — a hand pointed at the camera projects
+    to nothing, so the guide shows the pose the way the *user* sees it."""
+    parts = [path(d) for d in [
+        'M7 25.5 C12 22.5 18 21.5 24.5 21.8',      # back of the hand
+        'M7 25.5 V33.5',                           # wrist
+        'M7 33.5 C12 35 17 34.8 21.5 33.8',        # underside
+        'M21.5 33.8 C23.5 35.8 26 36.5 28.5 36',   # thumb, tucked below
+        'M24.5 21.8 C30.5 21.4 35.5 22.2 40 24.2',  # fingers, staggered
+        'M25 25.2 C31 25.1 36 26 40.8 28',
+        'M24 28.6 C30 29.1 34.5 30 38 31.6',
+    ]]
+    return "\n  ".join(parts) + (("\n  " + extra) if extra else "")
+
+
+# --- guide panels ---------------------------------------------------------
+# The `full-*` set: the whole gesture in a 104x48 strip, one or two panels.
+
+def group(body, tx=0.0, ty=0.0, s=1.0):
+    """Place a 48-box drawing inside the wide strip. Stroke width is scaled
+    back up so every panel keeps the same 2px line."""
+    stroke = round(2 / s, 2)
+    return (f'<g transform="translate({tx} {ty}) scale({s})" stroke-width="{stroke}">'
+            f'\n  {body}\n  </g>')
+
+
+def chevron(x, y=24):
+    """Panel separator: and-then."""
+    return path(f'M{x - 1.5} {y - 4} L{x + 2.5} {y} L{x - 1.5} {y + 4}')
+
+
+def accent_circle(cx, cy, r):
+    return f'<circle class="accent" cx="{cx}" cy="{cy}" r="{r}" stroke="{ACCENT}" fill="none"/>'
+
+
+def clock(cx, cy, r=4.4):
+    """Hold it for a beat: a small clock face."""
+    return (accent_circle(cx, cy, r) + "\n  " +
+            path(f'M{cx} {round(cy - r + 1.6, 1)} V{cy} L{round(cx + r - 1.8, 1)} {round(cy + 1.2, 1)}',
+                 accent=True))
+
+
+def screen_edge(x=88):
+    """The screen the pointed wiggle points at: a slim display on its stand."""
+    return "\n  ".join([
+        f'<rect x="{x}" y="7" width="9" height="31" rx="2.5"/>',
+        path(f'M{x + 4.5} 38 V42 M{x + 1} 42 H{x + 8}'),
+    ])
+
+
+def rosette(cx, cy, inner=5.0, outer=10.0):
+    """Four small arrows radiating from a dot — the this-way-or-that badge
+    (the four thumb directions, the fling's edges and corners)."""
+    parts = [f'<circle class="dot" cx="{cx}" cy="{cy}" r="1.5" fill="{HAND}" stroke="none"/>']
+    for ux, uy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+        parts.append(arrow(cx + ux * inner, cy + uy * inner,
+                           cx + ux * outer, cy + uy * outer))
+    return "\n  ".join(parts)
+
+
 # --- the poses ------------------------------------------------------------
 
 def splayed_hand(cx, flip=False):
@@ -195,10 +293,19 @@ GLYPHS = {
 
     # ---- Custom gestures (Settings → Custom; none bound by default) ----
 
-    # The finger wiggle: fanned fingers with the wiggle floating above them.
+    # The raised finger wiggle: fanned fingers, the wiggle floating above.
     "wiggle": big_splayed(wiggle_marks([(13.5, 6.5), (22, 4.5), (31.5, 6)])),
     "wiggle-two": (splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) + "\n  " +
                    wiggle_marks([(9, 7.5), (14.5, 6), (33.5, 6), (39, 7.5)])),
+
+    # The pointed wiggle: the side-view hand, fingers drumming toward the
+    # screen — the desk posture, not the raised palm.
+    "wiggle-pointed": pointed_profile(
+        wiggle_marks([(36, 13.5)]) + "\n  " + updown_arrow(44.5, 18, 33)),
+    "wiggle-pointed-two": (
+        group(pointed_profile(wiggle_marks([(36.5, 15.5)])), tx=2, ty=-7, s=0.68) + "\n  " +
+        group(pointed_profile(wiggle_marks([(36.5, 15.5)])), tx=2, ty=15, s=0.68) + "\n  " +
+        updown_arrow(37.5, 20, 30)),
 
     # Thumb signals: the fist stays quiet, the thumb (and its direction)
     # carries the accent.
@@ -248,7 +355,103 @@ for finger_name in ("little", "ring", "middle"):
     GLYPHS[f"right-click-{finger_name}"] = hand((finger_name,),
                                                 tap_arrow(finger_name))
 
-TEMPLATE = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="{label}" fill="none" stroke="{hand}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+
+# --- the guide panels -----------------------------------------------------
+# One per Gesture Guide row: the whole gesture as one or two 48-box panels
+# placed in a 104x48 strip, and-then chevrons between stages.
+
+FIST = ("index", "middle", "ring", "little")
+
+GUIDE_GLYPHS = {
+    # Take control: a parked fist, and then the open hand that arms it.
+    "full-take-control": (
+        group(hand(FIST, accent_dipped=False), tx=2, ty=4.3, s=0.82) + "\n  " +
+        chevron(46) + "\n  " +
+        group(hand(extra=(path('M7.5 21.5 A11 11 0 0 1 10 14', accent=True) +
+                          path('M43.5 21.5 A11 11 0 0 0 41 14', accent=True))),
+              tx=56, ty=4.3, s=0.82)),
+
+    # Move: the open hand, the cursor riding the palm, travelling the strip.
+    "full-move": (
+        group(hand(extra=cursor_dot(25.5, 32)), tx=28, ty=1, s=0.95) + "\n  " +
+        side_arrow(31.5, 22, 6) + "\n  " + side_arrow(31.5, 82, 98)),
+
+    # Click: fingers up, and then the index dips.
+    "full-click": (
+        group(hand(), tx=2, ty=4.3, s=0.82) + "\n  " +
+        chevron(46) + "\n  " +
+        group(hand(("index",), tap_arrow("index")), tx=56, ty=4.3, s=0.82)),
+
+    # Drag: the dip, and then travel while it holds.
+    "full-drag": (
+        group(hand(("index",), tap_arrow("index")), tx=2, ty=4.3, s=0.82) + "\n  " +
+        chevron(46) + "\n  " +
+        group(hand(("index",), cursor_dot(25.5, 32) + side_arrow(33, 36.5, 47)),
+              tx=56, ty=4.3, s=0.82)),
+
+    # Scroll: the fold-in pose, the parked cursor, the hand riding up and down.
+    "full-scroll": (
+        group(hand(("middle", "ring"), cursor_dot(25.5, 32)), tx=22, ty=1, s=0.95) + "\n  " +
+        updown_arrow(78, 10, 38)),
+
+    # Stop tracking: the double high-five trading sides, drawn big.
+    "full-stop-tracking": group(
+        splayed_hand(14.5) + "\n  " + splayed_hand(33.5, flip=True) + "\n  " +
+        path('M11.5 39 C19 39 25 45.5 36 45.5 M33.5 43.5 L36 45.5 L33.5 47.5',
+             accent=True) + "\n  " +
+        path('M36.5 39 C29 39 23 45.5 12 45.5 M14.5 43.5 L12 45.5 L14.5 47.5',
+             accent=True),
+        tx=20.6, ty=-6.6, s=1.15),
+
+    # Raised wiggle: fingers fanned and up, and then curling — back and forth.
+    "full-wiggle": (
+        group(big_splayed(wiggle_marks([(13.5, 6.5), (22, 4.5), (31.5, 6)])),
+              tx=0, ty=2, s=0.9) + "\n  " +
+        side_arrow(20, 45, 56) + "\n  " + side_arrow(27, 56, 45) + "\n  " +
+        group(big_splayed_curled(wiggle_marks([(15, 10), (24, 8), (32.5, 9.5)])),
+              tx=60, ty=2, s=0.9)),
+
+    # Pointed wiggle: the side-view hand drumming its fingers at the screen.
+    "full-wiggle-pointed": (
+        group(pointed_profile(), tx=10, ty=-2, s=1.12) + "\n  " +
+        wiggle_marks([(46, 14), (55, 18)]) + "\n  " +
+        updown_arrow(66, 16, 34) + "\n  " + screen_edge(86)),
+
+    # Thumb signals: the fist with the thumb out, held for a beat, any of
+    # four ways.
+    "full-thumbs": (
+        group(hand(FIST, thumb='M17.5 28 C15.5 27.5 14 25.5 14 22 V15',
+                   accent_dipped=False, extra=arrow(9.5, 21, 9.5, 12)),
+              tx=8, ty=3, s=0.88) + "\n  " +
+        clock(56, 12) + "\n  " + rosette(80, 27, inner=5, outer=12)),
+
+    # Shaka: thumb and pinky out, held for a beat.
+    "full-shaka": (
+        group(hand(("index", "middle", "ring")), tx=22, ty=2, s=0.92) + "\n  " +
+        clock(74, 13)),
+
+    # Grab & fling: the open hand gathering onto the thumb (arrows in the
+    # finger gaps converging on the bunch), and then the bunch flung toward
+    # any edge or corner.
+    "full-grab": (
+        group(hand(extra=(arrow(20.8, 12.5, 22.6, 17.5) + "\n  " +
+                          arrow(25.8, 11, 24.6, 16.5) + "\n  " +
+                          arrow(30.2, 13, 26.4, 17.8) + "\n  " +
+                          arrow(12, 24, 19.5, 21.8) + "\n  " +
+                          cursor_dot(23.7, 20.8))),
+              tx=2, ty=4.3, s=0.82) + "\n  " +
+        chevron(46) + "\n  " +
+        group(hand(FIST, accent_dipped=False), tx=52, ty=4.3, s=0.82) + "\n  " +
+        rosette(91, 24, inner=5, outer=12)),
+}
+
+for finger_name in ("little", "ring", "middle"):
+    GUIDE_GLYPHS[f"full-right-click-{finger_name}"] = (
+        group(hand(), tx=2, ty=4.3, s=0.82) + "\n  " +
+        chevron(46) + "\n  " +
+        group(hand((finger_name,), tap_arrow(finger_name)), tx=56, ty=4.3, s=0.82))
+
+TEMPLATE = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} 48" width="{w}" height="48" role="img" aria-label="{label}" fill="none" stroke="{hand}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <!-- Generated by scripts/make_gesture_glyphs.py. Edit that, not this. -->
   {body}
 </svg>
@@ -256,8 +459,10 @@ TEMPLATE = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width=
 
 if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
-    for name, body in sorted(GLYPHS.items()):
+    for name, body in sorted(GLYPHS.items()) + sorted(GUIDE_GLYPHS.items()):
+        width = 104 if name.startswith("full-") else 48
         with open(os.path.join(OUT_DIR, name + ".svg"), "w") as fh:
             fh.write(TEMPLATE.format(label=name.replace("-", " "),
-                                     hand=HAND, body=body))
-    print(f"wrote {len(GLYPHS)} glyphs to docs/assets/gestures/")
+                                     hand=HAND, body=body, w=width))
+    print(f"wrote {len(GLYPHS)} icons + {len(GUIDE_GLYPHS)} guide panels "
+          "to docs/assets/gestures/")

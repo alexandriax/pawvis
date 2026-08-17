@@ -80,11 +80,13 @@ Mouse**.
   a setting under **Settings → Tracking**.
 - **Custom gestures**: **Settings → Gestures** lists a library of extra
   one-shot gestures, every one of them visible and none of them live until
-  you give it an action. Point a hand (or both) at the camera and wiggle
-  your fingers, hold a fist with your thumb up, down, or tilted to point
-  straight left or right, hold a shaka, or bunch all your fingertips onto
-  your thumb and fling the bunch toward any edge or corner, eight directions
-  in all. A gesture's action can be anything from the catalog: move between
+  you give it an action. Wiggle your fingers with a hand raised palm to the
+  camera, or point a hand flat at the screen and drum on invisible keys (a
+  separate gesture, and both come in one-hand and two-hand versions). Hold
+  a fist with your thumb up, down, or tilted to point straight left or
+  right, hold a shaka, or bunch all your fingertips onto your thumb and
+  fling the bunch toward any edge or corner, eight directions in all. A
+  gesture's action can be anything from the catalog: move between
   virtual desktops, open Mission Control or App Exposé, show the desktop,
   snap the focused window (halves, thirds, two-thirds, quarters, center,
   maximize, minimize, next display), press Return or Escape, go back or
@@ -94,7 +96,8 @@ Mouse**.
   own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
   fling distance), so a gesture that won't trigger, or triggers too easily,
   can be dialed in on the spot. The pill at the top of the screen confirms
-  every fire, and the Gesture Guide illustrates whatever you have bound.
+  every fire, and the Gesture Guide illustrates every gesture in full, with
+  what it is currently set to do.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a

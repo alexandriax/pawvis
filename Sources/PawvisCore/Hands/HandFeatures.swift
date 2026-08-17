@@ -296,10 +296,63 @@ public struct HandFeatures {
     }
 
     /// One fingertip's distance from the palm center, normalized by hand
-    /// scale — the per-finger openness the wiggle detector watches oscillate.
+    /// scale — the per-finger openness the raised wiggle watches oscillate.
     public func fingertipExtent(_ finger: Finger) -> Double? {
         guard let palm = palmCenter(), let tip = point(finger.tip) else { return nil }
         return tip.distance(to: palm) / scale
+    }
+
+    /// Projected index→little knuckle width. The one reference length that
+    /// survives a hand *pointed at the camera*: the wrist→knuckle axis lies
+    /// along the view direction there and `scale` collapses with it, while
+    /// the knuckle line stays broadside to the lens at either orientation.
+    public func knuckleSpan() -> Double? {
+        guard let index = point(.indexMCP), let little = point(.littleMCP) else { return nil }
+        let span = index.distance(to: little)
+        return span > 1e-6 ? span : nil
+    }
+
+    /// How far a fingertip hangs below its own knuckle on screen, in
+    /// knuckle-span units (+y is down, so positive = tip below the knuckle).
+    /// A raised hand holds its tips far above the knuckle line (≈ −1 span);
+    /// a hand pointed at the screen foreshortens the chain and the tips
+    /// settle at or below it — and drumming the fingers swings this measure,
+    /// which is what the pointed wiggle counts. Span-normalized because
+    /// `scale` is itself foreshortened in exactly the pose this measures.
+    public func fingertipDrop(_ finger: Finger) -> Double? {
+        guard let span = knuckleSpan(), let tip = point(finger.tip),
+              let mcp = point(finger.mcp) else { return nil }
+        return (tip.y - mcp.y) / span
+    }
+
+    /// The two wiggle poses: an open hand held up with the palm to the
+    /// camera, or a flat hand pointed at the screen (palm down, the desk
+    /// posture). Separate *gestures*, so the classification is structural:
+    /// each wiggle machine only counts motion in its own orientation.
+    public enum WiggleOrientation: String, Sendable {
+        case raised, pointed
+    }
+
+    /// Mean fingertip drop below this reads as the raised pose (tips well
+    /// above the knuckles). Even the contracted phase of a vigorous raised
+    /// wiggle keeps the tips far clear of the knuckle line.
+    public static let raisedDropCeiling = -0.45
+    /// Mean fingertip drop above this reads as pointed: tips at or below
+    /// the knuckle line, which no upright open hand produces.
+    public static let pointedDropFloor = 0.0
+
+    /// Which wiggle pose the hand is in — nil between the bands (a tilted
+    /// hand commits to neither) or when too few fingers are readable.
+    /// Deliberately not an `openness()` check: a pointed hand's collapsed
+    /// `scale` inflates openness unpredictably, while where the tips stand
+    /// relative to the knuckle line separates the two poses at any distance.
+    public func wiggleOrientation() -> WiggleOrientation? {
+        let drops = Finger.allCases.compactMap { fingertipDrop($0) }
+        guard drops.count >= 3 else { return nil }
+        let mean = drops.reduce(0, +) / Double(drops.count)
+        if mean <= Self.raisedDropCeiling { return .raised }
+        if mean >= Self.pointedDropFloor { return .pointed }
+        return nil
     }
 
     /// The direction a thumb-signal fist points its thumb, on screen: which
