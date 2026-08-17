@@ -17,5 +17,12 @@ if let wakeIndex = CommandLine.arguments.firstIndex(of: "--wake-eval") {
 if let execIndex = CommandLine.arguments.firstIndex(of: "--voice-exec") {
     exit(runVoiceExec(Array(CommandLine.arguments[(execIndex + 1)...])))
 }
+if let actionIndex = CommandLine.arguments.firstIndex(of: "--action-eval") {
+    let actionArgs = Array(CommandLine.arguments[(actionIndex + 1)...])
+    exit(MainActor.assumeIsolated { runActionEval(actionArgs) })
+}
+if let gestureIndex = CommandLine.arguments.firstIndex(of: "--gesture-eval") {
+    exit(runGestureEval(Array(CommandLine.arguments[(gestureIndex + 1)...])))
+}
 
 PawvisApp.main()

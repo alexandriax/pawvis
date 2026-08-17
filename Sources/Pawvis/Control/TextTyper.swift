@@ -46,9 +46,56 @@ final class TextTyper {
         keyCodes[chord.key] != nil
     }
 
+    /// Keys in the keyboard's fn block. Hardware presses of these always
+    /// carry the secondary-fn flag, and the system's own hotkeys are
+    /// registered with it (show desktop is literally fn+F11's mask, Mission
+    /// Control is control+fn+up) — synthetic presses without the flag are
+    /// simply not matched. Measured: F11 alone did nothing; F11+fn showed
+    /// the desktop.
+    private static let fnBlockKeyCodes: Set<CGKeyCode> = [
+        122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, // F1–F12
+        123, 124, 125, 126, // arrows
+        115, 119, 116, 121, 117, // home, end, page up/down, forward delete
+    ]
+
+    /// Modifiers as real keys, pressed in hardware order around the main
+    /// key. Symbolic hotkeys match against modifier *state*, which per-event
+    /// flags alone don't establish for every consumer. fn stays flag-only —
+    /// it has no ANSI key event of its own.
+    private static let modifierKeys: [(KeyChord.Modifier, CGKeyCode)] = [
+        (.control, 59), (.option, 58), (.shift, 56), (.command, 55),
+    ]
+
     func press(_ chord: KeyChord) {
         guard let keyCode = Self.keyCodes[chord.key] else { return }
-        pressKeyCode(keyCode, flags: Self.flags(for: chord.modifiers))
+        var flags = Self.flags(for: chord.modifiers)
+        if Self.fnBlockKeyCodes.contains(keyCode) {
+            flags.insert(.maskSecondaryFn)
+        }
+        let held = Self.modifierKeys.filter { chord.modifiers.contains($0.0) }
+        var accumulated: CGEventFlags = []
+        for (modifier, code) in held {
+            accumulated.insert(Self.flags(for: [modifier]))
+            postKey(code, down: true, flags: accumulated)
+        }
+        postKey(keyCode, down: true, flags: flags)
+        postKey(keyCode, down: false, flags: flags)
+        for (modifier, code) in held.reversed() {
+            accumulated.remove(Self.flags(for: [modifier]))
+            postKey(code, down: false, flags: accumulated)
+        }
+    }
+
+    /// One paced key event: like the mouse path, back-to-back posts are
+    /// intermittently dropped, and a lost modifier-up would wedge the
+    /// keyboard state much like a lost mouseUp wedges a button.
+    private func postKey(_ keyCode: CGKeyCode, down: Bool, flags: CGEventFlags) {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: down) else {
+            return
+        }
+        event.flags = flags
+        event.post(tap: .cghidEventTap)
+        usleep(8000)
     }
 
     private static func flags(for modifiers: Set<KeyChord.Modifier>) -> CGEventFlags {

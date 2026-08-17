@@ -23,6 +23,17 @@ Extras:
   eyes-on hook as `PAWVIS_OPEN_SETTINGS` below. Its posed-hand art is
   bundle-only, so a bare `swift run` shows the SF Symbol fallbacks instead:
   look at the guide from `build/Pawvis.app`, not from the binary.
+- `Pawvis --gesture-eval <video…> [--verbose]` — run the real Vision +
+  engine pipeline over a webcam recording and print every custom gesture
+  that fires (plus per-frame openness/splay/palm diagnostics with
+  `--verbose`). The ground-truth harness for the motion gestures: record a
+  clip of the gesture and ask the machine, because synthetic tests cannot
+  tell you what Vision does to a real hand mid-swipe. Every threshold in
+  `CustomGestureDetector` was tuned against such clips; retune the same way.
+- `Pawvis --action-eval <kind> [argument…]` — perform one gesture action
+  through the real `GestureActionRunner` and print the pill outcome.
+  "Does desktopRight actually switch the desktop on this machine" is a
+  question for the machine, not for reading the code.
 - `VERSION=1.2.3 BUILD_NUMBER=42 make app` — stamp a version into the bundle
   (CI does this from the release tag; local builds show `0.0.0-dev`).
 
@@ -245,6 +256,72 @@ band, tracking loss, and the guards. Copy lives in `SettingsView` and
 `scripts/make_gesture_glyphs.py` (see [Gesture art](#gesture-art)) rather than
 reaching for an SF Symbol, because the symbols are what taught the wrong
 gesture last time.
+
+**The custom one-shot gestures** (`CustomGestureDetector`; bound in
+Settings → Custom, none live by default) follow the same rules plus a few
+that only real video could teach — every one below was a measured failure
+first, and `--gesture-eval` over the clips in question is how they were
+fixed. Do not retune these from intuition:
+
+- **Motion gestures are judged by endpoints, not per-frame continuity.**
+  Vision drops or blurs frames exactly during the fast part of a sweep; a
+  model that demanded consecutive fast frames never fired once on real
+  video. A swipe is displacement from a *launch pad* (where the open hand
+  last sat settled) covered within a window with one genuinely fast sample
+  along the way; a mid-flight dropout doesn't matter.
+- **Openness beats finger-extension checks for closed poses.** A hand
+  gathered toward the camera projects straight finger chains and scattered
+  tips (the trigger's foreshortening lesson again) — extension and splay
+  guards on the grab both silently vetoed the real gesture. `openness()` is
+  the one measure a closed hand can't fake; the shaka/thumbs look-alikes
+  are excluded by the thumb instead (a grab folds the thumb in; they stand
+  it out).
+- **Real swipes close at the end and return closed.** The relaxing
+  follow-through must not kill a mostly-banked sweep, and the curled
+  return stroke must never count as one — hence the closed-kill rule keyed
+  on how much travel was banked while still open, and the grab's engage
+  stillness gate (a real grab closes from rest; the return stroke closes
+  mid-flight).
+- **Unreadable openness holds, like every other missing signal.** The first
+  frames of a fling blur the fingertips into nothing; treating nil as
+  "opened" released a real grab right before its fling.
+- **A sweeping palm can't begin a press** (`pressEngageMaxSpeed`): mid-sweep
+  blur fakes finger dips (two phantom clicks in one seven-second clip), and
+  each one killed the swipe it rode on. Engage-only, like every such gate —
+  a held press still drags and releases at any speed.
+
+## Gesture actions
+
+How a bound gesture's action actually reaches macOS
+(`GestureActionRunner`), all of it measured on macOS 26 — verify any change
+with `--action-eval`, not by reading Apple's documentation, which describes
+none of this:
+
+- **Synthetic key chords need the fn flag and real modifier key events.**
+  The system's own hotkeys are registered with the secondary-fn bit for
+  fn-block keys (show desktop is literally fn+F11's mask, Mission Control
+  control+fn+up), and synthetic presses without it are simply not matched;
+  hardware always carries it. `TextTyper.press` adds the flag for fn-block
+  keycodes and posts the modifiers as their own paced key events around the
+  main key. F11 alone did nothing; F11+fn showed the desktop.
+- **Spaces switching refuses ALL synthetic input.** Every recipe was tried:
+  flags-only, real modifier events, flagsChanged-typed modifiers, fn/numpad
+  flag combinations, held modifiers, System Events, posting to the Dock's
+  pid, clicking Mission Control's spaces-bar thumbnails (whose AX frames are
+  correct, whose window thumbnails DO respond to synthetic clicks, and whose
+  AXPress is inert). Spotlight and Mission Control fire from the same
+  recipes that Spaces ignores. The one thing that switches a space is
+  SkyLight's own `SLSManagedDisplaySetCurrentSpace` — private API, resolved
+  at runtime with dlsym in `SpaceSwitcher`, used for exactly this one
+  feature, every switch verified against `SLSGetActiveSpace`, and reporting
+  honestly ("Desktop switching isn't available on this macOS") if a future
+  macOS removes the symbols. Nothing else may grow a SkyLight dependency
+  casually.
+- **Window placement is AX geometry** (`WindowPlacer` applying
+  `WindowPlacement`'s unit-tested rect math), the same Accessibility
+  permission the mouse already needs. Fire-and-forget actions (the desktop
+  switch) report a follow-up line through `GestureActionRunner.onFollowUp`,
+  which replaces the provisional pill text.
 
 ## Gesture art
 

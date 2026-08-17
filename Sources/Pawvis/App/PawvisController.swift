@@ -41,6 +41,11 @@ final class PawvisController: ObservableObject {
         mouse = MouseController(projector: projector)
         actionRunner.stopTracking = { [weak self] in self?.stopTracking() }
         actionRunner.toggleVoiceControl = { [weak self] in self?.voice.toggle() }
+        actionRunner.onFollowUp = { [weak self] outcome in
+            guard let self else { return }
+            self.gestureNotice = (text: "🐾 \(outcome)",
+                                  until: CACurrentMediaTime() + Self.gestureNoticeSeconds)
+        }
 
         camera.onFrame = { [weak self] sampleBuffer in
             guard let self else { return }

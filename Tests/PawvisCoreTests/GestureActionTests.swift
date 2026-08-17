@@ -3,10 +3,10 @@ import XCTest
 
 final class GestureActionTests: XCTestCase {
     func testKeyChordMappings() {
-        XCTAssertEqual(GestureAction(kind: .desktopLeft).keyChord,
-                       KeyChord(key: "left", modifiers: [.control]))
-        XCTAssertEqual(GestureAction(kind: .desktopRight).keyChord,
-                       KeyChord(key: "right", modifiers: [.control]))
+        // Desktops are not chords: macOS ignores synthetic ⌃←/⌃→ for Spaces,
+        // so the app switches through Mission Control's bar instead.
+        XCTAssertNil(GestureAction(kind: .desktopLeft).keyChord)
+        XCTAssertNil(GestureAction(kind: .desktopRight).keyChord)
         XCTAssertEqual(GestureAction(kind: .missionControl).keyChord,
                        KeyChord(key: "up", modifiers: [.control]))
         XCTAssertEqual(GestureAction(kind: .browserBack).keyChord,
