@@ -174,6 +174,18 @@ final class PawvisController: ObservableObject {
         }
         events.removeAll { if case .customGesture = $0 { return true } else { return false } }
 
+        // A hold pose mid-dwell paints a live countdown into the pill: a
+        // pose you must hold for a beat is invisible until it fires, and
+        // invisible reads as broken. Re-set every frame; the short TTL
+        // clears it the moment the pose is dropped. (A fire this same
+        // frame already cleared the dwell, so its notice stands.)
+        if let holding = engine.customHoldProgress {
+            gestureNotice = (
+                text: String(format: "🐾 %@ · hold… %.1f s",
+                             holding.gesture.displayName, holding.remaining),
+                until: time + 0.4)
+        }
+
         // The criss-cross wave completed: deliver everything else this frame
         // produced (a queued release must still land), then stop tracking
         // outright — the same full stop as the menu bar switch.
