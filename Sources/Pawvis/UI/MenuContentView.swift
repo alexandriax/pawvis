@@ -15,6 +15,9 @@ struct PawvisButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: 6)
+        // Disabled swaps to the opaque muted chip rather than fading this
+        // one: an alpha wash over the menu's vibrancy looks broken, not off.
+        let chip = isEnabled ? chip : PawvisTheme.chipDisabled
         return configuration.label
             .font(.callout.weight(.medium))
             .padding(.horizontal, 10)
@@ -22,7 +25,7 @@ struct PawvisButtonStyle: ButtonStyle {
             .background(shape.fill(chip.fillUI))
             .overlay(chip.borderUI.map { shape.strokeBorder($0, lineWidth: 1) })
             .foregroundStyle(chip.textUI)
-            .opacity(configuration.isPressed ? 0.7 : (isEnabled ? 1 : 0.45))
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
