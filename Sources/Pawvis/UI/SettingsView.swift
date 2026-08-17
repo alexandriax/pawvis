@@ -127,12 +127,28 @@ struct SettingsView: View {
                 .tabItem { Label("Voice (Beta)", systemImage: "mic") }
                 .tag(SettingsTab.voice)
             AboutTab(updater: updater)
-                .tabItem { Label("About", systemImage: "pawprint") }
+                .tabItem {
+                    // The real claw, same as the menu bar — not the generic
+                    // SF pawprint. Template, so it tints with the tab
+                    // selection like its SF neighbors; the symbol stays as
+                    // the bare-binary fallback (no bundle, no art).
+                    if let claw = Self.tabClaw {
+                        Image(nsImage: claw)
+                        Text("About")
+                    } else {
+                        Label("About", systemImage: "pawprint")
+                    }
+                }
                 .tag(SettingsTab.about)
         }
         .frame(width: 620, height: 580)
         .tint(PawvisTheme.accentUI)
     }
+
+    /// Loaded once: the body re-runs on every settings change, and
+    /// `PawvisGlyph` hands out fresh images on purpose (same reasoning as
+    /// the menu header's claw).
+    private static let tabClaw = PawvisGlyph.claw(size: 24)
 }
 
 // MARK: - General
