@@ -181,6 +181,14 @@ Hard-won constraints, each of which broke something real:
   the permissive pose bands only, and is blocked while any button is engaged
   or held, because a click closes part of the hand. The scroll pose folds
   only two fingers, so it never trips the three-finger disarm line.
+  Arming belongs to the *hand*, never to the slot that survives it: when the
+  armed hand goes missing while a bystander stays visible, primary holds
+  through the tracking-loss grace (a one-frame Vision dropout must not hand
+  the cursor — or a held drag — to a hand that never opted in), and past the
+  grace the survivor inherits control only if it is showing the trigger at
+  that moment. Otherwise any press the departed hand held lands where it
+  was, once, and the ceremony starts over — which is what lets a returning
+  open hand reclaim primary from the resting hand that inherited its slot.
 - **Low-confidence frames hold state, never flap it.** A missing fingertip
   must not release a held button; only the tracking-loss grace window does.
 - **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted
