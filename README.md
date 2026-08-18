@@ -175,7 +175,7 @@ the screen step by step:
 | "Pawvis, **pause** / **play**" | Presses the hardware play/pause key. macOS routes it to whatever's actually playing, not necessarily the frontmost app. |
 | "Pawvis, **close the window** / minimize / new tab / copy / paste / undo / save / select all / quit Safari" | Instant window and edit commands, no AI round-trip. |
 | "Pawvis, *anything else*" | On-device Apple Intelligence carries it out **step by step**: it reads the screen (accessibility + OCR, menus included), does the next action, looks again, and repeats until the request is done, up to 8 steps. Multi-step commands work: "open Notes and start a new note", "select the pawvis project and start a new conversation". A bottom-right panel streams each step with a **Cancel** button. |
-| "Pawvis, **stop**" | Cancels a running multi-step command. With nothing running, turns voice control off. |
+| "Pawvis, **stop**" | Cancels the running command mid-flight — a navigation, a chained sequence, or a step-by-step run. With nothing running, turns voice control off. |
 | "Pawvis, **stop listening**" | Turns voice control off. |
 
 You can chain several commands into one sentence and Pawvis runs each step
