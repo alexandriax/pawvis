@@ -4,7 +4,7 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free hand control</em></p>
+<p align="center"><em>Touch-free hand control for your Mac</em></p>
 
 ---
 
@@ -204,7 +204,8 @@ meant for Pawvis and recovers the command before the hand-off.
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
 (always the latest release), unzip, and drag **Pawvis.app** to your
-Applications folder.
+Applications folder. Homebrew users: a cask scaffold lives in
+`Casks/pawvis.rb`, pending submission to homebrew/cask.
 
 Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
@@ -245,7 +246,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # the full unit suite, keep it green
 swift build         # debug build
 ```
 
