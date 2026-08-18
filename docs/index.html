@@ -100,18 +100,21 @@
         Download for macOS
       </a>
       <a class="btn btn-ghost" href="https://github.com/alexandriax/pawvis">View on GitHub</a>
-      <a class="btn btn-ghost" href="https://www.youtube.com/watch?v=SF5y-K3zPdg">Demo Video</a>
     </div>
     <p class="meta-line mono" data-reveal>Signed &amp; notarized&nbsp;&nbsp;·&nbsp;&nbsp;macOS 14+&nbsp;&nbsp;·&nbsp;&nbsp;Free &amp; open source (MIT)</p>
 
     <figure class="hero-media" id="heroMedia" data-reveal>
       <div class="screen-frame">
-        <iframe id="demoVideo" src="https://www.youtube.com/embed/B2769nDHvZg"
-                width="1280" height="720"
-                title="Pawvis demo: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine."
-                referrerpolicy="strict-origin-when-cross-origin"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowfullscreen></iframe>
+        <a class="film" id="demoVideo" href="https://www.youtube.com/watch?v=B2769nDHvZg"
+           data-embed="https://www.youtube.com/embed/B2769nDHvZg?cc_load_policy=0&amp;autoplay=1"
+           data-title="Pawvis demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
+          <img src="assets/demo-cover.jpg" width="1280" height="720"
+               alt="A shaka gesture opens a video call on a Mac, with the webcam panel beside it tracking the hand's joints.">
+          <span class="film-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 6.5v11l9-5.5z"/></svg>
+          </span>
+          <span class="visually-hidden">Play the demo film</span>
+        </a>
       </div>
       <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
     </figure>
