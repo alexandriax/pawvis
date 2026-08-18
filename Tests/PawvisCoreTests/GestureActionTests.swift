@@ -19,6 +19,28 @@ final class GestureActionTests: XCTestCase {
                        KeyChord(key: "t", modifiers: [.command, .shift]))
         XCTAssertNil(GestureAction(kind: .windowLeftHalf).keyChord)
         XCTAssertNil(GestureAction(kind: .openApp, argument: "Safari").keyChord)
+        // Volume/brightness ride the hardware media-key path like
+        // play/pause — not synthesized key chords.
+        XCTAssertNil(GestureAction(kind: .volumeUp).keyChord)
+        XCTAssertNil(GestureAction(kind: .volumeDown).keyChord)
+        XCTAssertNil(GestureAction(kind: .volumeMute).keyChord)
+        XCTAssertNil(GestureAction(kind: .brightnessUp).keyChord)
+        XCTAssertNil(GestureAction(kind: .brightnessDown).keyChord)
+    }
+
+    func testVolumeAndBrightnessAreMediaKeysInNavigation() {
+        let mediaKinds: [GestureAction.Kind] = [
+            .volumeUp, .volumeDown, .volumeMute, .brightnessUp, .brightnessDown,
+        ]
+        for kind in mediaKinds {
+            XCTAssertEqual(kind.category, .navigation)
+            XCTAssertFalse(kind.needsArgument)
+        }
+        XCTAssertEqual(GestureAction(kind: .volumeUp).feedback, "Volume up")
+        XCTAssertEqual(GestureAction(kind: .volumeDown).feedback, "Volume down")
+        XCTAssertEqual(GestureAction(kind: .volumeMute).feedback, "Volume muted")
+        XCTAssertEqual(GestureAction(kind: .brightnessUp).feedback, "Brightness up")
+        XCTAssertEqual(GestureAction(kind: .brightnessDown).feedback, "Brightness down")
     }
 
     func testEveryKindHasCategoryNameAndFeedback() {
@@ -136,6 +158,7 @@ final class WindowPlacementTests: XCTestCase {
         XCTAssertNil(place(.windowNextDisplay))
         XCTAssertNil(place(.desktopLeft))
         XCTAssertNil(place(.openApp))
+        XCTAssertNil(place(.volumeUp))
     }
 
     func testTranslatedKeepsRelativePlacement() {
