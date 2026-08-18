@@ -329,6 +329,38 @@ question is how they were fixed. Do not retune these from intuition:
   path. Re-introducing them means beating those failure modes on
   `--gesture-eval` clips first.
 
+**User-trained gestures** (`GestureTrace`, `TakeRecorder`,
+`TrainedGestureBuilder`, `TrainedGestureDetector` — all pure PawvisCore):
+the trainer window records 3–10 takes; a take is segmented from the live
+stream by motion (or captured as a held pose after a grace), reduced to
+16 keyframes of palm-relative fingertip offsets plus scale-normalized
+palm travel, and takes are averaged along DTW alignment to their medoid.
+The matching threshold is calibrated from the takes' own spread; the
+per-gesture sensitivity slider scales it (0.7×–1.6×). Live matching
+DTW-scores a rolling window at three tempo scales and fires under the
+threshold. Its constraints:
+
+- **Training suspends control.** The trainer taps the camera stream ahead
+  of the engine (`PawvisController.beginTraining`): nothing reaches the
+  mouse or the other detectors while the window is open, because training
+  must not fight the very motions it records.
+- **Firing latches until the match visibly breaks** (distance 1.3× over
+  threshold), so a *held* trained pose fires once per performance, not
+  once per refractory — the custom hold-pose lesson, applied here.
+- **Presses and the criss-cross wave stand matching down**, and a
+  two-hand gesture matches only the ordered left-to-right pair stream:
+  half the pair is not the gesture.
+- **The representation is translation- and distance-invariant, not
+  rotation-invariant.** A swipe left and a swipe right are different
+  gestures — which is what you want from a trained library.
+- **Templates persist, takes don't.** Settings hold the learned keyframes
+  and calibration only (element-tolerant list, like the bindings);
+  retraining means re-recording.
+- **The badge is the icon.** A trained gesture draws its own learned
+  motion — palm trail plus fingertip dots in `PawvisTheme.fingerDots` —
+  instead of generated SVG art; the trainer's live overlay uses the same
+  colors, so the badge reads as a replay of what you did.
+
 ## Gesture actions
 
 How a bound gesture's action actually reaches macOS
