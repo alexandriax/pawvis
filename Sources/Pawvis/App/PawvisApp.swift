@@ -28,6 +28,12 @@ struct PawvisApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+
+        Window("Train a Gesture", id: TrainerWindow.id) {
+            GestureTrainerView(controller: appDelegate.controller)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 
 }
@@ -68,6 +74,7 @@ private struct MenuBarIcon: View {
         .onAppear {
             SettingsWindow.opener = openSettings
             GuideWindow.opener = openWindow
+            TrainerWindow.opener = openWindow
         }
     }
 }
@@ -170,6 +177,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if ProcessInfo.processInfo.environment["PAWVIS_OPEN_GUIDE"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 GuideWindow.show()
+            }
+        }
+
+        // PAWVIS_OPEN_TRAINER=1 opens the gesture trainer — eyes-on UI
+        // verification again. It starts the camera (that is the window),
+        // so it stays a deliberate, local flag rather than part of any
+        // automated flow.
+        if ProcessInfo.processInfo.environment["PAWVIS_OPEN_TRAINER"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                TrainerWindow.show()
             }
         }
 

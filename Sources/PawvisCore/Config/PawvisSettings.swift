@@ -73,6 +73,7 @@ public struct GeneralConfig: Codable, Equatable, Sendable {
 public struct PawvisSettings: Codable, Equatable, Sendable {
     public var gestures: GestureConfig = .default
     public var customGestures: CustomGestureSettings = CustomGestureSettings()
+    public var trainedGestures: TrainedGestureSettings = TrainedGestureSettings()
     public var voiceControl: VoiceControlConfig = VoiceControlConfig()
     public var overlay: OverlayConfig = OverlayConfig()
     public var general: GeneralConfig = GeneralConfig()
@@ -82,7 +83,7 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
     public static let `default` = PawvisSettings()
 
     enum CodingKeys: String, CodingKey {
-        case gestures, customGestures, voiceControl, overlay, general
+        case gestures, customGestures, trainedGestures, voiceControl, overlay, general
         case dictation // legacy (pre-voice-control builds)
     }
 
@@ -90,6 +91,7 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(gestures, forKey: .gestures)
         try c.encode(customGestures, forKey: .customGestures)
+        try c.encode(trainedGestures, forKey: .trainedGestures)
         try c.encode(voiceControl, forKey: .voiceControl)
         try c.encode(overlay, forKey: .overlay)
         try c.encode(general, forKey: .general)
@@ -102,6 +104,8 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
         gestures = (try? c.decodeIfPresent(GestureConfig.self, forKey: .gestures)) ?? .default
         customGestures = (try? c.decodeIfPresent(CustomGestureSettings.self, forKey: .customGestures))
             ?? CustomGestureSettings()
+        trainedGestures = (try? c.decodeIfPresent(TrainedGestureSettings.self, forKey: .trainedGestures))
+            ?? TrainedGestureSettings()
         overlay = (try? c.decodeIfPresent(OverlayConfig.self, forKey: .overlay)) ?? OverlayConfig()
         general = (try? c.decodeIfPresent(GeneralConfig.self, forKey: .general)) ?? GeneralConfig()
         if let v = try? c.decodeIfPresent(VoiceControlConfig.self, forKey: .voiceControl) {

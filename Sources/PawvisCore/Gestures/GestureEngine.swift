@@ -86,6 +86,16 @@ public final class GestureEngine {
         customDetector.holdProgress
     }
 
+    /// The user-trained gestures' configuration, compiled from settings by
+    /// the app layer. Same shape as `customConfig`: derived, not persisted
+    /// engine state; the detector resets itself when it changes.
+    public var trainedConfig: TrainedGestureDetector.Config {
+        get { trainedDetector.config }
+        set { trainedDetector.config = newValue }
+    }
+
+    private let trainedDetector = TrainedGestureDetector()
+
     private let customDetector = CustomGestureDetector()
 
     public init(config: GestureConfig = .default) {
@@ -281,6 +291,7 @@ public final class GestureEngine {
         scroll = ScrollState()
         crissCross = CrissCrossState()
         customDetector.reset()
+        trainedDetector.reset()
         for i in slots.indices { slots[i].reset() }
         primarySlotID = nil
         cursor = nil
@@ -794,8 +805,14 @@ public final class GestureEngine {
         let inputs = tracked.map {
             CustomGestureDetector.HandInput(slot: $0.slotID, hand: $0.hand)
         }
-        return customDetector.process(hands: inputs, context: context)
+        var events: [GestureEvent] = customDetector.process(hands: inputs, context: context)
             .map { .customGesture($0) }
+        // The trained gestures ride the same stream and the same guards.
+        events += trainedDetector.process(
+            hands: tracked.map { TrainedGestureDetector.HandInput(slot: $0.slotID, hand: $0.hand) },
+            context: context)
+            .map { .trainedGesture($0) }
+        return events
     }
 
     // MARK: - Right click

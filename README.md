@@ -98,6 +98,17 @@ Mouse**.
   can be dialed in on the spot. The pill at the top of the screen confirms
   every fire, and the Gesture Guide illustrates every gesture in full, with
   what it is currently set to do.
+- **Train your own gestures**: **Settings → Gestures → Train New Gesture**
+  opens a camera window with your hand's tracking drawn live, a color per
+  fingertip and a ring on the palm. Pick one hand or two, perform your
+  motion (or hold a pose) 3 to 10 times, and Pawvis learns a template from
+  your takes, tells you when they agree well enough, and lets you try the
+  match live before saving. Trained gestures join the Gestures tab with an
+  animated badge that replays the learned motion, and they work like the
+  built-ins: rename them, remove them, tune how strictly they match, and
+  bind them to any action from the same catalog (or leave them unassigned).
+  Pawvis control pauses while the trainer is open, so recording never
+  fights the mouse. Training data never leaves this Mac, like all tracking.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a
@@ -254,6 +265,7 @@ Sources/
     Hands/             21-landmark model · pinch/dip/curl metrics
     Gestures/          GestureEngine: frames → clicks, drags, scrolls, cursor moves
                        + the custom one-shot gestures (wiggles, held poses, flings)
+                       + user-trained gestures (recorded takes → matched templates)
     Actions/           gesture actions · typed-shortcut parsing · window placement math
     VoiceControl/      wake-word + command parser · spoken URLs & key chords
     Update/            semantic versions · check / offer / notify policy

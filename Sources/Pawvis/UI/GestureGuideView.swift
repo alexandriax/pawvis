@@ -161,7 +161,40 @@ struct GestureGuideView: View {
             ForEach(customRows, id: \.title) { row in
                 rowView(row)
             }
+            ForEach(store.settings.trainedGestures.gestures) { gesture in
+                trainedRowView(gesture)
+            }
         }
+    }
+
+    /// A trained gesture's guide row: the animated badge replaying its own
+    /// recorded motion, in place of generated art.
+    private func trainedRowView(_ gesture: TrainedGesture) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            TrainedGestureBadge(gesture: gesture, size: 48)
+                .frame(width: GestureArt.panelWidth)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(gesture.name).font(.headline)
+                Text("You taught Pawvis this one — \(gesture.handCount == 2 ? "both hands" : "one hand"), about \(String(format: "%.1f", max(gesture.duration, 0.3))) s. The badge replays the motion it learned.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let action = gesture.action {
+                    Text("→ \(action.summary)")
+                        .font(.callout.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                } else {
+                    Text("Not assigned yet.")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 2)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
     }
 
     private var customRows: [Row] {

@@ -189,6 +189,67 @@ final class CustomGestureEngineTests: XCTestCase {
         XCTAssertFalse(moves(events).isEmpty, "an upright hand takes the cursor back")
     }
 
+    func testTrainedGestureSurfacesAsEvent() {
+        // A trained swipe, compiled straight into the engine: the fire
+        // arrives as a .trainedGesture event with the stored id.
+        func swipe(_ progress: Double) -> Hand {
+            SyntheticHand.openRelaxed(wrist: Vec2(0.30 + 0.28 * progress, 0.60))
+        }
+        let recorder = TakeRecorder()
+        var takes: [GestureTake] = []
+        for _ in 0..<3 {
+            var t = 0.0
+            recorder.begin(handCount: 1, at: t)
+            for _ in 0..<8 {
+                _ = recorder.feed([GestureTrace.snapshot(of: swipe(0), minJointConfidence: 0.25)!], at: t)
+                t += 1.0 / 30
+            }
+            for i in 0..<15 {
+                if case .finished(let take)? = recorder.feed(
+                    [GestureTrace.snapshot(of: swipe(Double(i) / 14), minJointConfidence: 0.25)!], at: t) {
+                    takes.append(take)
+                }
+                t += 1.0 / 30
+            }
+            for _ in 0..<30 {
+                if case .finished(let take)? = recorder.feed(
+                    [GestureTrace.snapshot(of: swipe(1), minJointConfidence: 0.25)!], at: t) {
+                    takes.append(take)
+                }
+                t += 1.0 / 30
+            }
+        }
+        guard let build = TrainedGestureBuilder.build(takes: takes) else {
+            return XCTFail("no build from \(takes.count) takes")
+        }
+        let id = UUID()
+        var trained = TrainedGestureDetector.Config()
+        trained.gestures = [TrainedGestureDetector.Compiled(
+            id: id, handCount: 1, template: build.template,
+            duration: build.duration, threshold: build.baseThreshold * 1.15)]
+        engine.trainedConfig = trained
+
+        var events: [GestureEvent] = []
+        var t = 100.0
+        for _ in 0..<20 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(0)])).events
+            t += 1.0 / 30
+        }
+        for i in 0..<15 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(Double(i) / 14)])).events
+            t += 1.0 / 30
+        }
+        for _ in 0..<25 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(1)])).events
+            t += 1.0 / 30
+        }
+        let fired = events.compactMap { event -> UUID? in
+            if case .trainedGesture(let id) = event { return id }
+            return nil
+        }
+        XCTAssertEqual(fired, [id])
+    }
+
     func testEngineResetClearsDetector() {
         enable(.thumbsUp)
         var t = 0.0

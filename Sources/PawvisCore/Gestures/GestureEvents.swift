@@ -29,6 +29,9 @@ public enum GestureEvent: Equatable, Sendable {
     /// `PawvisController` maps it to its bound action; the mouse controller
     /// ignores it.
     case customGesture(CustomGesture)
+    /// A user-trained gesture matched (one-shot), by its stored id. Same
+    /// contract as `customGesture`: the controller maps it to its action.
+    case trainedGesture(UUID)
 }
 
 /// Per-hand overlay data: small dots for every detected fingertip.
