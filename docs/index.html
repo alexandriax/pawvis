@@ -106,10 +106,12 @@
 
     <figure class="hero-media" id="heroMedia" data-reveal>
       <div class="screen-frame">
-        <video id="demoVideo" autoplay muted loop playsinline preload="metadata" poster="assets/demo-poster.jpg"
-               width="1280" height="720" aria-label="Short demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
-          <source src="assets/demo.mp4" type="video/mp4">
-        </video>
+        <iframe id="demoVideo" src="https://www.youtube.com/embed/B2769nDHvZg"
+                width="1280" height="720"
+                title="Pawvis demo: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine."
+                referrerpolicy="strict-origin-when-cross-origin"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowfullscreen></iframe>
       </div>
       <figcaption class="visually-hidden">Pawvis moving the cursor by hand, live.</figcaption>
     </figure>
