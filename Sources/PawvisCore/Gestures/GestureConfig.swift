@@ -101,6 +101,17 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// scroll up (`.scroll` deltas are positive-up wheel units).
     public var scrollInvert: Bool = false
 
+    // MARK: Dwell click
+    /// Click by holding still: with cursor control armed and no button down,
+    /// keeping the cursor inside a small radius for `dwellSeconds` emits one
+    /// left click at the settled spot. The cursor must then leave that radius
+    /// before another dwell can begin — re-arm by movement, so resting in
+    /// place clicks exactly once, never a stream. The accessibility path for
+    /// hands that can't manage a crisp index dip; off by default.
+    public var dwellClickEnabled: Bool = false
+    /// How long the cursor must hold still before the dwell click fires.
+    public var dwellSeconds: TimeInterval = 1.0
+
     // MARK: Tracking-off wave
     /// Hold up both hands open with fingers spread wide (a double high-five)
     /// and cross them over each other back and forth to switch hand tracking
@@ -136,6 +147,12 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     public var jitterDeadband: Double = 0.004
 
     // MARK: Pointer
+    /// The landmark the cursor rides. The palm is the default because it is
+    /// the one part of the hand no click gesture moves (see AGENTS.md); the
+    /// fingertip sources are more direct but wobble whenever a finger dips,
+    /// so they suit control styles whose clicks move no fingers — dwell
+    /// clicking above all.
+    public var pointerSource: PointerSource = .palmCenter
     /// sporecaster's landmark tuning, applied to every joint. Vision is noisier
     /// than MediaPipe, so this is the floor for smoothing, not the ceiling.
     public var smoothing: OneEuroFilter.Params = .landmark
@@ -167,10 +184,11 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         case pinchEngageRatio, pinchReleaseHysteresis, pinchDebounceFrames
         case rightClickEnabled, rightClickFinger
         case scrollEnabled, scrollInvert
+        case dwellClickEnabled, dwellSeconds
         case crissCrossDisableEnabled, crissCrossDisableCrossings
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case dragStartDelay, dragIntentDistance, jitterDeadband
-        case smoothing, poseThresholds
+        case pointerSource, smoothing, poseThresholds
         case minHandConfidence, minJointConfidence, trackingLossGrace
         case interactionBox, reachMode, mirrorCamera
     }
@@ -188,6 +206,8 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Finger.self, forKey: .rightClickFinger) { rightClickFinger = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollInvert) { scrollInvert = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .dwellClickEnabled) { dwellClickEnabled = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dwellSeconds) { dwellSeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .crissCrossDisableEnabled) { crissCrossDisableEnabled = v }
         if let v = try? c.decodeIfPresent(Int.self, forKey: .crissCrossDisableCrossings) { crissCrossDisableCrossings = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
@@ -196,6 +216,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dragStartDelay) { dragStartDelay = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .dragIntentDistance) { dragIntentDistance = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .jitterDeadband) { jitterDeadband = v }
+        if let v = try? c.decodeIfPresent(PointerSource.self, forKey: .pointerSource) { pointerSource = v }
         if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) { smoothing = v }
         if let v = try? c.decodeIfPresent(PoseThresholds.self, forKey: .poseThresholds) { poseThresholds = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .minHandConfidence) { minHandConfidence = v }

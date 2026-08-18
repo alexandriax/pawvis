@@ -75,7 +75,7 @@ struct GestureGuideView: View {
             Row(symbol: "hand.raised.fill",
                 panel: "full-move",
                 title: "Move",
-                detail: "Hold your hand open, fingers up, and move it — the claw cursor rides your palm. The ring around the claw tightens as the click gesture forms."),
+                detail: "Hold your hand open, fingers up, and move it — the claw cursor rides your \(store.settings.gestures.pointerSource.inlineName). The ring around the claw tightens as the click gesture forms."),
             Row(symbol: "hand.point.up.left.fill",
                 panel: "full-click",
                 title: "Click",
@@ -85,6 +85,13 @@ struct GestureGuideView: View {
                 title: "Drag / hold",
                 detail: "Hold the click gesture and move — grab a window title bar, select text, drag files. The button stays down until you lift your index finger. (Deliberate movement starts the drag right away; otherwise it begins after the click-vs-grab delay.)"),
         ]
+
+        if store.settings.gestures.dwellClickEnabled {
+            rows.append(Row(
+                symbol: "timer",
+                title: "Dwell click",
+                detail: "Hold the cursor still on a target and the ring tightens; after \(String(format: "%.1f", store.settings.gestures.dwellSeconds)) s of stillness a left click fires on its own. Move the cursor away, then settle again, for the next one. Holding a button, scrolling, or a parked cursor never dwells."))
+        }
 
         if store.settings.gestures.rightClickEnabled {
             let finger = store.settings.gestures.rightClickFinger

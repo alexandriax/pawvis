@@ -70,6 +70,17 @@ Mouse**.
   a drag immediately; otherwise a short window protects quick clicks from
   turning into accidental drags. The window length is a slider.
 - **Double / triple click**: tap again quickly in the same spot.
+- **Dwell click** (optional, off by default): clicking without the finger
+  dip. Park the cursor on a target and hold it still; after the dwell time
+  (0.5 to 3 s, a slider) a left click fires at the settled spot, with the
+  ring around the claw tightening as the countdown runs. Move the cursor
+  away to arm the next one, so resting in place clicks once, never a
+  stream, and it never fires while a button is held, while scrolling, or
+  while the cursor is parked. Built for hands that can't manage a crisp
+  finger dip. **Settings → Mouse** can also put the cursor on the index
+  fingertip, thumb tip, or pinch midpoint instead of the palm; fingertip
+  sources point more directly but wobble during finger clicks, so they
+  pair best with dwell clicking, where clicking moves no fingers.
 - **Scroll**: fold your **middle and ring fingers** in, index and pinky up,
   then move your hand up and down. The cursor parks while the pose is held.
   Toggle it (or invert the direction) in Settings.

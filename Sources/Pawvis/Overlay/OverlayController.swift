@@ -146,7 +146,9 @@ final class OverlayController {
                         fillColor: PawvisTheme.blueLight.withAlphaComponent(0.25),
                         alpha: 1))
                 } else if config.showPinchRing, overlay.armed {
-                    let progress = overlay.closingProgress
+                    // A running dwell drives the same ring as a forming
+                    // click: the tightening IS the countdown.
+                    let progress = max(overlay.closingProgress, overlay.dwellProgress)
                     let ringRadius: CGFloat = anyGrab
                         ? (overlay.isDragging ? 26 : 20)
                         : 30 - 12 * progress
