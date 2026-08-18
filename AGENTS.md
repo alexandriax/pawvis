@@ -536,7 +536,14 @@ a hypothesis, checked against the world before a run is allowed to finish
 (`AppNameMatch`, the same fuzzy rules as resolution); `goToURL`/`webSearch`
 confirm a browser is frontmost; click/scroll steps confirm the full-screen
 accessibility signature changed at all, against a baseline snapshot taken
-before the click. A verification failure becomes a failure-history line and
+before the click. The signature covers element *values* as well as labels
+and frames — a toggle flip is a value-only change (the switch's label and
+frame are identical on both sides of the click), and a value-blind
+signature read every successful toggle click as "nothing changed", so the
+failed check made the loop click the switch again, undoing the user's
+request until the failure cap aborted. Numeric values round to 2 decimals
+in the hash so a slider's float noise never reads as change. A
+verification failure becomes a failure-history line and
 the loop keeps going: honest failure beats a fake success. `typeText` and
 `pressKey` claims are still trusted as reported — an unverifiable false
 negative would just mean blind, destructive repetition.
@@ -805,16 +812,21 @@ Rules that keep the site honest:
   there before it gets marketed anywhere else on the page.
 - **One third party, on purpose.** The page loads Google Analytics
   (`G-FPVSRRZQTY`) and nothing else: fonts are self-hosted woff2 in
-  `docs/assets/fonts/`, and there are no CDNs, badge images or other embeds.
-  The analytics tag measures the *website*; it has no connection to the app,
-  which still ships with no telemetry of any kind. Don't let the two get
-  conflated in copy, and don't add a second external dependency casually.
-- **The photography and demo video are static, committed assets**
-  (`docs/assets/*.jpg`, `demo.mp4`), generated once with OpenAI's image/video
-  APIs using the git-ignored `.env` key. The site itself needs no key, ever;
-  the Secrets section above still holds. Regenerate only deliberately, keeping
-  the same filenames (`hero-office.jpg`, `gesture-closeup.jpg`,
-  `voice-command.jpg`, `demo.mp4`).
+  `docs/assets/fonts/`, the Product Hunt badge is a self-hosted SVG
+  (`docs/assets/ph-badge.svg`, still linking out to producthunt.com), and
+  there are no CDNs or other embeds. The analytics tag measures the
+  *website*; it has no connection to the app, which still ships with no
+  telemetry of any kind. Don't let the two get conflated in copy, and don't
+  add a second external dependency casually.
+- **The app screenshots and demo video are static, committed assets.**
+  `docs/assets/app-*.png` (`app-gesture-guide.png`, `app-menu.png`,
+  `app-settings-custom.png`, `app-settings-gestures.png`) are window captures
+  of the running app, shot with alpha intact; retake them by hand after a UI
+  change, keeping the same filenames. `docs/assets/demo.mp4` and its poster
+  `demo-poster.jpg` are a generated demo film, made once with OpenAI's video
+  API using the git-ignored `.env` key. The site itself needs no key, ever;
+  the Secrets section above still holds. Regenerate only deliberately,
+  keeping the same filenames.
 - **The download button points at the permanent asset URL**
   (`releases/latest/download/Pawvis.zip`), same rule as the README button:
   never version it, and it never needs editing per release.
