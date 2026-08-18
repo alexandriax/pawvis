@@ -204,7 +204,8 @@ meant for Pawvis and recovers the command before the hand-off.
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
 (always the latest release), unzip, and drag **Pawvis.app** to your
-Applications folder.
+Applications folder. Homebrew users: a cask scaffold lives in
+`Casks/pawvis.rb`, pending submission to homebrew/cask.
 
 Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
