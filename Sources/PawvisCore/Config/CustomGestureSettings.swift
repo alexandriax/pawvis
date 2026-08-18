@@ -6,26 +6,43 @@ import Foundation
 public struct CustomGestureBinding: Codable, Equatable, Sendable, Identifiable {
     public var gesture: CustomGesture
     public var action: GestureAction?
+    /// Per-app exceptions: in a listed app, that app's action fires instead
+    /// of `action`. With `action` nil, the gesture only fires in the listed
+    /// apps (see `PerAppAction`).
+    public var overrides: [AppActionOverride]
 
     /// One binding per gesture, so the gesture is the identity.
     public var id: CustomGesture { gesture }
 
-    public init(gesture: CustomGesture, action: GestureAction? = nil) {
+    public init(gesture: CustomGesture, action: GestureAction? = nil,
+                overrides: [AppActionOverride] = []) {
         self.gesture = gesture
         self.action = action
+        self.overrides = overrides
+    }
+
+    /// Whether the binding does anything in any app — the detection gate.
+    public var firesAnywhere: Bool {
+        PerAppAction.firesAnywhere(base: action, overrides: overrides)
     }
 
     enum CodingKeys: String, CodingKey {
-        case gesture, action
+        case gesture, action, overrides
     }
 
     /// `gesture` decodes strictly (a binding for a gesture this build doesn't
     /// know is dropped by the lossy list below); an unreadable action just
-    /// leaves the binding unbound.
+    /// leaves the binding unbound. The overrides list is element-tolerant
+    /// like the bindings list itself: one unreadable override drops alone.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         gesture = try c.decode(CustomGesture.self, forKey: .gesture)
         action = try? c.decodeIfPresent(GestureAction.self, forKey: .action)
+        overrides = []
+        if let v = try? c.decodeIfPresent([Lossy<AppActionOverride>].self, forKey: .overrides) {
+            var seen: Set<String> = []
+            overrides = v.compactMap(\.value).filter { seen.insert($0.bundleID).inserted }
+        }
     }
 }
 
@@ -60,18 +77,22 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
         bindings.first { $0.gesture == gesture }
     }
 
-    /// The action a fired gesture should perform, honoring the master switch.
-    public func action(for gesture: CustomGesture) -> GestureAction? {
-        guard enabled else { return nil }
-        return binding(for: gesture)?.action
+    /// The action a fired gesture should perform, honoring the master switch
+    /// and any per-app override matching the frontmost app.
+    public func action(for gesture: CustomGesture,
+                       frontmostBundleID: String? = nil) -> GestureAction? {
+        guard enabled, let binding = binding(for: gesture) else { return nil }
+        return PerAppAction.resolve(base: binding.action, overrides: binding.overrides,
+                                    frontmostBundleID: frontmostBundleID)
     }
 
     /// What the engine's detector should watch: only gestures whose binding
-    /// has an action, and nothing at all while the master switch is off.
+    /// does something somewhere (a base action, or at least one per-app
+    /// action), and nothing at all while the master switch is off.
     public func detectorConfig() -> CustomGestureDetector.Config {
         var config = CustomGestureDetector.Config()
         guard enabled else { return config }
-        config.enabled = Set(bindings.compactMap { $0.action != nil ? $0.gesture : nil })
+        config.enabled = Set(bindings.filter(\.firesAnywhere).map(\.gesture))
         config.wiggleReversals = wiggleReversals
         config.holdSeconds = holdSeconds
         config.flingTravel = flingTravel

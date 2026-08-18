@@ -654,8 +654,16 @@ final class PawvisController: ObservableObject {
     /// How long a fired gesture's confirmation stays in the pill.
     private static let gestureNoticeSeconds: TimeInterval = 2.5
 
+    /// The frontmost app's bundle ID, read once per gesture fire (cheap; no
+    /// observer, no polling). The per-app override decision belongs to the
+    /// app that's frontmost the moment the gesture lands.
+    private func frontmostBundleID() -> String? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    }
+
     private func performCustomGesture(_ gesture: CustomGesture, at time: TimeInterval) {
-        guard let action = settingsStore.settings.customGestures.action(for: gesture) else { return }
+        guard let action = settingsStore.settings.customGestures.action(
+            for: gesture, frontmostBundleID: frontmostBundleID()) else { return }
         let feedback = actionRunner.perform(action)
         Log.app.info("Custom gesture \(gesture.rawValue): \(feedback)")
         gestureNotice = (text: "🐾 \(feedback)", until: time + Self.gestureNoticeSeconds)
@@ -664,7 +672,8 @@ final class PawvisController: ObservableObject {
     private func performTrainedGesture(_ id: UUID, at time: TimeInterval) {
         guard settingsStore.settings.customGestures.enabled,
               let gesture = settingsStore.settings.trainedGestures.gesture(withID: id),
-              let action = gesture.action else { return }
+              let action = gesture.resolvedAction(frontmostBundleID: frontmostBundleID())
+        else { return }
         let feedback = actionRunner.perform(action)
         Log.app.info("Trained gesture \(gesture.name, privacy: .public): \(feedback)")
         gestureNotice = (text: "🐾 \(gesture.name): \(feedback)",
