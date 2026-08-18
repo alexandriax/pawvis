@@ -365,13 +365,29 @@ public final class GestureEngine {
         let tracked = assignAndSmooth(hands: usableHands, at: frame.time)
         lastHandTime = frame.time
 
-        // 2. Pick the primary (gesture-driving) hand, sticky across frames.
-        var primary: TrackedHand
-        if let id = primarySlotID, let match = tracked.first(where: { $0.slotID == id }) {
-            primary = match
-        } else {
-            primary = tracked.max(by: { $0.hand.confidence < $1.hand.confidence })!
-            primarySlotID = primary.slotID
+        // 2. Pick the primary (gesture-driving) hand, sticky across frames —
+        // in `.openHand` mode sticky *through the tracking-loss grace*, and
+        // past it the trigger is re-checked on whichever hand inherits
+        // (see `pickPrimary`).
+        guard var primary = pickPrimary(tracked, at: frame.time, events: &events) else {
+            // Hold frame: the armed hand is missing but inside the grace
+            // while a bystander stays visible. Everything the primary drives
+            // holds — cursor, press, trigger, scroll — the same hold a
+            // no-hands dropout gets; the subsystems that watch every tracked
+            // hand still tick.
+            if updateCrissCross(tracked, at: frame.time) {
+                events.append(.disableTracking)
+            }
+            events += processCustomGestures(tracked, at: frame.time)
+            overlay.hands = overlayHands(tracked)
+            overlay.armed = armed
+            overlay.cursor = cursor
+            overlay.grabbed = leftButton.engaged
+            overlay.rightGrabbed = rightButton.engaged
+            overlay.isDragging = press?.dragging ?? false
+            overlay.isScrolling = scroll.active
+            overlay.closingProgress = closingProgress(for: nil)
+            return (events, overlay)
         }
 
         // While waiting for the trigger, prefer whichever hand is showing it:
@@ -525,12 +541,7 @@ public final class GestureEngine {
         updateReach(rawHand: primary.raw)
 
         // 8. Overlay state.
-        overlay.hands = tracked.map { th in
-            var oh = OverlayHand()
-            oh.isPrimary = th.slotID == primarySlotID
-            for (joint, p) in th.hand.fingertips { oh.fingertips[joint] = p }
-            return oh
-        }
+        overlay.hands = overlayHands(tracked)
         overlay.armed = armed
         overlay.cursor = cursor
         overlay.grabbed = leftButton.engaged
@@ -541,6 +552,55 @@ public final class GestureEngine {
         overlay.dwellProgress = dwellProgress(at: frame.time)
 
         return (events, overlay)
+    }
+
+    // MARK: - Primary hand
+
+    /// The primary (gesture-driving) hand, sticky across frames — or nil for
+    /// a hold frame.
+    ///
+    /// In `.openHand` mode, armed, the claim on the cursor belongs to the
+    /// *hand*, not to whichever slot survives: while the armed hand is
+    /// missing but inside the tracking-loss grace (with a bystander still
+    /// visible, or `handleNoHands` would own the frame), nothing reassigns —
+    /// a one-frame Vision dropout must not hand the cursor, or a held drag,
+    /// to a hand that never showed the trigger. Past the grace the best
+    /// surviving hand inherits the slot; the departed hand's press — if any —
+    /// lands where it was held (one release, exactly as the all-hands-gone
+    /// grace does it); and control stays armed only if the inheriting hand is
+    /// showing the trigger *at that moment*, read through the same
+    /// engage-grade `armFeatures` check that arms. Otherwise control disarms
+    /// and the ceremony starts over — which is also what lets the open-hand
+    /// preference in `process` reclaim primary for the original hand when it
+    /// returns open. `.anyHand` and `.gesturesOnly` keep the immediate
+    /// reassignment they always had.
+    private func pickPrimary(_ tracked: [TrackedHand], at time: TimeInterval,
+                             events: inout [GestureEvent]) -> TrackedHand? {
+        if let id = primarySlotID, let match = tracked.first(where: { $0.slotID == id }) {
+            return match
+        }
+        if config.controlTrigger == .openHand, armed, let id = primarySlotID,
+           let lastSeen = slots.first(where: { $0.id == id })?.lastSeen,
+           time - lastSeen <= config.trackingLossGrace {
+            return nil // the armed hand may be right back: hold, never flap
+        }
+        let primary = tracked.max(by: { $0.hand.confidence < $1.hand.confidence })!
+        let inherited = primarySlotID != nil
+        primarySlotID = primary.slotID
+        if inherited, config.controlTrigger == .openHand, armed {
+            // The grace just expired: the departed hand's press releases
+            // where it was held, and its click chain and half-run button
+            // debounces go with it. Inheriting the slot is not opting in —
+            // a merely visible hand must never drag the cursor — so the
+            // survivor keeps control only if it is showing the trigger.
+            events += forceRelease(at: time)
+            armFrames = 0
+            disarmFrames = 0
+            if armFeatures(of: primary.hand)?.isOpenHand() != true {
+                armed = false
+            }
+        }
+        return primary
     }
 
     // MARK: - Control trigger
@@ -1068,6 +1128,18 @@ public final class GestureEngine {
         press = nil
     }
 
+    /// The overlay's per-hand dots. On a hold frame the primary slot's hand
+    /// is absent, so no rendered hand is marked primary — honest about who
+    /// is (not) driving.
+    private func overlayHands(_ tracked: [TrackedHand]) -> [OverlayHand] {
+        tracked.map { th in
+            var oh = OverlayHand()
+            oh.isPrimary = th.slotID == primarySlotID
+            for (joint, p) in th.hand.fingertips { oh.fingertips[joint] = p }
+            return oh
+        }
+    }
+
     // MARK: - No-hands path
 
     private func handleNoHands(at time: TimeInterval) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -1124,9 +1196,16 @@ public final class GestureEngine {
             effectiveInteractionBox = config.interactionBox // manual: verbatim, at once
             return
         }
-        // Never mid-press: the box is a coordinate transform, so moving it
-        // under a held button would slide whatever is being dragged.
-        guard press == nil, let scale = smoothedHandScale else { return }
+        // Never mid-press, and never mid-scroll: the box is a coordinate
+        // transform, so moving it under a held button would slide whatever
+        // is being dragged — and scroll deltas are measured from the very
+        // pointer this box maps (see `pointerPoint`), so a box drifting
+        // under an active scroll remaps a motionless palm to a moving y and
+        // scrolls on its own (measured: a hand-scale ramp of 0.15→0.30 under
+        // a fixed palm emitted ~0.19 screen-normalized units of phantom
+        // scroll before this guard existed). Released, either way, the
+        // drift picks back up.
+        guard press == nil, !scroll.active, let scale = smoothedHandScale else { return }
         let target = Self.targetBox(forHandScale: scale)
         func drift(_ edge: Double, toward goal: Double) -> Double {
             edge + (goal - edge) * Self.reachLerp

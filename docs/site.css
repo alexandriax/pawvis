@@ -407,7 +407,7 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
 .media-placeholder p { color: var(--ink-dim); font-size: 0.85rem; margin: 14px 0 0; }
 
 /* ----------------------------------------------------------- 9. Sections */
-.gestures, .voice, .privacy, .install {
+.gestures, .voice, .privacy, .usecases, .compare, .faq, .install {
   padding: clamp(72px, 10vw, 140px) 0 0;
 }
 
@@ -807,3 +807,76 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
     transform: none;
   }
 }
+
+/* ----------------------------------------------------------- 17. Use cases
+   Four equal cards read better as a 2x2 grid than a 3-across row with one
+   left stranded, so this overrides .card-grid's column count; the card
+   itself (border, glass, hover, glyph, h3, p) is untouched, same class. */
+.usecase-grid { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 620px) {
+  .usecase-grid { grid-template-columns: 1fr; }
+}
+
+/* ----------------------------------------------------------- 18. Compare
+   Reuses .card and .pillar-tag as-is; only the term/definition list inside
+   each card is new. */
+.compare-card dl {
+  margin: 0;
+}
+.compare-card dt {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--blue-light);
+  margin: 14px 0 4px;
+}
+.compare-card dd {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+/* ----------------------------------------------------------- 19. FAQ
+   Native <details>/<summary>, no JS: keyboard and screen-reader accessible
+   for free, and it degrades to plain open text if CSS fails to load. */
+.faq-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 2.6rem;
+  max-width: 50em;
+}
+.faq-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  padding: 2px 22px;
+}
+.faq-item summary {
+  padding: 18px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-display);
+  font-weight: 650;
+  font-size: 1.02rem;
+  color: var(--ink);
+  cursor: pointer;
+  list-style: none;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+  content: "+";
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  color: var(--blue-light);
+  transition: transform 0.2s ease;
+}
+.faq-item[open] summary::after { transform: rotate(45deg); }
+.faq-item p {
+  margin: 0 0 20px;
+  max-width: 44em;
+  font-size: 0.96rem;
+}
+.faq-item a { color: var(--blue-light); }

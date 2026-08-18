@@ -20,12 +20,15 @@ public struct GestureAction: Codable, Equatable, Sendable {
         case windowBottomLeftQuarter, windowBottomRightQuarter
         case windowMaximize, windowCenter, windowMinimize, windowNextDisplay
 
-        // Navigation & media — key chords (and the hardware play/pause key)
-        // sent to the frontmost app.
+        // Navigation & media — key chords, plus the hardware media keys:
+        // play/pause routes to whatever's playing; volume and brightness act
+        // on the system directly and macOS shows its own HUD for both.
         case pressReturn, pressEscape
         case browserBack, browserForward
         case previousTab, nextTab
         case playPause
+        case volumeUp, volumeDown, volumeMute
+        case brightnessUp, brightnessDown
 
         // Pawvis itself.
         case stopTracking, toggleVoiceControl
@@ -146,6 +149,11 @@ public struct GestureAction: Codable, Equatable, Sendable {
         case .previousTab: return "Previous tab"
         case .nextTab: return "Next tab"
         case .playPause: return "Play / pause"
+        case .volumeUp: return "Volume up"
+        case .volumeDown: return "Volume down"
+        case .volumeMute: return "Volume muted"
+        case .brightnessUp: return "Brightness up"
+        case .brightnessDown: return "Brightness down"
         case .stopTracking: return "Tracking stopped"
         case .toggleVoiceControl: return "Voice control toggled"
         case .openApp: return "Opening \(argument.trimmingCharacters(in: .whitespaces))"
@@ -169,7 +177,8 @@ extension GestureAction.Kind {
              .windowMaximize, .windowCenter, .windowMinimize, .windowNextDisplay:
             return .window
         case .pressReturn, .pressEscape, .browserBack, .browserForward,
-             .previousTab, .nextTab, .playPause:
+             .previousTab, .nextTab, .playPause,
+             .volumeUp, .volumeDown, .volumeMute, .brightnessUp, .brightnessDown:
             return .navigation
         case .stopTracking, .toggleVoiceControl:
             return .pawvis
@@ -215,6 +224,11 @@ extension GestureAction.Kind {
         case .previousTab: return "Previous tab"
         case .nextTab: return "Next tab"
         case .playPause: return "Play / pause media"
+        case .volumeUp: return "Volume up"
+        case .volumeDown: return "Volume down"
+        case .volumeMute: return "Mute"
+        case .brightnessUp: return "Brightness up"
+        case .brightnessDown: return "Brightness down"
         case .stopTracking: return "Stop hand tracking"
         case .toggleVoiceControl: return "Start / stop voice control"
         case .openApp: return "Open app"

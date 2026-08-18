@@ -195,13 +195,42 @@ public struct GestureConfig: Codable, Equatable, Sendable {
 
     /// Field-tolerant decoding: unknown/missing/mistyped fields (including
     /// keys from retired gestures) keep defaults instead of failing the tree.
+    ///
+    /// Every *numeric* field is additionally clamped to a sane range after
+    /// decoding — a well-typed value still isn't validated by `Codable`, and
+    /// an out-of-range one can wedge the engine rather than merely fail to
+    /// apply (measured: `pinchEngageRatio: 5.0` clicks an idle hand
+    /// immediately and makes the release threshold physically unreachable,
+    /// so the button never comes back up). Ranges come from the matching
+    /// settings-UI slider where `SettingsView` has one; where it doesn't,
+    /// from the field's own doc comment above. See `Comparable.clamped(to:)`.
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
         if let v = try? c.decodeIfPresent(ControlTrigger.self, forKey: .controlTrigger) { controlTrigger = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) { pinchEngageRatio = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseHysteresis) { pinchReleaseHysteresis = v }
-        if let v = try? c.decodeIfPresent(Int.self, forKey: .pinchDebounceFrames) { pinchDebounceFrames = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchEngageRatio) {
+            // Settings → Mouse → "Sensitivity" slider (`range: 0.30...0.60`).
+            // This is the reproduced bug: unclamped, 5.0 makes engageRatio
+            // (×1.5) exceed any real hand's idle ratio, so every hand reads
+            // as already-clicked, and releaseRatio becomes unreachable.
+            pinchEngageRatio = v.clamped(to: 0.30...0.60)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .pinchReleaseHysteresis) {
+            // No slider. `pinchReleaseRatio` = engage + this, and it must
+            // stay reachable by a real hand (idle ratio ~1.0) even at the
+            // engage slider's max (0.90) — the same "unreachable release"
+            // hazard as pinchEngageRatio, one field over. 0 is a legal
+            // (if chattery) floor; 0.2 keeps the worst case at 1.10.
+            pinchReleaseHysteresis = v.clamped(to: 0...0.2)
+        }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .pinchDebounceFrames) {
+            // No slider (fixed at 2). Must stay ≥ 1: "0 or negative disables
+            // all debounce" is this field's own version of the same hazard.
+            // Capped at 10 (~0.33 s at 30 fps) so a runaway value can't
+            // silently disable clicking, scrolling and the criss-cross wave
+            // in the other direction (frame counts that can never accrue).
+            pinchDebounceFrames = v.clamped(to: 1...10)
+        }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .rightClickEnabled) { rightClickEnabled = v }
         if let v = try? c.decodeIfPresent(Finger.self, forKey: .rightClickFinger) { rightClickFinger = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
@@ -209,19 +238,65 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .dwellClickEnabled) { dwellClickEnabled = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dwellSeconds) { dwellSeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .crissCrossDisableEnabled) { crissCrossDisableEnabled = v }
-        if let v = try? c.decodeIfPresent(Int.self, forKey: .crissCrossDisableCrossings) { crissCrossDisableCrossings = v }
-        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) { doubleClickInterval = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) { doubleClickSlop = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) { dragActivationDistance = v }
-        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dragStartDelay) { dragStartDelay = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .dragIntentDistance) { dragIntentDistance = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .jitterDeadband) { jitterDeadband = v }
+        // The pointer source is an enum: an unknown raw value already fails
+        // decode and keeps the palm default, so there is no range to clamp.
         if let v = try? c.decodeIfPresent(PointerSource.self, forKey: .pointerSource) { pointerSource = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .crissCrossDisableCrossings) {
+            // Settings → Tracking → "Crossings required" stepper (`in: 1...6`).
+            crissCrossDisableCrossings = v.clamped(to: 1...6)
+        }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .doubleClickInterval) {
+            // No slider. "macOS default ballpark" per the doc comment above;
+            // 0.1...1.5 s is a generous margin around that ballpark without
+            // letting the window collapse to zero or run away indefinitely.
+            doubleClickInterval = v.clamped(to: 0.1...1.5)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .doubleClickSlop) {
+            // No slider. Screen-normalized travel; 0.2 (a fifth of the
+            // screen) is already far past any useful slop over the 0.025
+            // default, and 0 is a legal (strict) floor.
+            doubleClickSlop = v.clamped(to: 0...0.2)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .dragActivationDistance) {
+            // No slider. Screen-normalized travel; same reasoning as
+            // doubleClickSlop, generous headroom over the 0.010 default.
+            dragActivationDistance = v.clamped(to: 0...0.1)
+        }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dragStartDelay) {
+            // Settings → Mouse → "Click vs. grab" slider (`range: 0...0.6`).
+            dragStartDelay = v.clamped(to: 0...0.6)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .dragIntentDistance) {
+            // No slider. Screen-normalized travel, generous headroom over
+            // the 0.030 default (kept above dragActivationDistance's own
+            // ceiling, matching the "further than activation" semantics).
+            dragIntentDistance = v.clamped(to: 0...0.15)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .jitterDeadband) {
+            // No slider. The reproduced bug's sibling hazard: "negative
+            // jitterDeadband floods move events." 0.05 keeps the ceiling
+            // well short of making the cursor feel stuck (default 0.004).
+            jitterDeadband = v.clamped(to: 0...0.05)
+        }
         if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) { smoothing = v }
         if let v = try? c.decodeIfPresent(PoseThresholds.self, forKey: .poseThresholds) { poseThresholds = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .minHandConfidence) { minHandConfidence = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .minJointConfidence) { minJointConfidence = v }
-        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .trackingLossGrace) { trackingLossGrace = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .minHandConfidence) {
+            // No slider. A Vision confidence score, physically bounded to
+            // [0, 1] — `frame.hands.filter { $0.confidence >= … }` drops
+            // every hand forever if this decodes above 1.0.
+            minHandConfidence = v.clamped(to: 0...1)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .minJointConfidence) {
+            // No slider. Same [0, 1] confidence semantics as minHandConfidence.
+            minJointConfidence = v.clamped(to: 0...1)
+        }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .trackingLossGrace) {
+            // No slider. The reproduced bug's other sibling: "negative
+            // trackingLossGrace releases held buttons on every one-frame
+            // dropout." Capped at 5 s so a runaway value can't leave a
+            // button held long after the hand — and the user — are gone.
+            trackingLossGrace = v.clamped(to: 0...5)
+        }
         if let v = try? c.decodeIfPresent(InteractionBox.self, forKey: .interactionBox) { interactionBox = v }
         if let v = try? c.decodeIfPresent(ReachMode.self, forKey: .reachMode) { reachMode = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .mirrorCamera) { mirrorCamera = v }

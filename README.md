@@ -4,7 +4,7 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free hand control</em></p>
+<p align="center"><em>Touch-free hand control for your Mac</em></p>
 
 ---
 
@@ -101,14 +101,30 @@ Mouse**.
   virtual desktops, open Mission Control or App Exposé, show the desktop,
   snap the focused window (halves, thirds, two-thirds, quarters, center,
   maximize, minimize, next display), press Return or Escape, go back or
+<<<<<<< HEAD
   forward, switch tabs, play/pause, stop tracking, toggle voice control,
   open any app, press any keyboard shortcut, or run a shell command you
   provide (it runs exactly as typed, as you). Every gesture row carries its
   own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
   fling distance), so a gesture that won't trigger, or triggers too easily,
-  can be dialed in on the spot. The pill at the top of the screen confirms
-  every fire, and the Gesture Guide illustrates every gesture in full, with
-  what it is currently set to do.
+  can be dialed in on the spot. Every binding can also carry **per-app
+  actions**: add apps to a gesture's row and give each its own action, and
+  whichever app is frontmost when the gesture fires decides which action
+  runs (a thumbs up can advance slides in Keynote and press your merge
+  shortcut in the browser). Leave the main action unassigned and the
+  gesture fires only in the apps you listed. The pill at the top of the
+  screen confirms every fire, and the Gesture Guide illustrates every
+  gesture in full, with what it is currently set to do.
+=======
+  forward, switch tabs, play/pause, adjust volume or brightness, stop
+  tracking, toggle voice control, open any app, press any keyboard shortcut,
+  or run a shell command you provide (it runs exactly as typed, as you).
+  Every gesture row carries its own collapsed **Tuning** section (hold time,
+  wiggle vigor, grab tightness, fling distance), so a gesture that won't
+  trigger, or triggers too easily, can be dialed in on the spot. The pill at
+  the top of the screen confirms every fire, and the Gesture Guide
+  illustrates every gesture in full, with what it is currently set to do.
+>>>>>>> origin/main
 - **Train your own gestures**: **Settings → Gestures → Train New Gesture**
   opens a camera window with your hand's tracking drawn live, a color per
   fingertip and a ring on the palm. Pick one hand or two, perform your
@@ -117,7 +133,8 @@ Mouse**.
   match live before saving. Trained gestures join the Gestures tab with an
   animated badge that replays the learned motion, and they work like the
   built-ins: rename them, remove them, tune how strictly they match, and
-  bind them to any action from the same catalog (or leave them unassigned).
+  bind them to any action from the same catalog (or leave them unassigned);
+  per-app actions work here too.
   Each one can also require a hold before it fires (the pill counts the
   hold down), and a priority switch decides who wins when a gesture looks
   like a click: by default trained gestures keep matching through clicks
@@ -194,6 +211,15 @@ always shut it off instantly. Pausing after the wake word is fine: a bare
 mangles the wake word ("Paw this…"), the on-device model confirms it was
 meant for Pawvis and recovers the command before the hand-off.
 
+By default the hand-off **confirms first**: the command is read back in the
+capsule ("Send to Claude Code: …?") and sent only after you say "Pawvis
+yes". "Pawvis no" cancels it, ten seconds of silence cancels it, and a new
+command replaces it; the read-back can be switched off in **Settings →
+Voice**. Agent runs also go **one at a time** (a second command while one is
+running is refused with a notice, not queued behind your back), and every
+hand-off is recorded with its outcome in a **local log** only your account
+can read (**Settings → Voice → Open agent log**).
+
 > [!WARNING]
 > **The agent relays are the sharpest thing in Pawvis. They do not ask.**
 > Claude Code and Codex are launched with their own permission prompts turned
@@ -206,8 +232,9 @@ meant for Pawvis and recovers the command before the hand-off.
 > recognition is not perfect, and a misheard command is still executed. It is
 > also the one mode that sends what you say beyond your Mac, to the agent CLI
 > you picked. It is off by default, and Pawvis makes you accept this warning
-> in a dialog before it will turn on. If you want a confirmation step before
-> actions run, stay on the on-device handler. Turning it on is your call and
+> in a dialog before it will turn on. The spoken read-back above is the one
+> check standing in front of a send, it can be switched off, and once a
+> command is sent nothing asks again. Turning it on is your call and
 > your responsibility: no liability is accepted for what an agent does with
 > your machine, however it was asked.
 
@@ -215,7 +242,8 @@ meant for Pawvis and recovers the command before the hand-off.
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
 (always the latest release), unzip, and drag **Pawvis.app** to your
-Applications folder.
+Applications folder. Homebrew users: a cask scaffold lives in
+`Casks/pawvis.rb`, pending submission to homebrew/cask.
 
 Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
@@ -256,7 +284,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # the full unit suite, keep it green
 swift build         # debug build
 ```
 
@@ -316,6 +344,9 @@ and tracking-loss recovery are covered by unit tests rather than by hand.
   leaves your Mac: enable it and everything you say after the wake word is
   sent to the agent CLI you chose (Claude Code or Codex) and runs there with
   permission checks bypassed. "Pawvis, stop listening" always stays local.
+  Each hand-off and its outcome is also recorded in a local audit log
+  (`~/Library/Application Support/Pawvis/agent-log.jsonl`, readable only by
+  your account), so you can always see exactly what was sent.
 
 ## License
 
