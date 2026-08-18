@@ -11,6 +11,10 @@ struct ScreenTarget {
     enum Source: String { case accessibility, ocr }
     var label: String
     var role: String
+    /// The element's live state (checkbox 0/1, slider number, selection),
+    /// compactly rendered — nil for OCR text and stateless elements. Feeds
+    /// the autopilot's change signature, never the prompt.
+    var value: String? = nil
     /// Global screen coordinates, top-left origin (AX/CGEvent space).
     var frame: CGRect
     var source: Source
@@ -63,6 +67,7 @@ struct ScreenContextSnapshot {
                     label: target.label,
                     kind: Self.kindWords[target.role] ?? "text",
                     actionable: ScreenContextProvider.actionableRoles.contains(target.role),
+                    value: target.value,
                     x: target.frame.minX, y: target.frame.minY,
                     width: target.frame.width, height: target.frame.height)
             })
@@ -300,6 +305,7 @@ final class ScreenContextProvider {
                     result.targets.append(ScreenTarget(
                         label: String(text.prefix(120)),
                         role: elementRole,
+                        value: stateValue(of: element, role: elementRole),
                         frame: f,
                         source: .accessibility))
                 }
@@ -410,6 +416,37 @@ final class ScreenContextProvider {
             return value
         }
         return nil
+    }
+
+    /// Roles whose selected state is a separate AXSelected boolean rather
+    /// than the AXValue number (tabs, table rows and cells).
+    private static let selectionRoles: Set<String> = ["AXTab", "AXRow", "AXCell"]
+
+    /// The element's live state, rendered compactly: AXValue (a checkbox's
+    /// 0/1/2, a slider's number, a field's text) plus AXSelected for the
+    /// roles that carry selection there. One extra attribute read per
+    /// *collected* target — the traversal's visit loop never pays it. This
+    /// is what makes a value-only change (a flipped toggle: same label,
+    /// same frame) visible to completion verification; the numbers are
+    /// normalized by the signature, not here.
+    private static func stateValue(of element: AXUIElement, role: String) -> String? {
+        var parts: [String] = []
+        if let value = copyAttribute(element, kAXValueAttribute) {
+            if let number = value as? NSNumber {
+                // Covers checkbox/radio state (CFBoolean or 0/1/2) and
+                // slider positions alike.
+                parts.append(number.stringValue)
+            } else if let string = value as? String, !string.isEmpty {
+                parts.append(String(string.prefix(80)))
+            }
+            // Other AXValue shapes (points, ranges, elements) carry no
+            // toggle-style state worth hashing.
+        }
+        if selectionRoles.contains(role),
+           let selected = copyAttribute(element, kAXSelectedAttribute) as? Bool {
+            parts.append(selected ? "selected" : "unselected")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     private static func frame(of element: AXUIElement) -> CGRect? {
