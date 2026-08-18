@@ -28,14 +28,38 @@ struct CustomGesturesTab: View {
 
             SettingToggle(
                 title: "Enable custom gestures",
-                caption: "Off pauses all of them without losing your setup.",
+                caption: "Off pauses all of them — trained ones included — without losing your setup.",
                 isOn: $store.settings.customGestures.enabled)
+
+            Divider()
+            trainedSection
 
             ForEach(Self.familyOrder, id: \.self) { family in
                 Divider()
                 familySection(family)
             }
         }
+    }
+
+    // MARK: Your trained gestures
+
+    private var trainedSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your Trained Gestures").font(.title3.bold())
+            CaptionText("Gestures you record yourself: Pawvis watches you perform one a few times, learns what stays the same, and matches it live. The badge replays the motion it learned — your palm and fingertips, in their tracking colors.")
+            VStack(alignment: .leading, spacing: 5) {
+                Button("Train New Gesture…") { TrainerWindow.show() }
+                CaptionText("Opens the camera. Pawvis control pauses while you train.")
+            }
+            if store.settings.trainedGestures.gestures.isEmpty {
+                CaptionText("Nothing trained yet.")
+            }
+            ForEach(store.settings.trainedGestures.gestures) { gesture in
+                TrainedGestureRow(store: store, id: gesture.id)
+                    .opacity(store.settings.customGestures.enabled ? 1 : 0.5)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func familySection(_ family: CustomGesture.Family) -> some View {
@@ -73,28 +97,7 @@ private struct CustomGestureRow: View {
                     .foregroundStyle(action == nil ? .secondary : .primary)
                 CaptionText(gesture.howTo)
 
-                Picker("", selection: kindSelection) {
-                    Text("Not assigned").tag(GestureAction.Kind?.none)
-                    ForEach(GestureAction.Category.allCases, id: \.self) { category in
-                        Section(category.displayName) {
-                            ForEach(kinds(in: category), id: \.self) { kind in
-                                Text(kind.displayName).tag(GestureAction.Kind?.some(kind))
-                            }
-                        }
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(maxWidth: 340, alignment: .leading)
-
-                if let action, action.kind.needsArgument {
-                    TextField(argumentPlaceholder(for: action.kind), text: argumentBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 340)
-                    if let hint = argumentHint(for: action) {
-                        CaptionText(hint)
-                    }
-                }
+                GestureActionPicker(action: actionBinding)
 
                 DisclosureGroup(isExpanded: $showTuning) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -153,6 +156,61 @@ private struct CustomGestureRow: View {
 
     // MARK: Action plumbing
 
+    private var actionBinding: Binding<GestureAction?> {
+        Binding(get: { action }, set: { setAction($0) })
+    }
+
+    private func setAction(_ newAction: GestureAction?) {
+        var bindings = store.settings.customGestures.bindings
+        if let newAction {
+            if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
+                bindings[index].action = newAction
+            } else {
+                bindings.append(CustomGestureBinding(gesture: gesture, action: newAction))
+            }
+        } else {
+            bindings.removeAll { $0.gesture == gesture }
+        }
+        store.settings.customGestures.bindings = bindings
+    }
+}
+
+// MARK: - The action picker (shared by built-in and trained rows)
+
+/// "What does this gesture do": the categorized action menu plus, for the
+/// argument-taking kinds, the argument field and its live hint. One
+/// component for the built-in library and the trained gestures, so the two
+/// can never drift.
+struct GestureActionPicker: View {
+    @Binding var action: GestureAction?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("", selection: kindSelection) {
+                Text("Not assigned").tag(GestureAction.Kind?.none)
+                ForEach(GestureAction.Category.allCases, id: \.self) { category in
+                    Section(category.displayName) {
+                        ForEach(kinds(in: category), id: \.self) { kind in
+                            Text(kind.displayName).tag(GestureAction.Kind?.some(kind))
+                        }
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(maxWidth: 340, alignment: .leading)
+
+            if let action, action.kind.needsArgument {
+                TextField(argumentPlaceholder(for: action.kind), text: argumentBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 340)
+                if let hint = argumentHint(for: action) {
+                    CaptionText(hint)
+                }
+            }
+        }
+    }
+
     private func kinds(in category: GestureAction.Category) -> [GestureAction.Kind] {
         GestureAction.Kind.allCases.filter { $0.category == category }
     }
@@ -162,13 +220,13 @@ private struct CustomGestureRow: View {
             get: { action?.kind },
             set: { kind in
                 guard let kind else {
-                    setAction(nil)
+                    action = nil
                     return
                 }
                 // Keep the typed argument when re-picking the same kind;
                 // start fresh when the kind changes.
                 let argument = action?.kind == kind ? (action?.argument ?? "") : ""
-                setAction(GestureAction(kind: kind, argument: argument))
+                action = GestureAction(kind: kind, argument: argument)
             })
     }
 
@@ -176,8 +234,8 @@ private struct CustomGestureRow: View {
         Binding(
             get: { action?.argument ?? "" },
             set: { text in
-                guard let action else { return }
-                setAction(GestureAction(kind: action.kind, argument: text))
+                guard let current = action else { return }
+                action = GestureAction(kind: current.kind, argument: text)
             })
     }
 
@@ -207,19 +265,116 @@ private struct CustomGestureRow: View {
             return nil
         }
     }
+}
 
-    private func setAction(_ newAction: GestureAction?) {
-        var bindings = store.settings.customGestures.bindings
-        if let newAction {
-            if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
-                bindings[index].action = newAction
-            } else {
-                bindings.append(CustomGestureBinding(gesture: gesture, action: newAction))
+// MARK: - One trained gesture
+
+/// A trained gesture's settings row: the animated badge, an editable name,
+/// the shared action picker, and the match-tolerance dial. Removal is a
+/// two-step (the takes behind a trained gesture can't be recovered).
+private struct TrainedGestureRow: View {
+    @ObservedObject var store: SettingsStore
+    let id: UUID
+    @State private var showTuning = false
+    @State private var confirmingRemoval = false
+    @State private var editingName = false
+
+    private var gesture: TrainedGesture? {
+        store.settings.trainedGestures.gesture(withID: id)
+    }
+
+    var body: some View {
+        if let gesture {
+            HStack(alignment: .top, spacing: 12) {
+                TrainedGestureBadge(gesture: gesture, size: 44)
+                    .frame(width: 44)
+                    .opacity(gesture.action == nil ? 0.55 : 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        // Display + pencil rather than a bare text field: a
+                        // field here becomes the tab's first responder, and
+                        // stray keystrokes silently rename the gesture.
+                        if editingName {
+                            TextField("Name", text: binding(\.name))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.headline)
+                                .frame(maxWidth: 240)
+                                .onSubmit { editingName = false }
+                        } else {
+                            Text(gesture.name).font(.headline)
+                            Button {
+                                editingName = true
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Rename")
+                        }
+                        Spacer()
+                        Text(gesture.handCount == 2 ? "Two hands" : "One hand")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            confirmingRemoval = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Remove this gesture")
+                    }
+
+                    GestureActionPicker(action: binding(\.action))
+
+                    DisclosureGroup(isExpanded: $showTuning) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            LabeledSlider(
+                                label: "Match tolerance",
+                                caption: "Left: only a performance very close to your takes counts. Right: looser matching — move this right if the gesture won't trigger, left if it triggers by accident.",
+                                value: binding(\.sensitivity),
+                                range: 0...1)
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        Text("Tuning")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
-        } else {
-            bindings.removeAll { $0.gesture == gesture }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
+            .confirmationDialog(
+                "Remove “\(gesture.name)”? Its training can't be recovered.",
+                isPresented: $confirmingRemoval, titleVisibility: .visible
+            ) {
+                Button("Remove Gesture", role: .destructive) {
+                    store.settings.trainedGestures.gestures.removeAll { $0.id == id }
+                }
+            }
         }
-        store.settings.customGestures.bindings = bindings
+    }
+
+    /// A binding into the gesture's record in settings, by id — stable
+    /// against reordering and other rows' removal.
+    private func binding<Value>(_ keyPath: WritableKeyPath<TrainedGesture, Value>) -> Binding<Value> where Value: Sendable {
+        Binding(
+            get: {
+                guard let gesture = store.settings.trainedGestures.gesture(withID: id) else {
+                    return TrainedGesture(name: "", handCount: 1, template: [],
+                                          duration: 0, baseThreshold: 0)[keyPath: keyPath]
+                }
+                return gesture[keyPath: keyPath]
+            },
+            set: { newValue in
+                guard let index = store.settings.trainedGestures.gestures
+                    .firstIndex(where: { $0.id == id }) else { return }
+                store.settings.trainedGestures.gestures[index][keyPath: keyPath] = newValue
+            })
     }
 }
 
