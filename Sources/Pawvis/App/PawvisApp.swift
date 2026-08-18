@@ -86,6 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let updateNotifier: UpdateNotifier
     private var voiceObservation: AnyCancellable?
     private var updaterObservation: AnyCancellable?
+    /// Re-checks while resident (below): `checkIfDue()` self-gates to once
+    /// per 24h (`UpdatePolicy`), so this only needs to be frequent enough
+    /// that a machine which never sleeps still gets checked daily.
+    private static let updateCheckInterval: TimeInterval = 6 * 60 * 60
+    private var updateCheckTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
 
     override init() {
         // AppDelegate is constructed on the main thread before the run loop starts.
@@ -194,6 +200,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // worth offering posts the system notification via `onUpdateFound`.
         updater.checkIfDue()
 
+        // That launch-time call is the ONLY automatic trigger unless we add
+        // more: Pawvis is a menu-bar app (LSUIElement) that starts at login
+        // and then runs indefinitely, so a laptop that's slept through
+        // several days instead of logging out never produces a second
+        // "launch" to hang a check off — it can silently go weeks without
+        // one. `checkIfDue()` already caps itself to once per 24h, so it's
+        // safe to call far more often than that: a periodic timer covers a
+        // machine that never sleeps, and a wake observer catches the more
+        // common case — days asleep — promptly instead of waiting for the
+        // next timer tick.
+        updateCheckTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.updateCheckInterval, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updater.checkIfDue() }
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updater.checkIfDue() }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -211,6 +238,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.shutdown()
+        updateCheckTimer?.invalidate()
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
         AgentSessionManager.shared.shutdownOnAppQuit()
     }
 }
