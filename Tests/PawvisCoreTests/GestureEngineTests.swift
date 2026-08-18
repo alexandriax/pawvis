@@ -199,6 +199,168 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertFalse(bogus.scrollInvert)
     }
 
+    // MARK: - Decode-time clamping
+    //
+    // Field-tolerant decoding survives an unreadable *key*; these tests
+    // cover its other half — a well-typed but out-of-range *value* — which
+    // used to decode cleanly and reach the engine unchecked.
+
+    /// The reproduced bug, verbatim: `pinchEngageRatio: 5.0` decoded
+    /// cleanly, made an idle open hand read as already-clicked (idle ratio
+    /// ~1.0 sits under engageRatio 7.5), and pushed the release threshold
+    /// (engage + hysteresis) out of any real hand's reach — the left button
+    /// never came back up. Clamping to the Sensitivity slider's own range
+    /// removes both halves of that at once.
+    func testPinchEngageRatioClampsToSliderMaxAndCannotWedgeTheEngine() throws {
+        let decoded = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchEngageRatio":5.0}"#.utf8))
+        XCTAssertEqual(decoded.pinchEngageRatio, 0.60, "clamped to the Sensitivity slider's max")
+        XCTAssertLessThan(decoded.releaseRatio, 1.0,
+                          "release must stay under a real hand's idle ratio, or it can never fire")
+
+        // Engine smoke test at the clamped worst case (the slider's max —
+        // the loosest a corrupted file can still make it): a real tap must
+        // both engage and release, proving the button cannot latch down.
+        var config = decoded
+        config.interactionBox = InteractionBox(xMin: 0, xMax: 1, yMin: 0, yMax: 1)
+        config.reachMode = .manual
+        config.mirrorCamera = false
+        config.smoothing = OneEuroFilter.Params(minCutoff: 1e9, beta: 0, dCutoff: 1e9)
+        config.controlTrigger = .anyHand
+        engine = GestureEngine(config: config)
+
+        let events = tapClick(from: 0)
+        XCTAssertEqual(downs(events).count, 1, "a real tap still engages the button")
+        XCTAssertEqual(ups(events).count, 1,
+                       "…and releases it — unclamped, this release threshold was unreachable")
+    }
+
+    func testPinchReleaseHysteresisClampsToKeepReleaseReachable() throws {
+        // No slider for this one; the hazard is the same shape one field
+        // over — pinchReleaseRatio = engage + hysteresis, so a huge
+        // hysteresis makes release unreachable exactly like the reproduced
+        // bug did, even with pinchEngageRatio itself now clamped.
+        let tooLoose = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchReleaseHysteresis":9.0}"#.utf8))
+        XCTAssertEqual(tooLoose.pinchReleaseHysteresis, 0.2)
+
+        let negative = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchReleaseHysteresis":-3.0}"#.utf8))
+        XCTAssertEqual(negative.pinchReleaseHysteresis, 0)
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchReleaseHysteresis":0.12}"#.utf8))
+        XCTAssertEqual(inRange.pinchReleaseHysteresis, 0.12, accuracy: 1e-9,
+                       "in-range values decode untouched")
+    }
+
+    func testPinchDebounceFramesClampsAndCannotDisableDebounce() throws {
+        // "pinchDebounceFrames <= 0 disables all debounce" — the bug
+        // report's named sibling hazard.
+        let disabled = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchDebounceFrames":0}"#.utf8))
+        XCTAssertEqual(disabled.pinchDebounceFrames, 1, "0 must not disable debounce entirely")
+
+        let negative = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchDebounceFrames":-5}"#.utf8))
+        XCTAssertEqual(negative.pinchDebounceFrames, 1)
+
+        let runaway = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchDebounceFrames":999999}"#.utf8))
+        XCTAssertEqual(runaway.pinchDebounceFrames, 10, "a runaway value must not disable it the other way")
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"pinchDebounceFrames":4}"#.utf8))
+        XCTAssertEqual(inRange.pinchDebounceFrames, 4, "in-range values decode untouched")
+    }
+
+    func testJitterDeadbandAndTrackingLossGraceClampToNonNegative() throws {
+        // The bug report's two other named siblings: "negative jitterDeadband
+        // floods move events" and "negative trackingLossGrace releases held
+        // buttons on every one-frame dropout."
+        let bogus = try JSONDecoder().decode(
+            GestureConfig.self,
+            from: Data(#"{"jitterDeadband":-1.0,"trackingLossGrace":-1.0}"#.utf8))
+        XCTAssertEqual(bogus.jitterDeadband, 0)
+        XCTAssertEqual(bogus.trackingLossGrace, 0)
+
+        let runaway = try JSONDecoder().decode(
+            GestureConfig.self,
+            from: Data(#"{"jitterDeadband":50,"trackingLossGrace":9999}"#.utf8))
+        XCTAssertEqual(runaway.jitterDeadband, 0.05, "too large makes the cursor feel stuck instead")
+        XCTAssertEqual(runaway.trackingLossGrace, 5,
+                       "too large leaves a button held long after the hand is gone")
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self,
+            from: Data(#"{"jitterDeadband":0.01,"trackingLossGrace":0.5}"#.utf8))
+        XCTAssertEqual(inRange.jitterDeadband, 0.01, accuracy: 1e-9, "in-range values decode untouched")
+        XCTAssertEqual(inRange.trackingLossGrace, 0.5, accuracy: 1e-9)
+    }
+
+    func testCrissCrossDisableCrossingsClampsToStepperRange() throws {
+        let tooFew = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"crissCrossDisableCrossings":0}"#.utf8))
+        XCTAssertEqual(tooFew.crissCrossDisableCrossings, 1)
+
+        let tooMany = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"crissCrossDisableCrossings":50}"#.utf8))
+        XCTAssertEqual(tooMany.crissCrossDisableCrossings, 6)
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"crissCrossDisableCrossings":3}"#.utf8))
+        XCTAssertEqual(inRange.crissCrossDisableCrossings, 3, "in-range values decode untouched")
+    }
+
+    func testClickTimingFieldsClampToSaneRanges() throws {
+        let bogus = try JSONDecoder().decode(
+            GestureConfig.self, from: Data("""
+            {"doubleClickInterval": 99, "doubleClickSlop": 99,
+             "dragActivationDistance": 99, "dragStartDelay": 99, "dragIntentDistance": 99}
+            """.utf8))
+        XCTAssertEqual(bogus.doubleClickInterval, 1.5)
+        XCTAssertEqual(bogus.doubleClickSlop, 0.2)
+        XCTAssertEqual(bogus.dragActivationDistance, 0.1)
+        XCTAssertEqual(bogus.dragStartDelay, 0.6, "Click vs. grab slider max")
+        XCTAssertEqual(bogus.dragIntentDistance, 0.15)
+
+        let negative = try JSONDecoder().decode(
+            GestureConfig.self, from: Data("""
+            {"doubleClickInterval": -1, "doubleClickSlop": -1,
+             "dragActivationDistance": -1, "dragStartDelay": -1, "dragIntentDistance": -1}
+            """.utf8))
+        XCTAssertEqual(negative.doubleClickInterval, 0.1)
+        XCTAssertEqual(negative.doubleClickSlop, 0)
+        XCTAssertEqual(negative.dragActivationDistance, 0)
+        XCTAssertEqual(negative.dragStartDelay, 0, "Click vs. grab slider min")
+        XCTAssertEqual(negative.dragIntentDistance, 0)
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self, from: Data("""
+            {"doubleClickInterval": 0.5, "doubleClickSlop": 0.05,
+             "dragActivationDistance": 0.02, "dragStartDelay": 0.4, "dragIntentDistance": 0.05}
+            """.utf8))
+        XCTAssertEqual(inRange.doubleClickInterval, 0.5, accuracy: 1e-9, "in-range values decode untouched")
+        XCTAssertEqual(inRange.doubleClickSlop, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(inRange.dragActivationDistance, 0.02, accuracy: 1e-9)
+        XCTAssertEqual(inRange.dragStartDelay, 0.4, accuracy: 1e-9)
+        XCTAssertEqual(inRange.dragIntentDistance, 0.05, accuracy: 1e-9)
+    }
+
+    func testConfidenceFieldsClampToUnitRange() throws {
+        // No slider; these gate `frame.hands.filter { $0.confidence >= … }`
+        // and the per-joint read, both genuine Vision confidences in [0, 1].
+        let bogus = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"minHandConfidence":5.0,"minJointConfidence":-2.0}"#.utf8))
+        XCTAssertEqual(bogus.minHandConfidence, 1.0, "above 1.0 drops every hand forever")
+        XCTAssertEqual(bogus.minJointConfidence, 0.0)
+
+        let inRange = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"minHandConfidence":0.5,"minJointConfidence":0.4}"#.utf8))
+        XCTAssertEqual(inRange.minHandConfidence, 0.5, accuracy: 1e-9, "in-range values decode untouched")
+        XCTAssertEqual(inRange.minJointConfidence, 0.4, accuracy: 1e-9)
+    }
+
     // MARK: - Cursor movement
 
     func testCursorFollowsHand() {

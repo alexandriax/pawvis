@@ -49,6 +49,18 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     /// Field-tolerant decoding, matching GestureConfig's behavior. Keys from
     /// earlier builds (stop phrases, typing pause, delta typing) are simply
     /// ignored — one-shot commands made them obsolete.
+    ///
+    /// Most numeric fields here are app-layer UI timers, not engine state
+    /// machines, and already fail safe at their point of use (`vadSilenceMs`
+    /// is floored by `SpeechEngine`; `transcriptOverlaySeconds` only changes
+    /// how long a capsule stays visible), so they're left unclamped —
+    /// they're the "benign cosmetic numbers" this pattern deliberately
+    /// leaves alone. `agentTimeoutSeconds` is the exception: it reaches
+    /// `AgentSessionManager.run`, which does `Int(max(30, timeout))` — a
+    /// huge decoded value (a corrupted or hand-edited file has no reason not
+    /// to contain one) overflows that `Double`-to-`Int` conversion and traps,
+    /// crashing the app the moment a voice command runs an agent. Clamping
+    /// here closes that.
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -62,6 +74,11 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Double.self, forKey: .transcriptOverlaySeconds) { transcriptOverlaySeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayManualDismiss) { transcriptOverlayManualDismiss = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .agentExecutor) { agentExecutor = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .agentTimeoutSeconds) { agentTimeoutSeconds = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .agentTimeoutSeconds) {
+            // "Agent timeout" slider (`range: 30...300`) — also the ceiling
+            // that keeps AgentSessionManager's `Int(max(30, timeout))` from
+            // trapping on an oversized decoded value.
+            agentTimeoutSeconds = v.clamped(to: 30...300)
+        }
     }
 }
