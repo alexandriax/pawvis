@@ -385,26 +385,19 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   background: linear-gradient(165deg, rgba(255, 255, 255, 0.08), transparent 38%);
   pointer-events: none;
 }
+.screen-frame iframe,
 .screen-frame video,
 .screen-frame img {
+  display: block;
   border-radius: calc(var(--radius) - 8px);
   width: 100%;
 }
-
-/* Placeholder if both the film and the photo are unavailable */
-.media-placeholder {
-  border-radius: calc(var(--radius) - 8px);
+.screen-frame iframe {
   aspect-ratio: 16 / 9;
-  display: grid;
-  place-items: center;
-  gap: 0;
-  background:
-    radial-gradient(60% 90% at 30% 20%, rgba(139, 92, 246, 0.35), transparent 70%),
-    radial-gradient(50% 80% at 75% 70%, rgba(14, 165, 233, 0.28), transparent 70%),
-    var(--bg-raised);
+  height: auto;
+  border: 0;
+  background: var(--bg-raised);
 }
-.media-placeholder img { width: clamp(84px, 14vw, 140px); height: auto; border-radius: 20%; }
-.media-placeholder p { color: var(--ink-dim); font-size: 0.85rem; margin: 14px 0 0; }
 
 /* ----------------------------------------------------------- 9. Sections */
 .gestures, .voice, .privacy, .usecases, .compare, .faq, .install {
