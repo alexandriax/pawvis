@@ -1,3 +1,4 @@
+import AppKit
 import PawvisCore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -52,6 +53,7 @@ struct CustomGesturesTab: View {
                 Button("Train New Gesture…") { TrainerWindow.show() }
                 CaptionText("Opens the camera. Pawvis control pauses while you train.")
             }
+            TrainedGestureImportExportRow(store: store)
             SettingToggle(
                 title: "Trained gestures take priority over clicks",
                 caption: "Matching keeps running through clicks and scrolls, and once a match is recognized and dwelling, finger dips can't click. A dip that lands before recognition can still click — give the gesture a hold time and the block covers the rest. Off: the mouse always wins, and a gesture that curls your index finger may click instead of firing.",
@@ -155,7 +157,7 @@ private struct CustomGestureRow: View {
         case .grabFling:
             LabeledSlider(
                 label: "Grab tightness",
-                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight pinch. Right: a looser bunch counts — try moving this right if grabs won't register.",
+                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight cluster. Right: a looser bunch counts — try moving this right if grabs won't register.",
                 value: $store.settings.customGestures.gatherSpread,
                 range: 0.22...0.50)
             LabeledSlider(
@@ -413,6 +415,89 @@ private enum AppOverrideIcon {
         }
         cache[bundleID] = image
         return image
+// MARK: - Export / import
+
+/// Trained templates live only in this settings blob — there's no other copy
+/// anywhere, and no way to recreate one short of re-recording. Export writes
+/// every trained gesture (bound action included) to a `.pawvisgestures`
+/// file; Import reads one back and merges it into the current library as
+/// copies, never overwrites. Quiet by design: two buttons and a caption that
+/// doubles as the outcome report, matching how the rest of this tab reports
+/// state inline rather than with alerts.
+private struct TrainedGestureImportExportRow: View {
+    @ObservedObject var store: SettingsStore
+    @State private var feedback: String?
+
+    private static let fileType = UTType(filenameExtension: "pawvisgestures") ?? .data
+
+    private static let defaultCaption =
+        "Export saves every trained gesture, with its assigned action, to a file you can back up or share. Import merges another file's gestures into yours as copies: a name already in use gets renumbered, and nothing here is ever overwritten."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 10) {
+                Button("Export…") { exportGestures() }
+                    .disabled(store.settings.trainedGestures.gestures.isEmpty)
+                Button("Import…") { importGestures() }
+            }
+            CaptionText(feedback ?? Self.defaultCaption)
+        }
+    }
+
+    private func exportGestures() {
+        let gestures = store.settings.trainedGestures.gestures
+        guard !gestures.isEmpty else { return }
+        guard let data = try? PawvisGestureFile(gestures: gestures).encoded() else {
+            feedback = "Couldn't prepare the export"
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Export Trained Gestures"
+        panel.nameFieldStringValue = "Pawvis Gestures.pawvisgestures"
+        panel.allowedContentTypes = [Self.fileType]
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url, options: .atomic)
+                feedback = "Exported \(gestures.count) gesture\(gestures.count == 1 ? "" : "s")"
+            } catch {
+                feedback = "Couldn't write the file: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func importGestures() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Trained Gestures"
+        panel.allowedContentTypes = [Self.fileType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: url)
+                let file = try PawvisGestureFile.decoded(from: data)
+                guard !file.gestures.isEmpty else {
+                    feedback = "No gestures found in that file"
+                    return
+                }
+                let result = TrainedGestureImport.merge(
+                    existing: store.settings.trainedGestures.gestures,
+                    importing: file.gestures)
+                store.settings.trainedGestures.gestures = result.gestures
+                feedback = summary(for: result)
+            } catch {
+                feedback = "Couldn't import: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func summary(for result: TrainedGestureImport.Result) -> String {
+        let count = result.added.count
+        let noun = count == 1 ? "gesture" : "gestures"
+        guard result.renamedCount > 0 else { return "Imported \(count) \(noun)" }
+        return "Imported \(count) \(noun) (\(result.renamedCount) renamed)"
     }
 }
 

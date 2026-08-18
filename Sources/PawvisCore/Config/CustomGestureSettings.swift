@@ -108,6 +108,14 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
     /// Field-tolerant decoding, like every settings section; the bindings
     /// list is additionally element-tolerant, so one unreadable binding (say,
     /// from a newer build's gesture) drops alone instead of resetting the list.
+    ///
+    /// The four tuning dials are family-wide thresholds fed straight into
+    /// `CustomGestureDetector`'s state machines (wiggle, hold-pose,
+    /// grab-fling), so each is clamped to its settings-UI slider/stepper
+    /// range after decoding — the same hazard, and the same fix, as
+    /// `GestureConfig`: an out-of-range value doesn't just fail to apply, it
+    /// can make a whole gesture family permanently unfireable (or, in the
+    /// grab/fling case, fire on nearly anything).
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -116,10 +124,22 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
             var seen: Set<CustomGesture> = []
             bindings = v.compactMap(\.value).filter { seen.insert($0.gesture).inserted }
         }
-        if let v = try? c.decodeIfPresent(Int.self, forKey: .wiggleReversals) { wiggleReversals = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .holdSeconds) { holdSeconds = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .flingTravel) { flingTravel = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .gatherSpread) { gatherSpread = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .wiggleReversals) {
+            // "Wiggle vigor" stepper (`in: 2...5`).
+            wiggleReversals = v.clamped(to: 2...5)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .holdSeconds) {
+            // "Hold time" slider (`range: 0.2...0.8`).
+            holdSeconds = v.clamped(to: 0.2...0.8)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .flingTravel) {
+            // "Fling distance" slider (`range: 0.10...0.30`).
+            flingTravel = v.clamped(to: 0.10...0.30)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .gatherSpread) {
+            // "Grab tightness" slider (`range: 0.22...0.50`).
+            gatherSpread = v.clamped(to: 0.22...0.50)
+        }
     }
 }
 

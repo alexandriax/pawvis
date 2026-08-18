@@ -19,6 +19,28 @@ final class GestureActionTests: XCTestCase {
                        KeyChord(key: "t", modifiers: [.command, .shift]))
         XCTAssertNil(GestureAction(kind: .windowLeftHalf).keyChord)
         XCTAssertNil(GestureAction(kind: .openApp, argument: "Safari").keyChord)
+        // Volume/brightness ride the hardware media-key path like
+        // play/pause — not synthesized key chords.
+        XCTAssertNil(GestureAction(kind: .volumeUp).keyChord)
+        XCTAssertNil(GestureAction(kind: .volumeDown).keyChord)
+        XCTAssertNil(GestureAction(kind: .volumeMute).keyChord)
+        XCTAssertNil(GestureAction(kind: .brightnessUp).keyChord)
+        XCTAssertNil(GestureAction(kind: .brightnessDown).keyChord)
+    }
+
+    func testVolumeAndBrightnessAreMediaKeysInNavigation() {
+        let mediaKinds: [GestureAction.Kind] = [
+            .volumeUp, .volumeDown, .volumeMute, .brightnessUp, .brightnessDown,
+        ]
+        for kind in mediaKinds {
+            XCTAssertEqual(kind.category, .navigation)
+            XCTAssertFalse(kind.needsArgument)
+        }
+        XCTAssertEqual(GestureAction(kind: .volumeUp).feedback, "Volume up")
+        XCTAssertEqual(GestureAction(kind: .volumeDown).feedback, "Volume down")
+        XCTAssertEqual(GestureAction(kind: .volumeMute).feedback, "Volume muted")
+        XCTAssertEqual(GestureAction(kind: .brightnessUp).feedback, "Brightness up")
+        XCTAssertEqual(GestureAction(kind: .brightnessDown).feedback, "Brightness down")
     }
 
     func testEveryKindHasCategoryNameAndFeedback() {
@@ -136,6 +158,7 @@ final class WindowPlacementTests: XCTestCase {
         XCTAssertNil(place(.windowNextDisplay))
         XCTAssertNil(place(.desktopLeft))
         XCTAssertNil(place(.openApp))
+        XCTAssertNil(place(.volumeUp))
     }
 
     func testTranslatedKeepsRelativePlacement() {
@@ -188,6 +211,37 @@ final class CustomGestureSettingsTests: XCTestCase {
         XCTAssertEqual(config.holdSeconds, 0.6)
         XCTAssertEqual(config.flingTravel, 0.25)
         XCTAssertEqual(config.gatherSpread, 0.45)
+    }
+
+    /// The four family-wide tuning dials feed `CustomGestureDetector`'s state
+    /// machines directly (wiggle, hold-pose, grab-fling); an out-of-range
+    /// decoded value can make a whole gesture family permanently unfireable,
+    /// the same shape of hazard `GestureConfig` has. Each is clamped to its
+    /// own settings-UI slider/stepper range.
+    func testTuningFieldsClampToSliderRangesOnDecode() throws {
+        let bogus = try JSONDecoder().decode(CustomGestureSettings.self, from: Data("""
+        {"wiggleReversals": 99, "holdSeconds": 99, "flingTravel": 99, "gatherSpread": 99}
+        """.utf8))
+        XCTAssertEqual(bogus.wiggleReversals, 5, "Wiggle vigor stepper max")
+        XCTAssertEqual(bogus.holdSeconds, 0.8, "Hold time slider max")
+        XCTAssertEqual(bogus.flingTravel, 0.30, "Fling distance slider max")
+        XCTAssertEqual(bogus.gatherSpread, 0.50, "Grab tightness slider max")
+
+        let negative = try JSONDecoder().decode(CustomGestureSettings.self, from: Data("""
+        {"wiggleReversals": -1, "holdSeconds": -1, "flingTravel": -1, "gatherSpread": -1}
+        """.utf8))
+        XCTAssertEqual(negative.wiggleReversals, 2, "Wiggle vigor stepper min")
+        XCTAssertEqual(negative.holdSeconds, 0.2, "Hold time slider min")
+        XCTAssertEqual(negative.flingTravel, 0.10, "Fling distance slider min")
+        XCTAssertEqual(negative.gatherSpread, 0.22, "Grab tightness slider min")
+
+        let inRange = try JSONDecoder().decode(CustomGestureSettings.self, from: Data("""
+        {"wiggleReversals": 4, "holdSeconds": 0.5, "flingTravel": 0.2, "gatherSpread": 0.3}
+        """.utf8))
+        XCTAssertEqual(inRange.wiggleReversals, 4, "in-range values decode untouched")
+        XCTAssertEqual(inRange.holdSeconds, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(inRange.flingTravel, 0.2, accuracy: 1e-9)
+        XCTAssertEqual(inRange.gatherSpread, 0.3, accuracy: 1e-9)
     }
 
     func testUnknownBindingDropsAloneAndDuplicatesCollapse() throws {

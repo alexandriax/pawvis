@@ -27,7 +27,7 @@ final class UpdateChecker: ObservableObject {
         case checking
         case upToDate
         case available(Release)
-        case downloading(Double)   // 0…1
+        case downloading(Double?)  // 0…1, or nil while the size is still unknown
         case installing
         case readyToRelaunch
         case failed(String)
@@ -70,6 +70,14 @@ final class UpdateChecker: ObservableObject {
 
     init() {
         lastChecked = defaults.object(forKey: Key.lastChecked) as? Date
+        // A previous run may have quit expecting to come back up as a new
+        // version and instead had to roll back mid-swap — that failure has
+        // nowhere to surface except the next launch. Reuses the ordinary
+        // "failed" state rather than adding a dedicated UI for it.
+        if let failure = SelfUpdater.consumeFailureMarker() {
+            Log.app.error("Update rolled back: \(failure, privacy: .public)")
+            state = .failed(failure)
+        }
     }
 
     // MARK: - Checking
@@ -187,13 +195,25 @@ final class UpdateChecker: ObservableObject {
         downloadTask = Task { await download(release: release, from: downloadURL) }
     }
 
+    /// Disk writes during download are batched to this size rather than one
+    /// syscall per byte; it also sets the granularity at which progress is
+    /// reconsidered (see `downloadWithProgress`).
+    private static let downloadBufferSize = 1 << 16   // 64 KiB
+    /// Progress-update throttling: `state` — a `@Published` property — is
+    /// only touched at least every this-much fraction of progress…
+    private static let progressStep = 0.02
+    /// …or at least this often by wall-clock time, whichever comes first.
+    private static let progressInterval: TimeInterval = 0.25
+
     private func download(release: Release, from url: URL) async {
-        state = .downloading(0)
+        // Optimistic immediate feedback; downloadWithProgress refines this
+        // to determinate as soon as the response headers are in.
+        state = .downloading(nil)
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pawvis-update-\(UUID().uuidString).zip")
+        defer { try? FileManager.default.removeItem(at: tempFile) }
         do {
-            let (tempFile, response) = try await URLSession.shared.download(from: url)
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                throw UpdateError.message("Download failed (HTTP \(http.statusCode))")
-            }
+            try await downloadWithProgress(from: url, to: tempFile)
             if let checksumURL = release.checksumURL {
                 try await verifyChecksum(of: tempFile, against: checksumURL)
             }
@@ -207,6 +227,63 @@ final class UpdateChecker: ObservableObject {
         } catch {
             Log.app.error("Update install failed: \(error.localizedDescription, privacy: .public)")
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Streams `url` to `destination`, reporting fractional progress through
+    /// `state` as bytes arrive — instead of `URLSession.download(from:)`,
+    /// whose async form only returns once the whole file is on disk, which is
+    /// what left the progress bar stuck at empty.
+    ///
+    /// `URLResponse.expectedContentLength` is `-1` when the server doesn't
+    /// send a `Content-Length` (e.g. chunked transfer encoding); that case is
+    /// reported as `.downloading(nil)`, which the UI renders as indeterminate
+    /// rather than a bar frozen at some fraction that can never be computed.
+    private func downloadWithProgress(from url: URL, to destination: URL) async throws {
+        let (bytes, response) = try await URLSession.shared.bytes(from: url)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw UpdateError.message("Download failed (HTTP \(http.statusCode))")
+        }
+        let expectedLength = response.expectedContentLength
+        state = expectedLength > 0 ? .downloading(0) : .downloading(nil)
+
+        guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+            throw UpdateError.message("Could not create a file for the download")
+        }
+        let handle = try FileHandle(forWritingTo: destination)
+        defer { try? handle.close() }
+
+        var diskBuffer = Data()
+        diskBuffer.reserveCapacity(Self.downloadBufferSize)
+        var received: Int64 = 0
+        var lastReportedFraction = 0.0
+        var lastReportedAt = Date()
+
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            diskBuffer.append(byte)
+            received += 1
+            // Flushing (rather than writing every byte) also sets how often
+            // progress is reconsidered below, so `Date()` isn't called on
+            // every one of what can be tens of millions of bytes.
+            guard diskBuffer.count >= Self.downloadBufferSize else { continue }
+            try handle.write(contentsOf: diskBuffer)
+            diskBuffer.removeAll(keepingCapacity: true)
+
+            guard expectedLength > 0 else { continue }
+            let fraction = min(1, Double(received) / Double(expectedLength))
+            let now = Date()
+            guard fraction - lastReportedFraction >= Self.progressStep
+                || now.timeIntervalSince(lastReportedAt) >= Self.progressInterval else { continue }
+            state = .downloading(fraction)
+            lastReportedFraction = fraction
+            lastReportedAt = now
+        }
+        if !diskBuffer.isEmpty {
+            try handle.write(contentsOf: diskBuffer)
+        }
+        if expectedLength > 0 {
+            state = .downloading(1)
         }
     }
 

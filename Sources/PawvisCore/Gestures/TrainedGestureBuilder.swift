@@ -69,6 +69,15 @@ public final class TakeRecorder {
     private var handCount = 1
     private var times: [TimeInterval] = []
     private var frames: [[GestureTrace.HandSnapshot]] = []
+    /// A second, longer accumulation kept alongside `times`/`frames` while
+    /// waiting — reaching all the way back to `staticGrace`. Only a static
+    /// take's `finish` draws on it, and only when the short pre-roll above
+    /// doesn't already have enough frames: at low frame rates 0.35s isn't
+    /// enough wall-clock time to gather `minFrames` samples, no matter how
+    /// long the pose is held. Keeping it separate means the short pre-roll
+    /// (and motion takes, which start near it) never has to compromise.
+    private var staticTimes: [TimeInterval] = []
+    private var staticFrames: [[GestureTrace.HandSnapshot]] = []
     private var lastVector: [Double]?
     private var stillSince: TimeInterval?
     private var armedAt: TimeInterval = -.infinity
@@ -82,6 +91,8 @@ public final class TakeRecorder {
         phase = .waiting
         times = []
         frames = []
+        staticTimes = []
+        staticFrames = []
         lastVector = nil
         stillSince = nil
         armedAt = time
@@ -113,6 +124,8 @@ public final class TakeRecorder {
 
         times.append(time)
         frames.append(frame)
+        staticTimes.append(time)
+        staticFrames.append(frame)
 
         // Instantaneous motion: the largest per-dim change of the tip
         // offsets and the palm (in hand scales) against the previous
@@ -129,11 +142,18 @@ public final class TakeRecorder {
 
         switch phase {
         case .waiting:
-            // Keep only a short pre-roll while waiting, so the take starts
-            // near the motion rather than at the countdown.
+            // Keep only a short pre-roll while waiting, so a motion take
+            // starts near the motion rather than at the countdown.
             while let first = times.first, time - first > 0.35 {
                 times.removeFirst()
                 frames.removeFirst()
+            }
+            // The longer, parallel accumulation a static take falls back
+            // on (see the property comments) — capped at the grace itself,
+            // since there's never reason to hold more.
+            while let first = staticTimes.first, time - first > Self.staticGrace {
+                staticTimes.removeFirst()
+                staticFrames.removeFirst()
             }
             if let motion, motion >= Self.motionFloor {
                 phase = .recording
@@ -142,9 +162,16 @@ public final class TakeRecorder {
             }
             if time - armedAt >= Self.staticGrace {
                 // The pose held still *is* the take: capture the buffered
-                // window as a static gesture.
+                // window as a static gesture. Prefer the short pre-roll,
+                // identical to a motion take's — it keeps live matching
+                // responsive — and only reach for the longer accumulation
+                // when the short one doesn't hold enough frames to pass
+                // the sanity floor.
                 phase = .idle
-                return finish(at: time)
+                if frames.count >= Self.minFrames {
+                    return finish(at: time)
+                }
+                return finish(at: time, times: staticTimes, frames: staticFrames)
             }
             return nil
 
@@ -173,6 +200,11 @@ public final class TakeRecorder {
     }
 
     private func finish(at time: TimeInterval) -> Event {
+        finish(at: time, times: times, frames: frames)
+    }
+
+    private func finish(at time: TimeInterval, times: [TimeInterval],
+                        frames: [[GestureTrace.HandSnapshot]]) -> Event {
         guard frames.count >= Self.minFrames,
               (times.last ?? 0) - (times.first ?? 0) >= Self.minSeconds else {
             return .discarded(reason: "Too quick to read — try a slightly longer take")
