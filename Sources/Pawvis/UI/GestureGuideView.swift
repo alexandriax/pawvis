@@ -179,8 +179,8 @@ struct GestureGuideView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                if let action = gesture.action {
-                    Text("→ \(action.summary)")
+                if let line = trainedBindingLine(gesture) {
+                    Text(line)
                         .font(.callout.weight(.medium))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
@@ -197,11 +197,30 @@ struct GestureGuideView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.5)))
     }
 
+    /// "→ what it does", with the compact per-app suffix when overrides
+    /// exist — same treatment as the built-in rows. nil means unassigned.
+    private func trainedBindingLine(_ gesture: TrainedGesture) -> String? {
+        let perApp = gesture.overrides.filter { $0.action != nil }.count
+        if let summary = gesture.action?.summary {
+            let suffix = perApp > 0 ? " (+\(perApp) per-app)" : ""
+            return "→ \(summary)\(suffix)"
+        }
+        guard perApp > 0 else { return nil }
+        return "→ per-app actions in \(perApp) app\(perApp == 1 ? "" : "s")"
+    }
+
     private var customRows: [Row] {
         let custom = store.settings.customGestures
         func bound(_ pairs: [(String, CustomGesture)]) -> [String] {
             pairs.compactMap { label, gesture in
-                (custom.binding(for: gesture)?.action?.summary).map { "\(label) → \($0)" }
+                guard let binding = custom.binding(for: gesture) else { return nil }
+                let perApp = binding.overrides.filter { $0.action != nil }.count
+                if let summary = binding.action?.summary {
+                    let suffix = perApp > 0 ? " (+\(perApp) per-app)" : ""
+                    return "\(label) → \(summary)\(suffix)"
+                }
+                guard perApp > 0 else { return nil }
+                return "\(label) → per-app actions in \(perApp) app\(perApp == 1 ? "" : "s")"
             }
         }
         return [

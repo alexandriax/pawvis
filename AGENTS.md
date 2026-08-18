@@ -434,6 +434,21 @@ none of this:
   permission the mouse already needs. Fire-and-forget actions (the desktop
   switch) report a follow-up line through `GestureActionRunner.onFollowUp`,
   which replaces the provisional pill text.
+- **Per-app actions resolve at fire time, through one pure rule.** Every
+  binding (built-in and trained alike) can carry `AppActionOverride` rows;
+  `PerAppAction.resolve` (PawvisCore, unit-tested) picks the override whose
+  bundle ID matches the frontmost app and falls back to the base action
+  otherwise. The app layer's entire contribution is one
+  `NSWorkspace.shared.frontmostApplication` read per fire in
+  `PawvisController` (no observer, no polling). A nil base with overrides
+  present is the app-gated gesture: detection stays on (`firesAnywhere` is
+  the detector gate in both `detectorConfig`s, because the frontmost check
+  happens at fire time, not detection time) and the fire resolves to
+  nothing outside the listed apps. Overrides persist element-tolerantly
+  like every list (bundle ID strict, name falls back to the bundle ID,
+  unreadable action leaves the row unassigned), and an unassigned override
+  changes nothing. Only the bundle ID and display name are stored; icons
+  are looked up live, so an uninstalled app keeps its readable row.
 
 ## Gesture art
 

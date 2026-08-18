@@ -24,11 +24,15 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
     /// What firing does; nil while unassigned (an unassigned gesture is
     /// never matched, exactly like the built-in library).
     public var action: GestureAction?
+    /// Per-app exceptions: in a listed app, that app's action fires instead
+    /// of `action`. With `action` nil, the gesture only fires in the listed
+    /// apps (see `PerAppAction`).
+    public var overrides: [AppActionOverride]
 
     public init(id: UUID = UUID(), name: String, handCount: Int,
                 template: [[Double]], duration: Double, baseThreshold: Double,
                 sensitivity: Double = 0.5, holdSeconds: Double = 0,
-                action: GestureAction? = nil) {
+                action: GestureAction? = nil, overrides: [AppActionOverride] = []) {
         self.id = id
         self.name = name
         self.handCount = handCount
@@ -38,6 +42,19 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
         self.sensitivity = sensitivity
         self.holdSeconds = holdSeconds
         self.action = action
+        self.overrides = overrides
+    }
+
+    /// The action a fire should perform given what's frontmost — the shared
+    /// per-app rule, same as the built-in library's.
+    public func resolvedAction(frontmostBundleID: String?) -> GestureAction? {
+        PerAppAction.resolve(base: action, overrides: overrides,
+                             frontmostBundleID: frontmostBundleID)
+    }
+
+    /// Whether the gesture does anything in any app — the matching gate.
+    public var firesAnywhere: Bool {
+        PerAppAction.firesAnywhere(base: action, overrides: overrides)
     }
 
     /// The live matching threshold: strict at 0 (0.7×), forgiving at 1
@@ -48,12 +65,13 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, handCount, template, duration, baseThreshold
-        case sensitivity, holdSeconds, action
+        case sensitivity, holdSeconds, action, overrides
     }
 
     /// The identity and the learned template decode strictly — without them
     /// there is no gesture, and the lossy list drops the record alone. The
-    /// user-adjustable extras are tolerant.
+    /// user-adjustable extras are tolerant, and the per-app overrides list
+    /// is element-tolerant on top: one unreadable override drops alone.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -65,6 +83,11 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
         sensitivity = (try? c.decodeIfPresent(Double.self, forKey: .sensitivity)) ?? 0.5
         holdSeconds = (try? c.decodeIfPresent(Double.self, forKey: .holdSeconds)) ?? 0
         action = try? c.decodeIfPresent(GestureAction.self, forKey: .action)
+        overrides = []
+        if let v = try? c.decodeIfPresent([Lossy<AppActionOverride>].self, forKey: .overrides) {
+            var seen: Set<String> = []
+            overrides = v.compactMap(\.value).filter { seen.insert($0.bundleID).inserted }
+        }
     }
 }
 
@@ -86,15 +109,16 @@ public struct TrainedGestureSettings: Codable, Equatable, Sendable {
         gestures.first { $0.id == id }
     }
 
-    /// What the engine's detector should watch: only gestures with an
-    /// action, compiled to their effective thresholds. `enabled` is the
-    /// shared custom-gestures master switch.
+    /// What the engine's detector should watch: only gestures that do
+    /// something somewhere (a base action, or at least one per-app action),
+    /// compiled to their effective thresholds. `enabled` is the shared
+    /// custom-gestures master switch.
     public func detectorConfig(enabled: Bool) -> TrainedGestureDetector.Config {
         var config = TrainedGestureDetector.Config()
         guard enabled else { return config }
         config.overridesMouse = mouseOverride
         config.gestures = gestures.compactMap { gesture in
-            guard gesture.action != nil, !gesture.template.isEmpty else { return nil }
+            guard gesture.firesAnywhere, !gesture.template.isEmpty else { return nil }
             return TrainedGestureDetector.Compiled(
                 id: gesture.id, handCount: gesture.handCount,
                 template: gesture.template, duration: gesture.duration,

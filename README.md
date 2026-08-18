@@ -95,9 +95,14 @@ Mouse**.
   provide (it runs exactly as typed, as you). Every gesture row carries its
   own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
   fling distance), so a gesture that won't trigger, or triggers too easily,
-  can be dialed in on the spot. The pill at the top of the screen confirms
-  every fire, and the Gesture Guide illustrates every gesture in full, with
-  what it is currently set to do.
+  can be dialed in on the spot. Every binding can also carry **per-app
+  actions**: add apps to a gesture's row and give each its own action, and
+  whichever app is frontmost when the gesture fires decides which action
+  runs (a thumbs up can advance slides in Keynote and press your merge
+  shortcut in the browser). Leave the main action unassigned and the
+  gesture fires only in the apps you listed. The pill at the top of the
+  screen confirms every fire, and the Gesture Guide illustrates every
+  gesture in full, with what it is currently set to do.
 - **Train your own gestures**: **Settings → Gestures → Train New Gesture**
   opens a camera window with your hand's tracking drawn live, a color per
   fingertip and a ring on the palm. Pick one hand or two, perform your
@@ -106,7 +111,8 @@ Mouse**.
   match live before saving. Trained gestures join the Gestures tab with an
   animated badge that replays the learned motion, and they work like the
   built-ins: rename them, remove them, tune how strictly they match, and
-  bind them to any action from the same catalog (or leave them unassigned).
+  bind them to any action from the same catalog (or leave them unassigned);
+  per-app actions work here too.
   Each one can also require a hold before it fires (the pill counts the
   hold down), and a priority switch decides who wins when a gesture looks
   like a click: by default trained gestures keep matching through clicks
