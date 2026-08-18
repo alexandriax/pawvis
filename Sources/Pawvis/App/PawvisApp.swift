@@ -11,7 +11,8 @@ struct PawvisApp: App {
             MenuContentView(
                 controller: appDelegate.controller,
                 voice: appDelegate.controller.voice,
-                updater: appDelegate.updater)
+                updater: appDelegate.updater,
+                settingsStore: appDelegate.controller.settingsStore)
         } label: {
             MenuBarIcon(voiceActive: appDelegate.controller.voice.state.isActive)
         }
