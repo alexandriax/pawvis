@@ -236,7 +236,12 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollInvert) { scrollInvert = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .dwellClickEnabled) { dwellClickEnabled = v }
-        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dwellSeconds) { dwellSeconds = v }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dwellSeconds) {
+            // Settings → Mouse → "Dwell time" slider (`range: 0.5...3.0`).
+            // A negative or zero dwell would fire the instant the cursor
+            // settles — the wedge class the sibling clamps exist for.
+            dwellSeconds = v.clamped(to: 0.5...3.0)
+        }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .crissCrossDisableEnabled) { crissCrossDisableEnabled = v }
         // The pointer source is an enum: an unknown raw value already fails
         // decode and keeps the palm default, so there is no range to clamp.
