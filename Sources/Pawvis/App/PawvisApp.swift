@@ -34,6 +34,12 @@ struct PawvisApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+
+        Window("Welcome to Pawvis", id: WelcomeWindow.id) {
+            WelcomeView(controller: appDelegate.controller)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 
 }
@@ -75,6 +81,7 @@ private struct MenuBarIcon: View {
             SettingsWindow.opener = openSettings
             GuideWindow.opener = openWindow
             TrainerWindow.opener = openWindow
+            WelcomeWindow.opener = openWindow
         }
     }
 }
@@ -86,6 +93,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let updateNotifier: UpdateNotifier
     private var voiceObservation: AnyCancellable?
     private var updaterObservation: AnyCancellable?
+    /// Re-checks while resident (below): `checkIfDue()` self-gates to once
+    /// per 24h (`UpdatePolicy`), so this only needs to be frequent enough
+    /// that a machine which never sleeps still gets checked daily.
+    private static let updateCheckInterval: TimeInterval = 6 * 60 * 60
+    private var updateCheckTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
 
     override init() {
         // AppDelegate is constructed on the main thread before the run loop starts.
@@ -139,7 +152,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // item registered on the machine that ran them.
         let automated = ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] != nil
 
-        if controller.settingsStore.settings.general.startTrackingOnLaunch, !automated {
+        // First run: a genuinely new install gets the welcome window (opened
+        // below) instead of a cold camera dialog, and auto-start waits for
+        // the tour's own Start button. An install that already granted the
+        // camera predates onboarding — record completion and launch exactly
+        // as every build before the tour did. The rules are pure and tested
+        // (FirstRunPolicy); automated runs stay headless and leave the flag
+        // untouched, so a smoke test on a fresh machine can't suppress a
+        // later real onboarding.
+        let firstRun = FirstRunPolicy.verdict(
+            completed: FirstRun.completed,
+            cameraGranted: Permissions.camera() == .granted,
+            automated: automated)
+        if firstRun == .adoptCompleted {
+            FirstRun.markCompleted()
+        }
+
+        if controller.settingsStore.settings.general.startTrackingOnLaunch, !automated,
+           firstRun != .showWelcome {
             controller.startTracking()
         }
 
@@ -190,10 +220,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
+        // The welcome tour: automatic for a genuinely new install (decided
+        // above), and on demand via PAWVIS_OPEN_WELCOME=1 — the same eyes-on
+        // hook as PAWVIS_OPEN_GUIDE, and the way to look at the tour again
+        // without wiping the first-run flag.
+        if firstRun == .showWelcome
+            || ProcessInfo.processInfo.environment["PAWVIS_OPEN_WELCOME"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WelcomeWindow.show()
+            }
+        }
+
         // At most one automatic check per day (see UpdatePolicy). A release
         // worth offering posts the system notification via `onUpdateFound`.
         updater.checkIfDue()
 
+        // That launch-time call is the ONLY automatic trigger unless we add
+        // more: Pawvis is a menu-bar app (LSUIElement) that starts at login
+        // and then runs indefinitely, so a laptop that's slept through
+        // several days instead of logging out never produces a second
+        // "launch" to hang a check off — it can silently go weeks without
+        // one. `checkIfDue()` already caps itself to once per 24h, so it's
+        // safe to call far more often than that: a periodic timer covers a
+        // machine that never sleeps, and a wake observer catches the more
+        // common case — days asleep — promptly instead of waiting for the
+        // next timer tick.
+        updateCheckTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.updateCheckInterval, repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updater.checkIfDue() }
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updater.checkIfDue() }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -201,10 +263,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // applicationWillTerminate alone can run too late for AVFoundation to
         // wind down cleanly, which left ghost state across relaunch cycles.
         controller.shutdown()
+        // And take the agent runs with us: they execute with permission
+        // prompts bypassed, so none may keep working headless after the app
+        // that launched them (and its cancel UI) is gone. Bounded — signals
+        // now, ≤0.5s grace, SIGKILL the groups, proceed.
+        AgentSessionManager.shared.shutdownOnAppQuit()
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.shutdown()
+        updateCheckTimer?.invalidate()
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        AgentSessionManager.shared.shutdownOnAppQuit()
     }
 }

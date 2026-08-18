@@ -134,6 +134,63 @@ final class TrainedGestureTests: XCTestCase {
         XCTAssertNotNil(finished, "a held pose is a take too")
     }
 
+    func testRecorderCapturesAStaticPoseAtLowFrameRate() {
+        // Below ~17 fps, the old 0.35s pre-roll cap held too few frames for
+        // `finish` to ever accept a static take — no matter how long the
+        // pose was held, holding longer could never help. Regression for
+        // that: a pose held the full static grace at 12 fps must still
+        // finish with at least `minFrames` frames.
+        let lowDt = 1.0 / 12
+        let recorder = TakeRecorder()
+        var t = 0.0
+        recorder.begin(handCount: 1, at: t)
+        var finished: GestureTake?
+        for _ in 0..<30 {
+            if case .finished(let take)? = recorder.feed(snapshots([poseHand()]), at: t) {
+                finished = take
+                break
+            }
+            t += lowDt
+        }
+        guard let take = finished else {
+            return XCTFail("a held pose at low fps must still finish as a take")
+        }
+        XCTAssertGreaterThanOrEqual(take.frames.count, TakeRecorder.minFrames)
+    }
+
+    func testMotionTakeStartsNearMotionAtLowFrameRate() {
+        // The waiting-phase buffer now grows all the way to the static
+        // grace so a still pose can finish at low fps (above) — but a
+        // motion take must still begin near the motion, not carry that
+        // whole buffered window as a bloated pre-roll.
+        let lowDt = 1.0 / 12
+        let recorder = TakeRecorder()
+        var t = 0.0
+        recorder.begin(handCount: 1, at: t)
+        for _ in 0..<10 { // still: short of the 1.5s static grace
+            _ = recorder.feed(snapshots([swipeHand(progress: 0)]), at: t)
+            t += lowDt
+        }
+        var startedAt: TimeInterval?
+        for i in 0..<15 { // the sweep
+            if case .started? = recorder.feed(snapshots([swipeHand(progress: Double(i) / 14)]), at: t) {
+                startedAt = t
+            }
+            t += lowDt
+        }
+        guard let started = startedAt else { return XCTFail("expected the sweep to start the take") }
+        var finished: GestureTake?
+        for _ in 0..<30 where finished == nil { // stillness ends it
+            if case .finished(let take)? = recorder.feed(snapshots([swipeHand(progress: 1)]), at: t) {
+                finished = take
+            }
+            t += lowDt
+        }
+        guard let take = finished else { return XCTFail("expected a finished take") }
+        XCTAssertLessThanOrEqual(started - take.times.first!, 0.35 + 1e-6,
+            "leading stillness must be trimmed to the short pre-roll, not the full static grace")
+    }
+
     func testRecorderDiscardsWhenTheHandVanishes() {
         let recorder = TakeRecorder()
         var t = 0.0

@@ -4,7 +4,7 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free hand control</em></p>
+<p align="center"><em>Touch-free hand control for your Mac</em></p>
 
 ---
 
@@ -90,14 +90,14 @@ Mouse**.
   virtual desktops, open Mission Control or App Exposé, show the desktop,
   snap the focused window (halves, thirds, two-thirds, quarters, center,
   maximize, minimize, next display), press Return or Escape, go back or
-  forward, switch tabs, play/pause, stop tracking, toggle voice control,
-  open any app, press any keyboard shortcut, or run a shell command you
-  provide (it runs exactly as typed, as you). Every gesture row carries its
-  own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
-  fling distance), so a gesture that won't trigger, or triggers too easily,
-  can be dialed in on the spot. The pill at the top of the screen confirms
-  every fire, and the Gesture Guide illustrates every gesture in full, with
-  what it is currently set to do.
+  forward, switch tabs, play/pause, adjust volume or brightness, stop
+  tracking, toggle voice control, open any app, press any keyboard shortcut,
+  or run a shell command you provide (it runs exactly as typed, as you).
+  Every gesture row carries its own collapsed **Tuning** section (hold time,
+  wiggle vigor, grab tightness, fling distance), so a gesture that won't
+  trigger, or triggers too easily, can be dialed in on the spot. The pill at
+  the top of the screen confirms every fire, and the Gesture Guide
+  illustrates every gesture in full, with what it is currently set to do.
 - **Train your own gestures**: **Settings → Gestures → Train New Gesture**
   opens a camera window with your hand's tracking drawn live, a color per
   fingertip and a ring on the palm. Pick one hand or two, perform your
@@ -204,7 +204,8 @@ meant for Pawvis and recovers the command before the hand-off.
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
 (always the latest release), unzip, and drag **Pawvis.app** to your
-Applications folder.
+Applications folder. Homebrew users: a cask scaffold lives in
+`Casks/pawvis.rb`, pending submission to homebrew/cask.
 
 Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
@@ -245,7 +246,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # the full unit suite, keep it green
 swift build         # debug build
 ```
 

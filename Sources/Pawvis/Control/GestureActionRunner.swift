@@ -28,6 +28,26 @@ final class GestureActionRunner {
             typer.press(MediaKey.playPause)
             return action.feedback
 
+        case .volumeUp:
+            typer.press(MediaKey.volumeUp)
+            return action.feedback
+
+        case .volumeDown:
+            typer.press(MediaKey.volumeDown)
+            return action.feedback
+
+        case .volumeMute:
+            typer.press(MediaKey.volumeMute)
+            return action.feedback
+
+        case .brightnessUp:
+            typer.press(MediaKey.brightnessUp)
+            return action.feedback
+
+        case .brightnessDown:
+            typer.press(MediaKey.brightnessDown)
+            return action.feedback
+
         case .desktopLeft, .desktopRight:
             // Not a key press: macOS ignores synthetic ⌃←/⌃→ for Spaces
             // (see SpaceSwitcher for the measured story and the mechanism).
