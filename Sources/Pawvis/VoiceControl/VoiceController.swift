@@ -46,6 +46,22 @@ final class VoiceController: ObservableObject {
     /// has already been installed, and must not clobber the successor's
     /// task handle, panel, or state. Bumped by every new run and by stop().
     private var autopilotGeneration = 0
+    /// The in-flight near-wake AI rescue, if any — cancelled by stop() and
+    /// superseded by any newer near-wake final. Without the handle, a rescue
+    /// still waiting on the model when voice control stopped would come back
+    /// a model-latency later and dispatch its command — in agent mode,
+    /// STARTING an agent run — while the UI says voice is off.
+    private var wakeRescueTask: Task<Void, Never>?
+    /// Identifies one voice session (a start() … stop()-or-failure
+    /// interval). Every await that can straddle a session boundary — the
+    /// mic-permission dialog in start(), the wake rescuer's model round,
+    /// an executor round that may fall back to the free-form ladder —
+    /// captures this before suspending and drops its continuation on a
+    /// mismatch: acting on a stale one executes commands (or launches an
+    /// engine) after the user turned voice control off. Bumped by stop()
+    /// and by engine failure, so a match also proves the session that
+    /// scheduled the work is the one still live.
+    private var sessionGeneration = 0
     /// AutopilotEngine is macOS 26-only; the untyped slot lets this
     /// controller keep a deployment floor below that.
     private var autopilotStorage: Any?
@@ -92,6 +108,14 @@ final class VoiceController: ObservableObject {
     }
 
     func setConfig(_ config: VoiceControlConfig) {
+        var config = config
+        // Strict wake acceptance whenever the agent hand-off is live: there
+        // an accepted utterance is arbitrary execution, so the ladder drops
+        // its loosest tiers — no glued-speech stitching, and the capture
+        // window stops taking the next final verbatim (handleFinal threads
+        // the same flag into the gate). This is app policy, decided here;
+        // PawvisCore just takes the flag, and it is never persisted.
+        config.strictWake = !config.agentExecutor.isEmpty
         self.config = config
         parser.config = config
         executor.aiAppNameRescueEnabled = config.visualContextEnabled
@@ -125,9 +149,21 @@ final class VoiceController: ObservableObject {
             return
         case .notDetermined:
             state = .connecting
+            let session = sessionGeneration
             Task { [weak self] in
                 let granted = await Permissions.requestMicrophone()
                 guard let self else { return }
+                // The system dialog sits open as long as the user leaves
+                // it, and .connecting is an active state — the menu toggle
+                // can stop() voice control while it's up. A grant that
+                // lands after that must not launch an engine: that is a
+                // hot mic running under state == .off, recognizing and
+                // executing commands. (No engine exists yet on this path,
+                // so a stale grant has nothing to tear down.)
+                guard self.sessionGeneration == session else {
+                    Log.voice.log("Mic permission resolved after voice control stopped — engine not launched")
+                    return
+                }
                 if granted {
                     self.launchEngine()
                 } else {
@@ -142,9 +178,12 @@ final class VoiceController: ObservableObject {
     }
 
     func stop() {
+        sessionGeneration += 1
         autopilotGeneration += 1
         autopilotTask?.cancel()
         autopilotTask = nil
+        wakeRescueTask?.cancel()
+        wakeRescueTask = nil
         autopilotPanel.hide()
         engine?.stop()
         engine = nil
@@ -166,10 +205,21 @@ final class VoiceController: ObservableObject {
     }
 
     private func launchEngine() {
+        // Defensive: nothing should reach here with an engine live (start()
+        // refuses while active, and stale permission grants are dropped),
+        // but overwriting one would orphan it with the mic still hot.
+        engine?.stop()
         let engine = SpeechEngine(config: config)
         self.engine = engine
-        engine.onEvent = { [weak self] event in
-            self?.handle(event)
+        engine.onEvent = { [weak self, weak engine] event in
+            // Identity-gated: a stopped engine can still have events queued
+            // on the main run loop (the legacy backend's silence-timer
+            // finalize doesn't re-check `stopped`; the modern backend's
+            // failure hop doesn't either). An event from any engine but the
+            // current one is a dead session talking — it must not repaint
+            // the capsule, flip state, or dispatch a command.
+            guard let self, let engine, self.engine === engine else { return }
+            self.handle(event)
         }
         engine.start()
         // Warm the on-device model now so the first free-form command
@@ -230,6 +280,13 @@ final class VoiceController: ObservableObject {
             handleFinal(transcript, showedLive: showedLive, wakeHeardLive: wakeHeardLive)
 
         case .failed(let message):
+            // Engine failure ends the session as surely as stop(): anything
+            // parked on an await from it (a wake rescue mid-model-round, an
+            // executor round) must go stale with it, or its continuation
+            // would execute a command while the UI shows the error.
+            sessionGeneration += 1
+            wakeRescueTask?.cancel()
+            wakeRescueTask = nil
             engine?.stop()
             engine = nil
             state = .error(message)
@@ -249,7 +306,15 @@ final class VoiceController: ObservableObject {
             Log.voice.log("Wake heard live; final revised it — accepting near remainder")
             remainder = near
         }
-        let decision = gate.decide(remainder: remainder, transcript: transcript, now: now)
+        // Strict wake (agent mode): the armed window's capture must itself
+        // parse deterministically — a wake-carrying final never consults the
+        // bar, so "Pawvis quit chrome" (and wake-led free-form speech for
+        // the agent) works exactly as before.
+        let decision = gate.decide(
+            remainder: remainder, transcript: transcript, now: now,
+            strictCommandBar: config.strictWake
+                ? { [parser] in parser.remainderIsDeterministicCommand($0) }
+                : nil)
         gateWindowTimer?.invalidate()
         gateWindowTimer = nil
 
@@ -298,9 +363,26 @@ final class VoiceController: ObservableObject {
            let nearRemainder = parser.nearWakeRemainder(transcript)?
                .trimmingCharacters(in: .whitespacesAndNewlines),
            !nearRemainder.isEmpty {
-            Task { [weak self] in
+            // A newer near-wake final supersedes a rescue still out with
+            // the model; the superseded one is cancelled, not raced.
+            wakeRescueTask?.cancel()
+            let session = sessionGeneration
+            wakeRescueTask = Task { [weak self] in
                 guard let self else { return }
                 let confirmed = (try? await WakeRescuer.confirmsInstruction(nearRemainder)) ?? false
+                // The model round takes up to seconds — long enough for
+                // voice control to be turned off (or fail, or be turned
+                // back on) while it thinks. A confirmation that lands
+                // after that must be dropped: dispatching it would run a
+                // command — in agent mode, START an agent run — while the
+                // UI says voice is off. Session match proves no stop or
+                // failure happened since the final arrived.
+                guard !Task.isCancelled, self.sessionGeneration == session,
+                      self.state.isActive else {
+                    Log.voice.log("Near-wake rescue resolved after voice control stopped (or was superseded) — dropped")
+                    return
+                }
+                self.wakeRescueTask = nil
                 Log.voice.log("Near-wake rescue \(confirmed ? "confirmed" : "declined", privacy: .public)")
                 if confirmed {
                     self.transcriptOverlay.complete(transcript)
@@ -329,16 +411,41 @@ final class VoiceController: ObservableObject {
     /// locally and instantly; agent mode pipes everything else to the chosen
     /// CLI; the on-device path runs the grammar, then the autopilot loop.
     private func dispatch(_ command: String, tool: AgentCLIExecutor.Tool?) {
+        // Belt and suspenders under the per-path guards above: a command
+        // must never START while the UI says voice control is off. Nothing
+        // legitimate is blocked — the eval harnesses (--voice-exec,
+        // --selftest) drive the parser and executor directly and never
+        // route through this controller.
+        guard state.isActive else {
+            Log.voice.log("Dispatch dropped — voice control is not active: \(command, privacy: .private)")
+            return
+        }
         let result = parser.parseRemainder(command)
         if case .stopVoiceControl? = result.command {
+            // "Pawvis stop listening" stays what the README promises: local,
+            // instant, mic off. Background agent runs are deliberately left
+            // to finish — the activity panel belongs to their manager, not
+            // to voice state, so they remain visible and cancellable there.
             stop()
             return
         }
         if case .cancelActivity? = result.command {
             // "Pawvis stop": brake whatever is running; with nothing in
             // flight it keeps its original meaning and turns voice off.
-            if autopilotTask != nil {
+            // Background agent runs never live in autopilotTask — they must
+            // be braked through their manager, and voice must STAY ON while
+            // they wind down: turning it off here would silence the user's
+            // only hands-free brake while the agent kept working.
+            let agentRuns = agentSessions.cancelAll()
+            if autopilotTask != nil || agentRuns > 0 {
                 cancelAutopilot()
+                if agentRuns > 0 {
+                    // Instant acknowledgment — SIGTERM can take seconds to
+                    // land; each run's outcome still flashes when it dies.
+                    flashNotice(agentRuns == 1
+                        ? "Stopping agent run…"
+                        : "Stopping \(agentRuns) agent runs…")
+                }
             } else {
                 stop()
             }
@@ -368,9 +475,18 @@ final class VoiceController: ObservableObject {
         case .sequence(let commands):
             runSequence(commands)
         default:
+            let session = sessionGeneration
             Task { [weak self] in
                 guard let self else { return }
                 let outcome = await self.executor.execute(command)
+                // The executor round can outlast the session — a failing
+                // app launch waits out waitForFrontmost's timeout, plenty
+                // of room for the user to toggle voice off. Post-stop, the
+                // free-form rescue below must not restart the model ladder
+                // (that resurrects .resolving under a dead mic), and the
+                // outcome notice belongs to a session that no longer
+                // exists — vanish silently, like superseded loop runs do.
+                guard self.sessionGeneration == session, self.state.isActive else { return }
                 // The grammar can mis-slice a garbled utterance ("open up
                 // safari please" → app "up safari please"). When an app
                 // command fails to resolve, hand the whole phrase back to

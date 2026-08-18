@@ -131,4 +131,41 @@ public enum AppNameMatch {
     public static func matches(spoken: String, appName: String) -> Bool {
         bestScore(spoken: spoken, name: appName) > 0
     }
+
+    // MARK: - Generic web qualifiers
+
+    /// Qualifiers that name "the web" or "a browser" in general, not any one
+    /// specific app — "the browser", "my browser", "the internet"… A speaker
+    /// who says one of these hasn't actually named an app; it means "no app
+    /// in particular", i.e. fall back to the default browser. Shared by two
+    /// call sites that both receive free-form spoken text: intent
+    /// translation (`TranslationPolicy`, the on-device model regularly emits
+    /// these on plain search requests) and the deterministic grammar's own
+    /// qualifier, which reaches the executor unresolved on purpose — "the
+    /// browser-word list is vocabulary, not app resolution" — so without
+    /// this check "the browser" fell through to fuzzy app resolution, where
+    /// stripping its leading article left "browser", a prefix match for any
+    /// installed app literally named Browser (Brave, Tor). One list, so
+    /// every path treats "the browser" identically.
+    public static let genericWebQualifiers: Set<String> = [
+        "web", "the web", "internet", "the internet", "online",
+        "browser", "the browser", "my browser", "a browser",
+        "default browser", "the default browser",
+    ]
+
+    /// An app qualifier ready for resolution: nil when `spoken` is nil,
+    /// empty/whitespace, or names the web/a browser generically (see
+    /// `genericWebQualifiers`) — callers should treat all three exactly like
+    /// "no app was named" rather than attempt to resolve them against an
+    /// installed or running app. Otherwise the trimmed qualifier, so a real
+    /// app name ("chrome", "safari") passes through for resolution.
+    public static func resolvedAppQualifier(_ spoken: String?) -> String? {
+        guard let spoken else { return nil }
+        let trimmed = spoken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !genericWebQualifiers.contains(VoiceControlParser.normalize(trimmed)) else {
+            return nil
+        }
+        return trimmed
+    }
 }
