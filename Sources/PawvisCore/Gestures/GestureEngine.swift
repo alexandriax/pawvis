@@ -13,8 +13,11 @@ import Foundation
 ///   move while dipped   → drag
 ///   the finger lifts    → button up
 ///   a second finger dips → the same machinery, on the right button
+///   a third finger dips → the same machinery again, on the middle button
+///                         (optional, off by default)
 ///   middle + ring fold in → scroll: the scroll pose parks the cursor and
 ///                         turns vertical hand travel into wheel events
+///                         (sideways too, when horizontal scrolling is on)
 ///   both hands splayed, traded sides → the criss-cross wave: hand tracking
 ///                         switches off entirely (optional, on by default)
 ///
@@ -37,16 +40,21 @@ public final class GestureEngine {
                 for i in slots.indices { slots[i].setFilterParams(config.smoothing) }
             }
             if config.rightClickFinger != oldValue.rightClickFinger
-                || config.rightClickEnabled != oldValue.rightClickEnabled {
+                || config.rightClickEnabled != oldValue.rightClickEnabled
+                || config.middleClickFinger != oldValue.middleClickFinger
+                || config.middleClickEnabled != oldValue.middleClickEnabled {
                 // The new setting's ratio says nothing about the old one's
                 // hold, so changing it mid-press would strand the button down —
-                // the finger moved out from under its right-click. The up
-                // rides out with the next frame (or the next forceRelease).
+                // the finger moved out from under its right-click (or middle-
+                // click). The up rides out with the next frame (or the next
+                // forceRelease).
                 pendingEvents = forceRelease(at: lastHandTime)
             }
-            if config.scrollEnabled != oldValue.scrollEnabled {
-                // Off mid-scroll: stop scrolling at once. On: the pose still
-                // has to engage from scratch.
+            if config.scrollEnabled != oldValue.scrollEnabled
+                || config.scrollAxes != oldValue.scrollAxes {
+                // Off (or re-axed) mid-scroll: stop scrolling at once and
+                // re-anchor from scratch — a newly enabled axis must not
+                // measure its first delta against a stale anchor.
                 scroll = ScrollState()
             }
             if config.dwellClickEnabled != oldValue.dwellClickEnabled {
@@ -156,8 +164,9 @@ public final class GestureEngine {
         var dragging = false
     }
 
-    /// One button's hysteresis + debounce state. Left and right run the same
-    /// machine over different metrics; only one of them may hold at a time.
+    /// One button's hysteresis + debounce state. All three buttons run the
+    /// same machine over different metrics; only one of them may hold at a
+    /// time.
     private struct ButtonState {
         var engaged = false
         var engageFrames = 0
@@ -170,10 +179,11 @@ public final class GestureEngine {
         var active = false
         var engageFrames = 0
         var releaseFrames = 0
-        /// Unclamped pointer y the next delta is measured against; nil until
-        /// the first armed frame after activation seeds it. Unclamped so a
-        /// hand that sails past the interaction box keeps scrolling.
-        var anchorY: Double?
+        /// Unclamped pointer point the next delta is measured against, each
+        /// axis advancing independently; nil until the first armed frame
+        /// after activation seeds it. Unclamped so a hand that sails past
+        /// the interaction box keeps scrolling.
+        var anchor: Vec2?
     }
 
     /// The dwell click's state: where the cursor settled, when, and whether
@@ -292,6 +302,7 @@ public final class GestureEngine {
     private var press: PressState?
     private var leftButton = ButtonState()
     private var rightButton = ButtonState()
+    private var middleButton = ButtonState()
     private var scroll = ScrollState()
     private var dwell = DwellState()
     private var crissCross = CrissCrossState()
@@ -323,6 +334,7 @@ public final class GestureEngine {
         press = nil
         leftButton = ButtonState()
         rightButton = ButtonState()
+        middleButton = ButtonState()
         // A forced release must not chain into a double-click.
         lastUpTime = -.infinity
         _ = time
@@ -438,21 +450,40 @@ public final class GestureEngine {
         if armed, let pointer = pointerPoint(features) {
             // 5. Cursor follows the configured pointer landmark (the palm by
             // default, chosen so the click gesture barely moves it) — unless
-            // the scroll pose holds it parked, in which case vertical palm
-            // travel becomes wheel events instead.
+            // the scroll pose holds it parked, in which case palm travel
+            // becomes wheel events instead (vertical, plus horizontal when
+            // both axes are enabled).
             let clamped = pointer.clampedToUnit()
             if scroll.active {
-                if let anchor = scroll.anchorY {
-                    // Deadband against the anchor, like a drag's: shimmer
-                    // stays put, and slow travel accumulates until it counts.
-                    let travel = pointer.y - anchor
-                    if abs(travel) >= config.jitterDeadband {
-                        scroll.anchorY = pointer.y
+                if let anchor = scroll.anchor {
+                    // Deadband against the anchor, like a drag's — per axis:
+                    // shimmer stays put, and slow travel accumulates against
+                    // the unmoved anchor until it counts on that axis.
+                    var next = anchor
+                    var deltaX = 0.0
+                    var deltaY = 0.0
+                    let travelY = pointer.y - anchor.y
+                    if abs(travelY) >= config.jitterDeadband {
+                        next.y = pointer.y
                         // Hand up (y shrinking) = scroll up (positive wheel).
-                        events.append(.scroll(deltaY: config.scrollInvert ? travel : -travel))
+                        // The invert setting flips vertical only.
+                        deltaY = config.scrollInvert ? travelY : -travelY
+                    }
+                    if config.scrollAxes == .both {
+                        let travelX = pointer.x - anchor.x
+                        if abs(travelX) >= config.jitterDeadband {
+                            next.x = pointer.x
+                            // Hand left (x shrinking) = scroll left (positive
+                            // axis-2), mirroring the vertical convention.
+                            deltaX = -travelX
+                        }
+                    }
+                    if deltaX != 0 || deltaY != 0 {
+                        scroll.anchor = next
+                        events.append(.scroll(deltaX: deltaX, deltaY: deltaY))
                     }
                 } else {
-                    scroll.anchorY = pointer.y
+                    scroll.anchor = pointer
                 }
             } else if crissCrossParked {
                 // The wave is in progress: the cursor parks so hands trading
@@ -487,11 +518,11 @@ public final class GestureEngine {
         }
 
         // 6. Button state: each button's ratio with hysteresis + debounce.
-        // Left runs first, so a frame where both fingers dip reads as a plain
-        // click; from then on whichever is held locks the other out — and an
-        // active scroll locks out both. Disarmed, the buttons stay untouched
-        // (they are at rest — disarming resets them), so no press can ever
-        // begin on a parked cursor.
+        // Left runs first (then right, then middle), so a frame where several
+        // fingers dip reads as a plain click; from then on whichever is held
+        // locks the others out — and an active scroll locks out all of them.
+        // Disarmed, the buttons stay untouched (they are at rest — disarming
+        // resets them), so no press can ever begin on a parked cursor.
         //
         // A sweeping palm blocks *engage* on both buttons: motion blur makes
         // the finger extents flap, and real clicks begin from a hand that is
@@ -508,19 +539,30 @@ public final class GestureEngine {
         let ratio = armed ? clickRatio(features) : nil
         if armed {
             let rightHeld = isHeld(.right)
+            let middleHeld = isHeld(.middle)
             updateButton(.left, state: &leftButton, ratio: ratio,
                          engage: config.engageRatio, release: config.releaseRatio,
                          confident: engageConfident(primary.hand),
-                         blocked: rightHeld || scroll.active || crissCross.engaged
-                             || sweeping || pointedParked || trainedDwellBlock,
+                         blocked: rightHeld || middleHeld || scroll.active
+                             || crissCross.engaged || sweeping || pointedParked
+                             || trainedDwellBlock,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
                          confident: rightEngageConfident(primary.hand),
-                         blocked: leftHeld || scroll.active || crissCross.engaged
-                             || scrollPoseBlocksRightClick(features) || sweeping
-                             || pointedParked || trainedDwellBlock,
+                         blocked: leftHeld || middleHeld || scroll.active
+                             || crissCross.engaged
+                             || scrollPoseBlocksDip(of: config.rightClickFinger, features)
+                             || sweeping || pointedParked || trainedDwellBlock,
+                         at: frame.time, events: &events)
+            updateButton(.middle, state: &middleButton, ratio: middleRatio(features),
+                         engage: config.middleEngageRatio, release: config.middleReleaseRatio,
+                         confident: middleEngageConfident(primary.hand),
+                         blocked: isHeld(.left) || isHeld(.right) || scroll.active
+                             || crissCross.engaged
+                             || scrollPoseBlocksDip(of: config.middleClickFinger, features)
+                             || sweeping || pointedParked || trainedDwellBlock,
                          at: frame.time, events: &events)
         }
 
@@ -531,6 +573,7 @@ public final class GestureEngine {
         // blocks it, and a fired dwell re-arms only once the cursor leaves.
         updateDwell(
             blocked: press != nil || leftButton.engaged || rightButton.engaged
+                || middleButton.engaged
                 || scroll.active || crissCross.engaged || grabParked
                 || pointedParked || trainedDwellBlock || !armed,
             at: frame.time, events: &events)
@@ -546,6 +589,7 @@ public final class GestureEngine {
         overlay.cursor = cursor
         overlay.grabbed = leftButton.engaged
         overlay.rightGrabbed = rightButton.engaged
+        overlay.middleGrabbed = middleButton.engaged
         overlay.isDragging = press?.dragging ?? false
         overlay.isScrolling = scroll.active
         overlay.closingProgress = closingProgress(for: ratio)
@@ -646,6 +690,7 @@ public final class GestureEngine {
         if armed {
             armFrames = 0
             let pressing = press != nil || leftButton.engaged || rightButton.engaged
+                || middleButton.engaged
             guard !pressing, features.curledFingerCount() >= 3 else {
                 disarmFrames = 0
                 return
@@ -657,6 +702,7 @@ public final class GestureEngine {
             // A button mid-engage-debounce must not fire on the next arm.
             leftButton = ButtonState()
             rightButton = ButtonState()
+            middleButton = ButtonState()
         } else {
             disarmFrames = 0
             guard armFeatures(of: hand)?.isOpenHand() == true else {
@@ -749,7 +795,8 @@ public final class GestureEngine {
             scroll = ScrollState()
             return
         }
-        guard press == nil, !leftButton.engaged, !rightButton.engaged else {
+        guard press == nil, !leftButton.engaged, !rightButton.engaged,
+              !middleButton.engaged else {
             scroll.engageFrames = 0
             return
         }
@@ -780,15 +827,16 @@ public final class GestureEngine {
         }
     }
 
-    /// With scroll on, a right-click finger that is *half the scroll
-    /// pose* (middle or ring) gets one extra engage guard: the pose's other
-    /// folding finger must still be extended. Folding middle + ring together
-    /// into a scroll can transiently read as one of them dipping ahead of its
-    /// tap reference; a genuine dip keeps the rest of the hand up. Engage
-    /// only — a held right button still releases normally.
-    private func scrollPoseBlocksRightClick(_ features: HandFeatures?) -> Bool {
+    /// With scroll on, a click finger that is *half the scroll pose* (middle
+    /// or ring) gets one extra engage guard: the pose's other folding finger
+    /// must still be extended. Folding middle + ring together into a scroll
+    /// can transiently read as one of them dipping ahead of its tap
+    /// reference; a genuine dip keeps the rest of the hand up. Engage only —
+    /// a held button still releases normally. The right and middle buttons
+    /// share this guard, each asking about its own configured finger.
+    private func scrollPoseBlocksDip(of finger: Finger, _ features: HandFeatures?) -> Bool {
         guard config.scrollEnabled, let features else { return false }
-        switch config.rightClickFinger {
+        switch finger {
         case .middle: return features.isExtended(.ring) != true
         case .ring: return features.isExtended(.middle) != true
         case .index, .little: return false
@@ -877,7 +925,7 @@ public final class GestureEngine {
 
         if !crissCross.engaged {
             guard tracked.count == 2, press == nil,
-                  !leftButton.engaged, !rightButton.engaged,
+                  !leftButton.engaged, !rightButton.engaged, !middleButton.engaged,
                   tracked.allSatisfy({ armFeatures(of: $0.hand)?.isOpenPalmSplayed() == true })
             else {
                 crissCross.engageFrames = 0
@@ -971,7 +1019,7 @@ public final class GestureEngine {
             minJointConfidence: config.minJointConfidence,
             trackingLossGrace: config.trackingLossGrace,
             pressOrScrollActive: press != nil || leftButton.engaged
-                || rightButton.engaged || scroll.active,
+                || rightButton.engaged || middleButton.engaged || scroll.active,
             crissCrossEngaged: crissCross.engaged)
         let inputs = tracked.map {
             CustomGestureDetector.HandInput(slot: $0.slotID, hand: $0.hand)
@@ -1011,6 +1059,39 @@ public final class GestureEngine {
     /// dipping finger's tip and knuckle plus its reference neighbor's.
     private func rightEngageConfident(_ hand: Hand) -> Bool {
         guard let finger = activeRightClickFinger else { return false }
+        return dipEngageConfident(finger, hand)
+    }
+
+    // MARK: - Middle click
+
+    /// The finger whose dip presses the middle button, or nil when this
+    /// configuration has none: the index already drives the left button, and
+    /// a collision with the active right-click finger yields to right-click
+    /// (it was there first) rather than letting one dip race two buttons.
+    private var activeMiddleClickFinger: Finger? {
+        guard config.middleClickEnabled else { return nil }
+        guard config.middleClickFinger != .index,
+              config.middleClickFinger != activeRightClickFinger else { return nil }
+        return config.middleClickFinger
+    }
+
+    /// The dip differential the middle button thresholds. nil holds the
+    /// current state, exactly as the other buttons' ratios do.
+    private func middleRatio(_ features: HandFeatures?) -> Double? {
+        guard let features, let finger = activeMiddleClickFinger else { return nil }
+        return features.fingerTapRatio(finger)
+    }
+
+    /// The middle-click differential's engage-side confidence gate, same
+    /// shape as the right button's.
+    private func middleEngageConfident(_ hand: Hand) -> Bool {
+        guard let finger = activeMiddleClickFinger else { return false }
+        return dipEngageConfident(finger, hand)
+    }
+
+    /// A dip differential's engage-side confidence gate: the dipping
+    /// finger's tip and knuckle plus its reference neighbor's.
+    private func dipEngageConfident(_ finger: Finger, _ hand: Hand) -> Bool {
         let reference = HandFeatures.tapReference(for: finger)
         return [finger.tip, finger.mcp, reference.tip, reference.mcp].allSatisfy {
             hand.confidence(for: $0) >= Self.engageConfidenceFloor
@@ -1018,9 +1099,14 @@ public final class GestureEngine {
     }
 
     /// Whether this button currently owns the press. One press at a time: the
-    /// other button's engage counter must not so much as accumulate meanwhile.
+    /// other buttons' engage counters must not so much as accumulate meanwhile.
     private func isHeld(_ button: MouseButton) -> Bool {
-        let state = button == .left ? leftButton : rightButton
+        let state: ButtonState
+        switch button {
+        case .left: state = leftButton
+        case .right: state = rightButton
+        case .middle: state = middleButton
+        }
         return state.engaged || press?.button == button
     }
 
@@ -1075,7 +1161,7 @@ public final class GestureEngine {
 
     /// 0 when the hand sits comfortably open, 1 while a button is down.
     private func closingProgress(for ratio: Double?) -> Double {
-        if leftButton.engaged || rightButton.engaged { return 1 }
+        if leftButton.engaged || rightButton.engaged || middleButton.engaged { return 1 }
         guard let ratio else { return 0 }
         // The tap differential idles near 1.0; a short ramp keeps the resting
         // ring near zero instead of showing a quarter-closed ring at rest.
@@ -1170,9 +1256,10 @@ public final class GestureEngine {
                 disarmFrames = 0
             }
         } else {
-            let held = leftButton.engaged || rightButton.engaged
+            let held = leftButton.engaged || rightButton.engaged || middleButton.engaged
             overlay.grabbed = leftButton.engaged
             overlay.rightGrabbed = rightButton.engaged
+            overlay.middleGrabbed = middleButton.engaged
             overlay.isDragging = press?.dragging ?? false
             overlay.isScrolling = scroll.active
             overlay.closingProgress = held ? 1 : 0

@@ -88,9 +88,40 @@ final class GestureEngineTests: XCTestCase {
         }
     }
 
+    /// Vertical deltas of every scroll event (0 when an event was
+    /// horizontal-only — vertical-mode tests never produce those).
     private func scrolls(_ events: [GestureEvent]) -> [Double] {
         events.compactMap {
-            if case .scroll(let deltaY) = $0 { return deltaY }
+            if case .scroll(_, let deltaY) = $0 { return deltaY }
+            return nil
+        }
+    }
+
+    /// Horizontal deltas of every scroll event.
+    private func scrollXs(_ events: [GestureEvent]) -> [Double] {
+        events.compactMap {
+            if case .scroll(let deltaX, _) = $0 { return deltaX }
+            return nil
+        }
+    }
+
+    private func middleDowns(_ events: [GestureEvent]) -> [(Vec2, Int)] {
+        events.compactMap {
+            if case .buttonDown(.middle, let at, let cc) = $0 { return (at, cc) }
+            return nil
+        }
+    }
+
+    private func middleUps(_ events: [GestureEvent]) -> [(Vec2, Int)] {
+        events.compactMap {
+            if case .buttonUp(.middle, let at, let cc) = $0 { return (at, cc) }
+            return nil
+        }
+    }
+
+    private func middleDrags(_ events: [GestureEvent]) -> [Vec2] {
+        events.compactMap {
+            if case .drag(.middle, let to) = $0 { return to }
             return nil
         }
     }
@@ -197,6 +228,57 @@ final class GestureEngineTests: XCTestCase {
             GestureConfig.self, from: Data(#"{"scrollEnabled":"maybe","scrollInvert":7}"#.utf8))
         XCTAssertTrue(bogus.scrollEnabled, "a mistyped field keeps its default")
         XCTAssertFalse(bogus.scrollInvert)
+    }
+
+    func testMiddleClickAndScrollDialDefaults() {
+        let c = GestureConfig.default
+        XCTAssertFalse(c.middleClickEnabled, "a third button is opt-in")
+        XCTAssertEqual(c.middleClickFinger, .ring,
+                       "the finger neither default button uses")
+        XCTAssertEqual(c.scrollAxes, .vertical, "horizontal scrolling is opt-in")
+        XCTAssertEqual(c.scrollGain, 2.2, accuracy: 1e-9,
+                       "the dial's default matches the retired hardcoded gain")
+        XCTAssertEqual(c.middleEngageRatio, c.engageRatio, accuracy: 1e-9,
+                       "all three buttons are dips on one sensitivity slider")
+        XCTAssertEqual(c.middleReleaseRatio, c.releaseRatio, accuracy: 1e-9)
+    }
+
+    func testMiddleClickAndScrollFieldsRoundTrip() throws {
+        var config = GestureConfig.default
+        config.middleClickEnabled = true
+        config.middleClickFinger = .middle
+        config.scrollAxes = .both
+        config.scrollGain = 3.3
+        let decoded = try JSONDecoder().decode(
+            GestureConfig.self, from: JSONEncoder().encode(config))
+        XCTAssertEqual(decoded, config, "the new fields survive a save/load cycle")
+    }
+
+    func testNewFieldsTolerateGarbageAndClampTheGain() throws {
+        let known = try JSONDecoder().decode(
+            GestureConfig.self,
+            from: Data(#"{"middleClickEnabled":true,"middleClickFinger":"little","scrollAxes":"both","scrollGain":1.5}"#.utf8))
+        XCTAssertTrue(known.middleClickEnabled)
+        XCTAssertEqual(known.middleClickFinger, .little)
+        XCTAssertEqual(known.scrollAxes, .both)
+        XCTAssertEqual(known.scrollGain, 1.5, accuracy: 1e-9)
+
+        let bogus = try JSONDecoder().decode(
+            GestureConfig.self,
+            from: Data(#"{"middleClickEnabled":"sure","middleClickFinger":6,"scrollAxes":"diagonal","scrollGain":"fast"}"#.utf8))
+        XCTAssertFalse(bogus.middleClickEnabled, "a mistyped field keeps its default")
+        XCTAssertEqual(bogus.middleClickFinger, .ring)
+        XCTAssertEqual(bogus.scrollAxes, .vertical, "an unknown axes value keeps the default")
+        XCTAssertEqual(bogus.scrollGain, 2.2, accuracy: 1e-9)
+
+        // The gain multiplies straight into posted wheel pixels, so stored
+        // values are clamped into the slider's range, not trusted verbatim.
+        let high = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"scrollGain":50}"#.utf8))
+        XCTAssertEqual(high.scrollGain, GestureConfig.scrollGainRange.upperBound, accuracy: 1e-9)
+        let low = try JSONDecoder().decode(
+            GestureConfig.self, from: Data(#"{"scrollGain":0.01}"#.utf8))
+        XCTAssertEqual(low.scrollGain, GestureConfig.scrollGainRange.lowerBound, accuracy: 1e-9)
     }
 
     // MARK: - Decode-time clamping
@@ -991,6 +1073,338 @@ final class GestureEngineTests: XCTestCase {
                                             from: 0.3, count: 6)).isEmpty)
     }
 
+    // MARK: - Middle click
+
+    /// The test config with middle-click switched on (it ships off) on the
+    /// given finger. The default right-click stays on the pinky, so `.ring`
+    /// keeps the three buttons on three different fingers.
+    private func useMiddleClick(_ finger: Finger = .ring) {
+        var config = Self.testConfig()
+        config.middleClickEnabled = true
+        config.middleClickFinger = finger
+        engine = GestureEngine(config: config)
+    }
+
+    /// One middle click: dip the middle-click finger, then lift it.
+    @discardableResult
+    private func middleClick(_ finger: Finger = .ring, at wrist: Vec2 = Vec2(0.5, 0.7),
+                             from: TimeInterval) -> [GestureEvent] {
+        feedFrames([SyntheticHand.fingerDip(finger, wrist: wrist)], from: from, count: 3)
+            + feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: wrist)],
+                         from: from + 0.1, count: 3)
+    }
+
+    func testMiddleClickShipsOff() {
+        // testConfig leaves the default: no finger presses the middle button.
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 10)
+        XCTAssertTrue(middleDowns(e).isEmpty, "middle-click is opt-in")
+        XCTAssertTrue(downs(e).isEmpty && rightDowns(e).isEmpty,
+                      "…and a ring dip is no other button's gesture either")
+    }
+
+    func testRingDipMiddleClicksAndReleasesOnThePalm() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+
+        let dipping = feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.15, count: 3)
+        let d = middleDowns(dipping)
+        XCTAssertEqual(d.count, 1, "dipping the configured finger presses the middle button")
+        XCTAssertEqual(d[0].1, 1)
+        XCTAssertTrue(downs(dipping).isEmpty && rightDowns(dipping).isEmpty,
+                      "…and the other buttons stay out of it")
+
+        // The palm-anchored cursor never moved, so the up lands on the down.
+        let lifting = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.28, count: 3)
+        XCTAssertTrue(middleDrags(lifting).isEmpty)
+        let u = middleUps(lifting)
+        XCTAssertEqual(u.count, 1)
+        XCTAssertEqual(u[0].0.distance(to: d[0].0), 0, accuracy: 1e-9)
+        XCTAssertTrue(ups(lifting).isEmpty && rightUps(lifting).isEmpty)
+    }
+
+    func testMiddleClickDebouncesBothWays() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 4)
+
+        // One dipped frame (debounce needs 2), then open again: no click.
+        var events = feed([SyntheticHand.fingerDip(.ring)], at: 0.15).events
+        events += feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.1833, count: 3)
+        XCTAssertTrue(middleDowns(events).isEmpty, "a one-frame blip must not middle-click")
+
+        // Engaged, one frame of release-side noise must not let go.
+        feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.4, count: 3)
+        var spiked = feed([SyntheticHand.mouseTap(indexDown: false)], at: 0.55).events
+        spiked += feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.5833, count: 3)
+        XCTAssertTrue(middleUps(spiked).isEmpty, "debounce guards the release direction too")
+    }
+
+    func testMiddlePressLocksOutTheOtherButtonsBothWays() {
+        // Three fingers with independent tap references: index (vs middle)
+        // for the left button, little (vs ring) for the middle button.
+        var config = Self.testConfig()
+        config.rightClickEnabled = false
+        config.middleClickEnabled = true
+        config.middleClickFinger = .little
+        engine = GestureEngine(config: config)
+        let bothDipped = SyntheticHand.build(
+            pose: .init(fingerDirs: SyntheticHand.relaxedDirs,
+                        curled: [.index, .little],
+                        thumbTipOffset: SyntheticHand.thumbExtendedOffset))
+
+        // Middle first: dipping the index as well must not add a left press.
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(middleDowns(feedFrames([SyntheticHand.fingerDip(.little)],
+                                              from: 0.1, count: 3)).count, 1)
+        let whileMiddle = feedFrames([bothDipped], from: 0.25, count: 10)
+        XCTAssertTrue(downs(whileMiddle).isEmpty,
+                      "a held middle button blocks the left engage outright")
+        XCTAssertTrue(middleUps(whileMiddle).isEmpty, "…and the middle press is undisturbed")
+
+        let opened = feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.6, count: 3)
+        XCTAssertEqual(middleUps(opened).count, 1)
+        XCTAssertTrue(ups(opened).isEmpty, "the blocked left button has nothing to release")
+
+        // Left first: the same pose must not add a middle press.
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.mouseTap(indexDown: true)],
+                                        from: 0.8, count: 3)).count, 1)
+        let whileLeft = feedFrames([bothDipped], from: 0.95, count: 10)
+        XCTAssertTrue(middleDowns(whileLeft).isEmpty, "…and it holds symmetrically the other way")
+        XCTAssertTrue(ups(whileLeft).isEmpty)
+    }
+
+    func testSimultaneousRightAndMiddleDipsYieldOneRightPress() {
+        // Right and middle on fingers with independent references (middle
+        // finger vs index, little vs ring): a frame where both dip carries
+        // both signals, and the right button — updated first — wins.
+        var config = Self.testConfig()
+        config.rightClickFinger = .middle
+        config.middleClickEnabled = true
+        config.middleClickFinger = .little
+        engine = GestureEngine(config: config)
+        let bothDipped = SyntheticHand.build(
+            pose: .init(fingerDirs: SyntheticHand.relaxedDirs,
+                        curled: [.middle, .little],
+                        thumbTipOffset: SyntheticHand.thumbExtendedOffset))
+
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([bothDipped], from: 0.1, count: 10)
+        XCTAssertEqual(rightDowns(e).count, 1, "whichever engaged first owns the press")
+        XCTAssertTrue(middleDowns(e).isEmpty, "one press at a time — middle never joins")
+        XCTAssertTrue(rightUps(e).isEmpty)
+    }
+
+    func testMiddleClickYieldsItsFingerToRightClick() {
+        // Both buttons pointed at the pinky: right-click was there first and
+        // keeps it; middle-click quietly stands down rather than racing.
+        useMiddleClick(.little) // rightClickFinger stays .little (the default)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.fingerDip(.little)], from: 0.1, count: 3)
+        XCTAssertEqual(rightDowns(e).count, 1, "right-click keeps the contested finger")
+        XCTAssertTrue(middleDowns(e).isEmpty)
+    }
+
+    func testMiddleClickFingerCannotAlsoBeTheLeftClickFinger() {
+        useMiddleClick(.index)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let e = feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.1, count: 3)
+        XCTAssertTrue(middleDowns(e).isEmpty, "the index already presses the left button")
+        XCTAssertEqual(downs(e).map(\.1), [1], "…and it still does")
+    }
+
+    func testMiddleDragWithThePalm() {
+        useMiddleClick(.ring)
+        let start = Vec2(0.4, 0.7)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: start)], from: 0, count: 4)
+        feedFrames([SyntheticHand.fingerDip(.ring, wrist: start)], from: 0.15, count: 3)
+
+        // Hold the dip past the tap window, then move the hand.
+        feedFrames([SyntheticHand.fingerDip(.ring, wrist: start)], from: 0.28, count: 8)
+        var dragged: [Vec2] = []
+        for i in 1...5 {
+            let e = feed([SyntheticHand.fingerDip(.ring, wrist: Vec2(0.4 + Double(i) * 0.03, 0.7))],
+                         at: 0.56 + Double(i) / 30).events
+            dragged += middleDrags(e)
+            XCTAssertTrue(drags(e).isEmpty && rightDrags(e).isEmpty,
+                          "a middle-button drag must not masquerade as another button's")
+        }
+        XCTAssertGreaterThanOrEqual(dragged.count, 4, "held dip + hand movement drags")
+        XCTAssertEqual(dragged, dragged.sorted { $0.x < $1.x }, "drag positions advance monotonically")
+
+        let opening = feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.55, 0.7))],
+                                 from: 0.8, count: 3)
+        XCTAssertEqual(middleUps(opening).count, 1)
+        XCTAssertEqual(middleUps(opening)[0].0.x, dragged.last!.x, accuracy: 1e-6,
+                       "up lands on the last emitted drag")
+    }
+
+    func testMiddleClicksNeverChainAndLeaveTheLeftChainAlone() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(middleDowns(middleClick(from: 0.10)).map(\.1), [1])
+        XCTAssertEqual(middleDowns(middleClick(from: 0.30)).map(\.1), [1],
+                       "a middle click is always a single, however fast it repeats")
+
+        XCTAssertEqual(downs(tapClick(from: 0.55)).map(\.1), [1])
+        XCTAssertEqual(middleDowns(middleClick(from: 0.73)).map(\.1), [1])
+        XCTAssertEqual(downs(tapClick(from: 0.91)).map(\.1), [2],
+                       "the middle click neither chained into the double nor broke it")
+    }
+
+    func testFaintDipJointsNeverMiddleClick() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+
+        var faint = SyntheticHand.fingerDip(.ring)
+        for joint in [HandJoint.ringTip, .ringMCP, .middleTip, .middleMCP] {
+            faint.setPoint(faint[joint]!, for: joint, confidence: 0.30)
+        }
+        // 0.30 clears minJointConfidence (0.25), so the differential exists and
+        // reads dipped — only the engage floor (0.40) holds the press back.
+        XCTAssertTrue(middleDowns(feedFrames([faint], from: 0.1, count: 20)).isEmpty,
+                      "the middle button gets the same phantom-click gate as the others")
+
+        // Tracked confidently, the same pose clicks on the usual debounce.
+        XCTAssertEqual(middleDowns(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                              from: 0.9, count: 3)).map(\.1), [1])
+    }
+
+    func testTrackingLossReleasesMiddlePressAfterGrace() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 3)
+
+        XCTAssertTrue(middleUps(feed([], at: 0.30).events).isEmpty, "grace holds the press")
+        let e = feed([], at: 0.55).events
+        XCTAssertEqual(middleUps(e).count, 1, "held button must release after tracking loss")
+        XCTAssertTrue(middleUps(feed([], at: 0.7).events).isEmpty, "no repeated releases")
+    }
+
+    func testOverlayReportsTheMiddleButton() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 2)
+        let (_, held) = feed([SyntheticHand.fingerDip(.ring)], at: 0.2)
+        XCTAssertTrue(held.middleGrabbed)
+        XCTAssertFalse(held.grabbed, "`grabbed` stays left-only")
+        XCTAssertFalse(held.rightGrabbed, "…and `rightGrabbed` right-only")
+        XCTAssertEqual(held.closingProgress, 1, accuracy: 1e-9,
+                       "the ring fills for whichever button is down")
+
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.3, count: 2)
+        let (_, lifted) = feed([SyntheticHand.mouseTap(indexDown: false)], at: 0.4)
+        XCTAssertFalse(lifted.middleGrabbed)
+        XCTAssertLessThan(lifted.closingProgress, 0.05)
+    }
+
+    func testChangingTheMiddleClickFingerMidPressReleasesIt() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let down = feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 3)
+        XCTAssertEqual(middleDowns(down).count, 1)
+
+        engine.config.middleClickFinger = .little
+
+        let (events, overlay) = feed([SyntheticHand.fingerDip(.ring)], at: 0.25)
+        XCTAssertEqual(middleUps(events).count, 1, "the finger holding the button changed under it")
+        XCTAssertEqual(middleUps(events)[0].0, middleDowns(down)[0].0)
+        XCTAssertFalse(overlay.middleGrabbed)
+        XCTAssertTrue(middleUps(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                           from: 0.3, count: 3)).isEmpty, "…and only once")
+    }
+
+    func testDisablingMiddleClickMidPressReleasesIt() {
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(middleDowns(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                              from: 0.1, count: 3)).count, 1)
+
+        engine.config.middleClickEnabled = false
+
+        XCTAssertEqual(middleUps(feed([SyntheticHand.fingerDip(.ring)], at: 0.25).events).count, 1)
+        XCTAssertTrue(middleDowns(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                             from: 0.3, count: 6)).isEmpty)
+    }
+
+    func testMiddlePressBlocksScrollEngageUntilReleased() {
+        // A press always wins: with the middle button held on the ring
+        // finger, folding the middle finger in completes the scroll pose —
+        // and nothing may scroll until that fold's own relative-ratio
+        // release lets the button go first.
+        useMiddleClick(.ring)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(middleDowns(feedFrames([SyntheticHand.fingerDip(.ring)],
+                                              from: 0.1, count: 3)).count, 1)
+
+        var sawUp = false
+        var all: [GestureEvent] = []
+        for i in 0..<8 {
+            let e = feed([SyntheticHand.scrollPose(wrist: Vec2(0.5, 0.7 - Double(i) * 0.02))],
+                         at: 0.25 + Double(i) / 30).events
+            if !sawUp {
+                XCTAssertTrue(scrolls(e).isEmpty, "no scroll before the button lets go")
+            }
+            if !middleUps(e).isEmpty { sawUp = true }
+            all += e
+        }
+        XCTAssertTrue(sawUp, "folding the other finger in releases the relative dip")
+        XCTAssertFalse(scrolls(all).isEmpty, "…then the pose scrolls normally")
+    }
+
+    func testActiveScrollNeverMiddleClicks() {
+        // The other way around: while a scroll is in flight, a ring that
+        // reads dipped (the fold drifting ring-deep) must not press the
+        // middle button — the scroll owns the hand.
+        var config = Self.testConfig()
+        config.rightClickEnabled = false
+        config.middleClickEnabled = true
+        config.middleClickFinger = .ring
+        engine = GestureEngine(config: config)
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        // Ring fully curled, middle only half-bent: still the held pose, but
+        // the ring-vs-middle differential now reads like a genuine dip.
+        func ringDeep(wrist: Vec2) -> Hand {
+            SyntheticHand.build(
+                pose: .init(fingerDirs: SyntheticHand.relaxedDirs,
+                            curled: [.ring], semiCurled: [.middle],
+                            thumbTipOffset: SyntheticHand.thumbExtendedOffset),
+                wrist: wrist)
+        }
+        var events: [GestureEvent] = []
+        for i in 1...8 {
+            events += feed([ringDeep(wrist: Vec2(0.5, 0.7 - Double(i) * 0.02))],
+                           at: 0.25 + Double(i) / 30).events
+        }
+        XCTAssertTrue(middleDowns(events).isEmpty, "an active scroll blocks the middle engage")
+        XCTAssertFalse(scrolls(events).isEmpty, "…and the scroll keeps flowing")
+    }
+
+    func testScrollPoseEntryNeverPhantomsAMiddleButtonPress() {
+        // The same transient the right button guards against: folding into
+        // the scroll pose reads, for a frame or two, like the middle-click
+        // finger dipping ahead of its reference. The shared guard (the
+        // pose's other folding finger must still be extended) blocks it.
+        for finger in [Finger.middle, .ring] {
+            var config = Self.testConfig()
+            config.rightClickEnabled = false
+            config.middleClickEnabled = true
+            config.middleClickFinger = finger
+            engine = GestureEngine(config: config)
+            feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+
+            var events: [GestureEvent] = []
+            for i in 0..<10 {
+                events += feed([SyntheticHand.scrollPose(wrist: Vec2(0.5, 0.7 - Double(i) * 0.01))],
+                               at: 0.1 + Double(i) / 30).events
+            }
+            XCTAssertTrue(middleDowns(events).isEmpty,
+                          "folding into the scroll pose is not a \(finger.rawValue) dip")
+            XCTAssertFalse(scrolls(events).isEmpty, "…it is a scroll")
+        }
+    }
+
     // MARK: - Scroll
 
     func testScrollPoseScrollsUpAndDown() {
@@ -1221,6 +1635,118 @@ final class GestureEngineTests: XCTestCase {
                         thumbTipOffset: SyntheticHand.thumbExtendedOffset))
         let e = feedFrames([ringFirst], from: 0.1, count: 10)
         XCTAssertTrue(rightDowns(e).isEmpty, "a fold-in-progress is not a ring dip")
+    }
+
+    // MARK: - Horizontal scroll
+
+    /// The test config with horizontal scrolling switched on (vertical-only
+    /// ships as the default).
+    private func useHorizontalScroll(invert: Bool = false) {
+        var config = Self.testConfig()
+        config.scrollAxes = .both
+        config.scrollInvert = invert
+        engine = GestureEngine(config: config)
+    }
+
+    func testSidewaysTravelEmitsNothingInVerticalOnlyMode() {
+        // testConfig keeps the default axes: vertical only.
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        var events: [GestureEvent] = []
+        for i in 1...5 {
+            events += feed([SyntheticHand.scrollPose(wrist: Vec2(0.5 + Double(i) * 0.02, 0.7))],
+                           at: 0.25 + Double(i) / 30).events
+        }
+        XCTAssertTrue(scrolls(events).isEmpty,
+                      "a purely sideways hand emits no scroll events at all")
+        XCTAssertTrue(moves(events).isEmpty, "…and the cursor stays parked — the pose still holds")
+    }
+
+    func testHorizontalScrollFollowsTheHandBothWays() {
+        useHorizontalScroll()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        // Hand left (x shrinking) → positive (scroll-left, axis-2) deltas
+        // that sum to the travel; the untouched vertical axis stays quiet.
+        var leftward: [GestureEvent] = []
+        for i in 1...5 {
+            leftward += feed([SyntheticHand.scrollPose(wrist: Vec2(0.5 - Double(i) * 0.02, 0.7))],
+                             at: 0.25 + Double(i) / 30).events
+        }
+        let leftDeltas = scrollXs(leftward)
+        XCTAssertEqual(leftDeltas.count, 5)
+        XCTAssertTrue(leftDeltas.allSatisfy { $0 > 0 }, "hand left = scroll left")
+        XCTAssertEqual(leftDeltas.reduce(0, +), 0.10, accuracy: 1e-6)
+        XCTAssertTrue(scrolls(leftward).allSatisfy { $0 == 0 },
+                      "purely sideways travel carries no vertical delta")
+
+        // Hand back right → negative deltas.
+        var rightDeltas: [Double] = []
+        for i in 1...5 {
+            rightDeltas += scrollXs(feed(
+                [SyntheticHand.scrollPose(wrist: Vec2(0.4 + Double(i) * 0.02, 0.7))],
+                at: 0.5 + Double(i) / 30).events)
+        }
+        XCTAssertTrue(rightDeltas.allSatisfy { $0 < 0 }, "hand right = scroll right")
+        XCTAssertEqual(rightDeltas.reduce(0, +), -0.10, accuracy: 1e-6)
+    }
+
+    func testDiagonalTravelScrollsBothAxesInOneEvent() {
+        useHorizontalScroll()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        let e = feed([SyntheticHand.scrollPose(wrist: Vec2(0.48, 0.68))], at: 0.25).events
+        let xs = scrollXs(e)
+        let ys = scrolls(e)
+        XCTAssertEqual(xs.count, 1, "one event carries both axes")
+        XCTAssertEqual(xs[0], 0.02, accuracy: 1e-6, "up-left = scroll left…")
+        XCTAssertEqual(ys[0], 0.02, accuracy: 1e-6, "…and scroll up, in the same event")
+    }
+
+    func testInvertFlipsVerticalButNeverHorizontal() {
+        useHorizontalScroll(invert: true)
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        var xs: [Double] = []
+        var ys: [Double] = []
+        for i in 1...4 {
+            let e = feed([SyntheticHand.scrollPose(
+                wrist: Vec2(0.5 - Double(i) * 0.02, 0.7 - Double(i) * 0.02))],
+                at: 0.25 + Double(i) / 30).events
+            xs += scrollXs(e)
+            ys += scrolls(e)
+        }
+        XCTAssertEqual(ys.count, 4)
+        XCTAssertTrue(ys.allSatisfy { $0 < 0 }, "inverted: hand up = scroll down")
+        XCTAssertTrue(xs.allSatisfy { $0 > 0 },
+                      "hand left still = scroll left — the invert setting is vertical-only")
+    }
+
+    func testPerAxisDeadbandAccumulatesIndependently() {
+        useHorizontalScroll()
+        feedFrames([SyntheticHand.openRelaxed()], from: 0, count: 3)
+        feedFrames([SyntheticHand.scrollPose()], from: 0.1, count: 3)
+
+        // 0.003 sideways (under the deadband) alongside 0.006 of climb: the
+        // event carries the vertical delta only, and x holds its anchor.
+        let first = feed([SyntheticHand.scrollPose(wrist: Vec2(0.503, 0.694))], at: 0.25).events
+        XCTAssertEqual(scrolls(first).count, 1)
+        XCTAssertEqual(scrolls(first)[0], 0.006, accuracy: 1e-6)
+        XCTAssertEqual(scrollXs(first)[0], 0, accuracy: 1e-9,
+                       "sub-deadband sideways wobble must not scroll")
+
+        // Another 0.003 sideways: now 0.006 against the unmoved x anchor,
+        // it comes through whole — on its own, y having stopped.
+        let second = feed([SyntheticHand.scrollPose(wrist: Vec2(0.506, 0.694))], at: 0.283).events
+        XCTAssertEqual(scrollXs(second).count, 1)
+        XCTAssertEqual(scrollXs(second)[0], -0.006, accuracy: 1e-6,
+                       "slow sideways travel accumulates against the anchor")
+        XCTAssertEqual(scrolls(second)[0], 0, accuracy: 1e-9,
+                       "…while the unmoved vertical axis stays quiet")
     }
 
     // MARK: - Control trigger

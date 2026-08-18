@@ -9,6 +9,7 @@ enum PawvisTheme {
     // flip with the system appearance.
     static let purple = NSColor(hex: 0x8B5CF6)      // violet-500 — left-click / primary
     static let blue = NSColor(hex: 0x0EA5E9)        // sky-500 — right-click / secondary
+    static let fuchsia = NSColor(hex: 0xD946EF)     // fuchsia-500 — middle-click
     static let purpleLight = NSColor(hex: 0xC4B5FD) // violet-300 — index fingertip
     static let blueLight = NSColor(hex: 0x7DD3FC)   // sky-300 — thumb fingertip
 

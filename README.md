@@ -68,6 +68,8 @@ Mouse**.
   click. A quick release is always a clean click.
 - **Right-click**: dip a second finger (**pinky** by default, configurable).
   Hold it to right-drag.
+- **Middle-click**: give a third finger the middle mouse button in Settings.
+  Off by default.
 - **Drag / hold**: keep the finger down and move. Deliberate movement starts
   a drag immediately; otherwise a short window protects quick clicks from
   turning into accidental drags. The window length is a slider.
@@ -85,7 +87,8 @@ Mouse**.
   pair best with dwell clicking, where clicking moves no fingers.
 - **Scroll**: fold your **middle and ring fingers** in, index and pinky up,
   then move your hand up and down. The cursor parks while the pose is held.
-  Toggle it (or invert the direction) in Settings.
+  Settings has the toggle, a scroll speed slider, optional horizontal
+  scrolling for sideways movement, and an invert switch (vertical only).
 - **Stop tracking**: hold up **both hands** open with fingers spread wide, like
   a double high-five, then wave them across each other. Once they have traded
   sides twice (over and back), hand tracking switches off entirely, the same
@@ -138,10 +141,10 @@ Mouse**.
   fixed area and a slider.
 
 The on-screen claw is your cursor: open while pointing, retracted and purple
-while the left button is held, blue for the right button, ringed in light blue
-while scrolling, faded while control is parked, with a ring that tightens as
-your click forms and a pulse confirming every click. Small dots mark each
-detected fingertip.
+while the left button is held, blue for the right button, pink for the middle
+button, ringed in light blue while scrolling, faded while control is parked,
+with a ring that tightens as your click forms and a pulse confirming every
+click. Small dots mark each detected fingertip.
 
 The menu bar icon opens a live status panel (hands seen, whether control is
 armed, voice-control state) plus a **Gesture Guide** window that walks

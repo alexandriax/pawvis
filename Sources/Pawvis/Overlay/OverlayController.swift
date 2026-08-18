@@ -116,9 +116,14 @@ final class OverlayController {
                 now: CACurrentMediaTime())
         }
 
-        let anyGrab = overlay.grabbed || overlay.rightGrabbed
+        let anyGrab = overlay.grabbed || overlay.rightGrabbed || overlay.middleGrabbed
         let grabRose = anyGrab && !prevGrabbed
-        let grabTint = overlay.rightGrabbed ? PawvisTheme.blue : PawvisTheme.purple
+        // One press at a time, so at most one of these is set: purple for
+        // left, blue for right, fuchsia for middle — each button's tint is
+        // the 500-weight of a hue the overlay already speaks.
+        let grabTint = overlay.rightGrabbed ? PawvisTheme.blue
+            : overlay.middleGrabbed ? PawvisTheme.fuchsia
+            : PawvisTheme.purple
         prevGrabbed = anyGrab
 
         for window in windows {
@@ -149,11 +154,13 @@ final class OverlayController {
             }
 
             // The claw IS the cursor: open paw while pointing, closed paw
-            // while a button is down — purple for left, blue for right. The
-            // ring tightens as the click gesture forms and fills while held.
+            // while a button is down — purple for left, blue for right,
+            // fuchsia for middle. The ring tightens as the click gesture
+            // forms and fills while held.
             if config.showCursorHalo, let cursor = overlay.cursor, let local = localize(cursor) {
                 model.clawCursor = .init(
                     center: local, closed: anyGrab, right: overlay.rightGrabbed,
+                    middle: overlay.middleGrabbed,
                     dimmed: !overlay.armed)
 
                 // No ring while control is parked: it advertises a click that
@@ -277,9 +284,11 @@ struct OverlayRenderModel {
     struct ClawCursor {
         var center: CGPoint
         /// Closed = a button is down: the retracted-claw glyph, tinted purple
-        /// for left and blue for right. Open = pointing: full claw, white.
+        /// for left, blue for right, fuchsia for middle. Open = pointing:
+        /// full claw, white.
         var closed: Bool
         var right: Bool = false
+        var middle: Bool = false
         /// Faded: the hand is tracked but the control trigger hasn't armed,
         /// so the claw is parked where control was last let go.
         var dimmed: Bool = false
@@ -456,9 +465,14 @@ final class OverlayContentView: NSView {
 
         let glyph = claw.closed ? Self.clawClosedGlyph : Self.clawOpenGlyph
         if glyph != nil {
-            let stateKey = claw.closed ? (claw.right ? "closed-right" : "closed") : "open"
+            let stateKey = claw.closed
+                ? (claw.right ? "closed-right" : claw.middle ? "closed-middle" : "closed")
+                : "open"
             let fillColor: NSColor = claw.closed
-                ? (claw.right ? PawvisTheme.blue : PawvisTheme.purple) : .white
+                ? (claw.right ? PawvisTheme.blue
+                    : claw.middle ? PawvisTheme.fuchsia
+                    : PawvisTheme.purple)
+                : .white
             clawShadowLayer.isHidden = false
             clawFillLayer.isHidden = false
             clawFallbackDot.isHidden = true
@@ -482,7 +496,10 @@ final class OverlayContentView: NSView {
                 transform: nil)
             clawFallbackDot.opacity = claw.dimmed ? 0.35 : 1
             clawFallbackDot.fillColor = (claw.closed
-                ? (claw.right ? PawvisTheme.blue : PawvisTheme.purple) : .white).cgColor
+                ? (claw.right ? PawvisTheme.blue
+                    : claw.middle ? PawvisTheme.fuchsia
+                    : PawvisTheme.purple)
+                : .white).cgColor
         }
     }
 

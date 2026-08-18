@@ -389,14 +389,48 @@ private struct MouseSettingsTab: View {
             Divider()
 
             SettingToggle(
+                title: "Middle-click",
+                caption: "Off by default. Gives a third finger the middle mouse button — open links in background tabs, close tabs with one click.",
+                isOn: $store.settings.gestures.middleClickEnabled)
+
+            SettingRow(
+                title: "Middle-click finger",
+                caption: "Dips exactly like the right-click finger. If it collides with the right-click finger, right-click keeps it."
+            ) {
+                Picker("", selection: $store.settings.gestures.middleClickFinger) {
+                    Text("Ring").tag(Finger.ring)
+                    Text("Middle").tag(Finger.middle)
+                    Text("Pinky").tag(Finger.little)
+                }
+                .disabled(!store.settings.gestures.middleClickEnabled)
+            }
+
+            Divider()
+
+            SettingToggle(
                 title: "Scroll gesture",
                 caption: "Fold your middle and ring fingers in — index and pinky stay up — then move your hand up and down to scroll. The cursor parks while the pose is held.",
                 isOn: $store.settings.gestures.scrollEnabled)
 
             SettingToggle(
+                title: "Horizontal scrolling",
+                caption: "Sideways hand movement scrolls sideways too, with the same deadband per axis. Off: only vertical movement scrolls.",
+                isOn: Binding(
+                    get: { store.settings.gestures.scrollAxes == .both },
+                    set: { store.settings.gestures.scrollAxes = $0 ? .both : .vertical }))
+                .disabled(!store.settings.gestures.scrollEnabled)
+
+            SettingToggle(
                 title: "Invert scroll direction",
-                caption: "On: moving your hand up scrolls the page down.",
+                caption: "On: moving your hand up scrolls the page down. Vertical only — horizontal scrolling always follows the hand.",
                 isOn: $store.settings.gestures.scrollInvert)
+                .disabled(!store.settings.gestures.scrollEnabled)
+
+            LabeledSlider(
+                label: "Scroll speed",
+                caption: "How much a hand movement scrolls, both axes. Left: slower, more precise. Right: faster.",
+                value: $store.settings.gestures.scrollGain,
+                range: GestureConfig.scrollGainRange)
                 .disabled(!store.settings.gestures.scrollEnabled)
 
             Divider()
@@ -445,7 +479,7 @@ private struct MouseSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, dwell click, the pointer source, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the control trigger, sensitivity, right-click, middle-click, scrolling, dwell click, the pointer source, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
             }
         }
     }

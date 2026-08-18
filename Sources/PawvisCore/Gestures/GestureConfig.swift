@@ -26,6 +26,17 @@ public enum ControlTrigger: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Which directions the scroll pose scrolls in. Vertical-only is the
+/// default — most content scrolls one way, and a hand hovering in the air
+/// always drifts a little sideways.
+public enum ScrollAxes: String, Codable, CaseIterable, Sendable {
+    /// Vertical hand travel scrolls; sideways travel is ignored.
+    case vertical
+    /// Both: sideways hand travel emits horizontal (axis-2) wheel deltas
+    /// alongside the vertical ones, each axis with its own deadband.
+    case both
+}
+
 /// How the interaction box — the slice of the camera view that maps onto the
 /// whole screen — is chosen.
 public enum ReachMode: String, Codable, CaseIterable, Sendable {
@@ -92,14 +103,42 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// Release tracks engage by the same hysteresis as the left button.
     public var rightReleaseRatio: Double { rightEngageRatio + pinchReleaseHysteresis }
 
+    // MARK: Middle click
+    /// Dip a third finger to press the middle button. Off by default — two
+    /// buttons cover most hands, and a third dip costs a finger the scroll
+    /// pose and right-click might want.
+    public var middleClickEnabled: Bool = false
+    /// Whose dip middle-clicks. Same rules as `rightClickFinger`: `.index`
+    /// (the left button's finger) turns it off, and so does colliding with
+    /// the active right-click finger — right-click keeps the finger.
+    public var middleClickFinger: Finger = .ring
+    /// The middle-click dip rides the same sensitivity slider and dip factor
+    /// as the other two buttons.
+    public var middleEngageRatio: Double { pinchEngageRatio * Self.dipEngageFactor }
+    /// Release tracks engage by the same hysteresis as the other buttons.
+    public var middleReleaseRatio: Double { middleEngageRatio + pinchReleaseHysteresis }
+
     // MARK: Scroll
     /// Fold the middle and ring fingers in — index and little stay up — and
     /// vertical hand movement scrolls instead of moving the cursor (which
     /// parks while the pose is held).
     public var scrollEnabled: Bool = true
     /// Flip which way the page moves relative to the hand. Off: hand up =
-    /// scroll up (`.scroll` deltas are positive-up wheel units).
+    /// scroll up (`.scroll` deltas are positive-up wheel units). Vertical
+    /// only, like a mouse's scroll-direction setting — horizontal is never
+    /// inverted.
     public var scrollInvert: Bool = false
+    /// Whether sideways hand travel scrolls too. Vertical-only by default.
+    public var scrollAxes: ScrollAxes = .vertical
+    /// Screen-heights (or -widths) of content scrolled per screen-height
+    /// (or -width) of hand travel — the Scroll speed slider. The engine
+    /// emits normalized deltas; the app's posting layer applies this gain.
+    /// >1 because a page-per-sweep felt sluggish next to a trackpad.
+    public var scrollGain: Double = 2.2
+    /// The Scroll speed slider's range; the tolerant decoder clamps stored
+    /// values into it, so a hand-edited settings file can't post glacial or
+    /// screen-length wheel steps.
+    public static let scrollGainRange: ClosedRange<Double> = 0.5...5.0
 
     // MARK: Dwell click
     /// Click by holding still: with cursor control armed and no button down,
@@ -183,7 +222,8 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         case controlTrigger
         case pinchEngageRatio, pinchReleaseHysteresis, pinchDebounceFrames
         case rightClickEnabled, rightClickFinger
-        case scrollEnabled, scrollInvert
+        case middleClickEnabled, middleClickFinger
+        case scrollEnabled, scrollInvert, scrollAxes, scrollGain
         case dwellClickEnabled, dwellSeconds
         case crissCrossDisableEnabled, crissCrossDisableCrossings
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
@@ -233,8 +273,16 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .rightClickEnabled) { rightClickEnabled = v }
         if let v = try? c.decodeIfPresent(Finger.self, forKey: .rightClickFinger) { rightClickFinger = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .middleClickEnabled) { middleClickEnabled = v }
+        if let v = try? c.decodeIfPresent(Finger.self, forKey: .middleClickFinger) { middleClickFinger = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollEnabled) { scrollEnabled = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .scrollInvert) { scrollInvert = v }
+        if let v = try? c.decodeIfPresent(ScrollAxes.self, forKey: .scrollAxes) { scrollAxes = v }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .scrollGain) {
+            // Clamped to the slider's range, not trusted verbatim: the gain
+            // multiplies straight into posted wheel pixels.
+            scrollGain = min(max(v, Self.scrollGainRange.lowerBound), Self.scrollGainRange.upperBound)
+        }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .dwellClickEnabled) { dwellClickEnabled = v }
         if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .dwellSeconds) {
             // Settings → Mouse → "Dwell time" slider (`range: 0.5...3.0`).
