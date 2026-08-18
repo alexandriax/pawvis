@@ -42,10 +42,14 @@ public final class VoiceControlParser {
     /// - Glued mid-utterance (the recognizer joined ambient speech to the
     ///   command segment): accepted ONLY when what follows the wake word
     ///   parses as a deterministic command — "she said pawvis was busy"
-    ///   stays ambient, "…anyway pawvis open safari" acts.
+    ///   stays ambient, "…anyway pawvis open safari" acts. With
+    ///   `config.strictWake` on (the agent hand-off is live), this tier is
+    ///   disabled outright: mid-utterance stitching is a mishearing surface
+    ///   no accept should ride when accepting means arbitrary execution.
     public func wakeRemainder(_ transcript: String) -> String? {
         guard let match = wakeMatch(in: transcript, tolerance: 1) else { return nil }
         if match.trusted { return match.remainder }
+        if config.strictWake { return nil }
         return remainderIsDeterministicCommand(match.remainder) ? match.remainder : nil
     }
 
@@ -64,8 +68,10 @@ public final class VoiceControlParser {
     }
 
     /// True when a remainder parses to a plain deterministic command (or
-    /// typing) — the acceptance bar for glued-speech wake matches.
-    func remainderIsDeterministicCommand(_ remainder: String) -> Bool {
+    /// typing) — the acceptance bar for glued-speech wake matches, and (via
+    /// `UtteranceGate.decide(strictCommandBar:)`) for what the armed capture
+    /// window may take when strict wake is on.
+    public func remainderIsDeterministicCommand(_ remainder: String) -> Bool {
         let result = parseRemainder(remainder)
         if !result.typing.isEmpty { return true }
         switch result.command {
@@ -621,6 +627,20 @@ public final class VoiceControlParser {
     /// How far into an utterance the wake word may sit (chunks skipped).
     private static let maxWakeSkip = 3
 
+    /// Fuzzy (edit-distance) wake matching needs candidates at least this
+    /// long: at five characters, one edit reaches common names ("pavis" ± 1
+    /// = "Davis", "Paris"). Shorter wake words and aliases still match —
+    /// exactly, as written.
+    public static let fuzzyMinCandidateLength = 6
+
+    /// True when this wake word (or alias) is long enough for edit-distance
+    /// tolerance, measured on the same folded token matching uses ("Paw
+    /// Viz" → "pawviz"). Settings shows a hint when it isn't, so nobody
+    /// discovers by mishearing that a short wake word matches strictly.
+    public static func supportsFuzzyMatching(_ wakeWord: String) -> Bool {
+        foldedWakeToken(wakeWord).count >= fuzzyMinCandidateLength
+    }
+
     /// Finds the wake word within the first few chunks of the utterance.
     /// Skipped filler keeps full trust; skipped non-filler (the recognizer
     /// glued ambient speech to a command segment) is matched but marked
@@ -663,15 +683,16 @@ public final class VoiceControlParser {
         for k in 1...min(maxCandidateWords + 1, chunks.count) {
             let joined = chunks[0..<k].map { Self.normalize(String($0)) }.joined()
             guard joined.count >= 3 else { continue }
-            // Fuzzy matching needs 6+ character candidates (at five, one
-            // edit reaches common names — "pavis" ± 1 = "Davis", "Paris")
-            // and a shared initial letter (a garble that loses the opening
-            // consonant is beyond rescuing; requiring it keeps "Davis, open
-            // the meeting notes" ambient at every tier). Short aliases
-            // still match — exactly, as written.
+            // Fuzzy matching needs `fuzzyMinCandidateLength`+ character
+            // candidates (at five, one edit reaches common names — "pavis"
+            // ± 1 = "Davis", "Paris") and a shared initial letter (a garble
+            // that loses the opening consonant is beyond rescuing; requiring
+            // it keeps "Davis, open the meeting notes" ambient at every
+            // tier). Short aliases still match — exactly, as written.
             let matched = candidates.contains(joined)
                 || candidates.contains { candidate in
-                    candidate.count >= 6 && candidate.first == joined.first
+                    candidate.count >= Self.fuzzyMinCandidateLength
+                        && candidate.first == joined.first
                         && abs(candidate.count - joined.count) <= tolerance
                         && Self.editDistance(joined, candidate, isAtMost: tolerance)
                 }

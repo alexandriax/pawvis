@@ -23,6 +23,11 @@ Extras:
   eyes-on hook as `PAWVIS_OPEN_SETTINGS` below. Its posed-hand art is
   bundle-only, so a bare `swift run` shows the SF Symbol fallbacks instead:
   look at the guide from `build/Pawvis.app`, not from the binary.
+- `PAWVIS_OPEN_WELCOME=1` — open the first-run welcome window at launch
+  regardless of the `Pawvis.firstRunCompleted` flag. A genuinely new install
+  (flag unset, camera not yet granted) gets it automatically instead of
+  auto-starting tracking; `PAWVIS_NO_AUTOSTART=1` suppresses that and leaves
+  the flag untouched, so automated runs stay headless.
 - `Pawvis --gesture-eval <video…> [--verbose]` — run the real Vision +
   engine pipeline over a webcam recording and print every custom gesture
   that fires (plus per-frame openness/splay/palm diagnostics with
@@ -151,6 +156,36 @@ Measured on macOS 26, and easy to get wrong:
 - `PAWVIS_NO_AUTOSTART=1` skips the reconcile as well as the camera, so
   automated runs don't leave a login item behind pointing at a build directory.
 
+## Energy and idle
+
+With the defaults, the camera and per-frame Vision inference run from login
+to shutdown, so the app owns two rest states (`PawvisController`):
+
+- **The lock screen pauses tracking** (`com.apple.screenIsLocked` /
+  `com.apple.screenIsUnlocked` over `DistributedNotificationCenter`). On
+  lock: release anything held (the same release path `stopTracking` uses —
+  synthetic events used to land on the lock screen itself), stop the camera,
+  and keep `trackingActive` true; the menu's status line shows the published
+  `pauseReason` ("Paused on the lock screen"). Unlock resumes with a fresh
+  engine, and a session started while locked (a voice command can) comes up
+  paused. Sleep/wake and capture-failure recovery are deliberately separate
+  paths, not this one.
+- **No hands for 10 s throttles Vision, never the camera** (`IdleThrottle`,
+  pure PawvisCore and clock-free like the rest of it; `FrameThrottleBox` is
+  its lock-guarded face at the camera tap). Frames skip inference before it
+  runs — one in six processes, ~5 fps of the locked 30 — because skipping
+  inference is free while reconfiguring the AVCaptureSession glitches. The
+  first processed frame containing a hand exits the throttle at once. Low
+  Power Mode shortens the no-hands delay to 3 s and sparsens the probe to
+  one frame in fifteen (~2 fps). The thresholds are constants, chosen
+  rather than measured; make them settings only if someone actually asks.
+- **Skipped frames never reach the gesture engine**, whose only clock is
+  the timestamps of the frames it is given — a delivery gap reads as a slow
+  camera, which the tracking-loss grace already tolerates. A held button,
+  an active scroll, or the open trainer exempts every frame explicitly:
+  throttling mid-press must be impossible by construction, even though the
+  no-hands clock could not be running then anyway.
+
 ## Gesture engine
 
 `PawvisCore` is pure logic — no AppKit, no AVFoundation, no clocks. All timing
@@ -181,6 +216,14 @@ Hard-won constraints, each of which broke something real:
   the permissive pose bands only, and is blocked while any button is engaged
   or held, because a click closes part of the hand. The scroll pose folds
   only two fingers, so it never trips the three-finger disarm line.
+  Arming belongs to the *hand*, never to the slot that survives it: when the
+  armed hand goes missing while a bystander stays visible, primary holds
+  through the tracking-loss grace (a one-frame Vision dropout must not hand
+  the cursor — or a held drag — to a hand that never opted in), and past the
+  grace the survivor inherits control only if it is showing the trigger at
+  that moment. Otherwise any press the departed hand held lands where it
+  was, once, and the ceremony starts over — which is what lets a returning
+  open hand reclaim primary from the resting hand that inherited its slot.
 - **Low-confidence frames hold state, never flap it.** A missing fingertip
   must not release a held button; only the tracking-loss grace window does.
 - **Synthetic mouse events must be paced ≥ ~6 ms apart.** Two CGEvents posted
@@ -434,6 +477,21 @@ none of this:
   permission the mouse already needs. Fire-and-forget actions (the desktop
   switch) report a follow-up line through `GestureActionRunner.onFollowUp`,
   which replaces the provisional pill text.
+- **Per-app actions resolve at fire time, through one pure rule.** Every
+  binding (built-in and trained alike) can carry `AppActionOverride` rows;
+  `PerAppAction.resolve` (PawvisCore, unit-tested) picks the override whose
+  bundle ID matches the frontmost app and falls back to the base action
+  otherwise. The app layer's entire contribution is one
+  `NSWorkspace.shared.frontmostApplication` read per fire in
+  `PawvisController` (no observer, no polling). A nil base with overrides
+  present is the app-gated gesture: detection stays on (`firesAnywhere` is
+  the detector gate in both `detectorConfig`s, because the frontmost check
+  happens at fire time, not detection time) and the fire resolves to
+  nothing outside the listed apps. Overrides persist element-tolerantly
+  like every list (bundle ID strict, name falls back to the bundle ID,
+  unreadable action leaves the row unassigned), and an unassigned override
+  changes nothing. Only the bundle ID and display name are stored; icons
+  are looked up live, so an uninstalled app keeps its readable row.
 
 ## Gesture art
 
@@ -524,6 +582,22 @@ rather than verified.
    away by the final ("Pawvis" → "Paw this"), lets the near remainder act
    directly, no AI round-trip (`VoiceController.handleFinal`).
 
+**Agent mode runs the ladder strict** (`VoiceControlConfig.strictWake`,
+transient — never persisted; `VoiceController.setConfig` switches it on
+whenever `agentExecutor` is non-empty, because an accept there hands the
+utterance to a permissions-bypassed CLI): tier 3 is disabled outright, and
+the utterance gate's capture window stops taking the next final verbatim — a
+wake-less capture must itself parse deterministically
+(`UtteranceGate.decide(strictCommandBar:)`; a final that carries the wake
+word never consults the bar, so wake-led free-form speech still reaches the
+agent). Tiers 1/2/4/5 stay. PawvisCore stays app-agnostic: the core takes
+the flag, the app decides when it's on. Related hardening: "jarvis" left the
+default aliases (a stock movie wake word made any TV audio a full-trust
+accept; saved alias lists keep whatever they saved), the Settings wake-word
+field trims on commit and snaps an emptied field back to the default, and a
+wake word under `fuzzyMinCandidateLength` (six folded characters) shows a
+"matches strictly" hint instead of silently losing edit-distance tolerance.
+
 `Pawvis --wake-eval "<transcript as the recognizer wrote it>" …` prints the
 tier verdict per transcript, no model — paste real mishearings to debug a
 miss. New verbs must keep `.resolve` and the safety phrases out of a
@@ -536,7 +610,14 @@ a hypothesis, checked against the world before a run is allowed to finish
 (`AppNameMatch`, the same fuzzy rules as resolution); `goToURL`/`webSearch`
 confirm a browser is frontmost; click/scroll steps confirm the full-screen
 accessibility signature changed at all, against a baseline snapshot taken
-before the click. A verification failure becomes a failure-history line and
+before the click. The signature covers element *values* as well as labels
+and frames — a toggle flip is a value-only change (the switch's label and
+frame are identical on both sides of the click), and a value-blind
+signature read every successful toggle click as "nothing changed", so the
+failed check made the loop click the switch again, undoing the user's
+request until the failure cap aborted. Numeric values round to 2 decimals
+in the hash so a slider's float noise never reads as change. A
+verification failure becomes a failure-history line and
 the loop keeps going: honest failure beats a fake success. `typeText` and
 `pressKey` claims are still trusted as reported — an unverifiable false
 negative would just mean blind, destructive repetition.
@@ -805,16 +886,21 @@ Rules that keep the site honest:
   there before it gets marketed anywhere else on the page.
 - **One third party, on purpose.** The page loads Google Analytics
   (`G-FPVSRRZQTY`) and nothing else: fonts are self-hosted woff2 in
-  `docs/assets/fonts/`, and there are no CDNs, badge images or other embeds.
-  The analytics tag measures the *website*; it has no connection to the app,
-  which still ships with no telemetry of any kind. Don't let the two get
-  conflated in copy, and don't add a second external dependency casually.
-- **The photography and demo video are static, committed assets**
-  (`docs/assets/*.jpg`, `demo.mp4`), generated once with OpenAI's image/video
-  APIs using the git-ignored `.env` key. The site itself needs no key, ever;
-  the Secrets section above still holds. Regenerate only deliberately, keeping
-  the same filenames (`hero-office.jpg`, `gesture-closeup.jpg`,
-  `voice-command.jpg`, `demo.mp4`).
+  `docs/assets/fonts/`, the Product Hunt badge is a self-hosted SVG
+  (`docs/assets/ph-badge.svg`, still linking out to producthunt.com), and
+  there are no CDNs or other embeds. The analytics tag measures the
+  *website*; it has no connection to the app, which still ships with no
+  telemetry of any kind. Don't let the two get conflated in copy, and don't
+  add a second external dependency casually.
+- **The app screenshots and demo video are static, committed assets.**
+  `docs/assets/app-*.png` (`app-gesture-guide.png`, `app-menu.png`,
+  `app-settings-custom.png`, `app-settings-gestures.png`) are window captures
+  of the running app, shot with alpha intact; retake them by hand after a UI
+  change, keeping the same filenames. `docs/assets/demo.mp4` and its poster
+  `demo-poster.jpg` are a generated demo film, made once with OpenAI's video
+  API using the git-ignored `.env` key. The site itself needs no key, ever;
+  the Secrets section above still holds. Regenerate only deliberately,
+  keeping the same filenames.
 - **The download button points at the permanent asset URL**
   (`releases/latest/download/Pawvis.zip`), same rule as the README button:
   never version it, and it never needs editing per release.

@@ -31,6 +31,13 @@ struct AgentSessionSnapshot: Identifiable, Equatable {
 /// `run` always resolves — normal exit, timeout (SIGTERM, then SIGKILL if
 /// ignored), launch failure, or user cancel — so the caller can always flash
 /// an outcome.
+///
+/// Every CLI runs as the leader of its own process group
+/// (`GroupLeaderProcess`), and cancellation signals the group: the agents run
+/// with permission prompts bypassed, so "cancel" has to take down the shell
+/// commands the agent already spawned, not just the CLI that spawned them.
+/// For the same reason, quitting Pawvis funnels through `shutdownOnAppQuit()`
+/// — no run may keep working headless after its cancel UI is gone.
 @MainActor
 final class AgentSessionManager: ObservableObject {
     static let shared = AgentSessionManager()
@@ -45,13 +52,16 @@ final class AgentSessionManager: ObservableObject {
     private static let maxCollectedBytes = 262_144
     /// Grace between SIGTERM and SIGKILL for a process that ignores the first.
     private static let killGraceSeconds: TimeInterval = 3
+    /// At app quit there is no run loop left for the 3s escalation, so quit
+    /// waits at most this long for SIGTERM to land before SIGKILLing groups.
+    private static let quitGraceSeconds: TimeInterval = 0.5
     /// How long a finished session stays visible before being cleared.
     private static let lingerSeconds: TimeInterval = 4
 
     private final class Run {
         let id = UUID()
         let tool: AgentCLIExecutor.Tool
-        let process = Process()
+        let process = GroupLeaderProcess()
         var stdoutRemnant = Data()
         var stderrRemnant = Data()
         var collectedText = ""
@@ -101,20 +111,20 @@ final class AgentSessionManager: ObservableObject {
         AgentAuditLog.shared.recordSent(id: run.id, tool: tool, instruction: instruction)
 
         let process = run.process
-        process.executableURL = URL(fileURLWithPath: binary)
+        process.executablePath = binary
         process.arguments = tool.arguments(prompt: AgentCLIExecutor.prompt(for: instruction))
-        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        process.currentDirectoryPath = FileManager.default.homeDirectoryForCurrentUser.path
         // GUI apps get a minimal PATH; give the agent a usable one.
         var environment = ProcessInfo.processInfo.environment
         let extra = AgentCLIExecutor.searchDirectories.joined(separator: ":")
         environment["PATH"] = "\(extra):\(environment["PATH"] ?? "/usr/bin:/bin")"
         process.environment = environment
 
+        // stdin is /dev/null inside GroupLeaderProcess.
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        process.standardInput = FileHandle.nullDevice
 
         installReader(stdout.fileHandleForReading, run: run, isStdout: true)
         installReader(stderr.fileHandleForReading, run: run, isStdout: false)
@@ -165,19 +175,62 @@ final class AgentSessionManager: ObservableObject {
         terminate(run)
     }
 
+    /// Kill every running session — the spoken brake ("Pawvis, stop").
+    /// `cancel(_:)` alone is only reachable from mouse UI, and a voice user
+    /// may have neither pointer nor patience mid-run. Returns how many runs
+    /// are still alive (already-SIGTERMed ones included, so a repeated
+    /// "stop" during the kill grace still reads as braking, not as "nothing
+    /// running"); only not-yet-cancelled runs get a new SIGTERM.
+    @discardableResult
+    func cancelAll() -> Int {
+        let alive = runs.values.filter { $0.process.isRunning }
+        for run in alive where !run.cancelled {
+            cancel(run.id)
+        }
+        return alive.count
+    }
+
+    /// App-quit cleanup. `cancelAll()` alone is not enough here: the SIGKILL
+    /// escalation is scheduled on a run loop that dies with the app, and a
+    /// permissions-bypassed agent must never keep working unattended after
+    /// the app (and its cancel UI) is gone. So: SIGTERM every group now, give
+    /// them a short bounded window to exit cleanly, then SIGKILL each group
+    /// outright — blocking quit for at most ~`quitGraceSeconds`, never the
+    /// full 3s escalation.
+    func shutdownOnAppQuit() {
+        let running = runs.values.filter { $0.process.isRunning }
+        guard !running.isEmpty else { return }
+        Log.voice.log("Quitting with \(running.count) agent run(s) live; terminating their process groups")
+        cancelAll()
+        let deadline = Date().addingTimeInterval(Self.quitGraceSeconds)
+        while Date() < deadline, running.contains(where: { $0.process.isRunning }) {
+            usleep(50_000) // reapers run on their own threads; main can block
+        }
+        for run in running {
+            // Unconditional sweep: a leader can exit on SIGTERM while a
+            // grandchild ignores it. Groups that are fully gone are ESRCH,
+            // which signalGroup treats as done.
+            run.process.signalGroup(SIGKILL)
+        }
+    }
+
     // MARK: - Process plumbing
 
-    /// SIGTERM now; SIGKILL if it's still alive after the grace period. The
-    /// termination handler fires either way, which is what finalizes the run.
+    /// SIGTERM the whole process group now; SIGKILL the group if anything in
+    /// it is still alive after the grace period. Group-wide because the CLI
+    /// spawns children of its own (shell commands, node workers): signalling
+    /// only the CLI used to leave those running as orphans, finishing
+    /// permissions-bypassed work nobody could see or stop. The termination
+    /// handler fires either way, which is what finalizes the run.
     private func terminate(_ run: Run) {
         guard run.process.isRunning else { return }
-        run.process.terminate()
+        run.process.signalGroup(SIGTERM)
         let pid = run.process.processIdentifier
         let killItem = DispatchWorkItem { [weak self] in
             guard let self, let run = self.runs[run.id] else { return }
             if run.process.isRunning {
-                Log.voice.error("Agent ignored SIGTERM; sending SIGKILL to pid \(pid)")
-                kill(pid, SIGKILL)
+                Log.voice.error("Agent ignored SIGTERM; sending SIGKILL to process group \(pid)")
+                run.process.signalGroup(SIGKILL)
             }
         }
         run.killItem = killItem

@@ -4,7 +4,7 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free hand control</em></p>
+<p align="center"><em>Touch-free hand control for your Mac</em></p>
 
 ---
 
@@ -90,14 +90,30 @@ Mouse**.
   virtual desktops, open Mission Control or App Exposé, show the desktop,
   snap the focused window (halves, thirds, two-thirds, quarters, center,
   maximize, minimize, next display), press Return or Escape, go back or
+<<<<<<< HEAD
   forward, switch tabs, play/pause, stop tracking, toggle voice control,
   open any app, press any keyboard shortcut, or run a shell command you
   provide (it runs exactly as typed, as you). Every gesture row carries its
   own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
   fling distance), so a gesture that won't trigger, or triggers too easily,
-  can be dialed in on the spot. The pill at the top of the screen confirms
-  every fire, and the Gesture Guide illustrates every gesture in full, with
-  what it is currently set to do.
+  can be dialed in on the spot. Every binding can also carry **per-app
+  actions**: add apps to a gesture's row and give each its own action, and
+  whichever app is frontmost when the gesture fires decides which action
+  runs (a thumbs up can advance slides in Keynote and press your merge
+  shortcut in the browser). Leave the main action unassigned and the
+  gesture fires only in the apps you listed. The pill at the top of the
+  screen confirms every fire, and the Gesture Guide illustrates every
+  gesture in full, with what it is currently set to do.
+=======
+  forward, switch tabs, play/pause, adjust volume or brightness, stop
+  tracking, toggle voice control, open any app, press any keyboard shortcut,
+  or run a shell command you provide (it runs exactly as typed, as you).
+  Every gesture row carries its own collapsed **Tuning** section (hold time,
+  wiggle vigor, grab tightness, fling distance), so a gesture that won't
+  trigger, or triggers too easily, can be dialed in on the spot. The pill at
+  the top of the screen confirms every fire, and the Gesture Guide
+  illustrates every gesture in full, with what it is currently set to do.
+>>>>>>> origin/main
 - **Train your own gestures**: **Settings → Gestures → Train New Gesture**
   opens a camera window with your hand's tracking drawn live, a color per
   fingertip and a ring on the palm. Pick one hand or two, perform your
@@ -106,7 +122,8 @@ Mouse**.
   match live before saving. Trained gestures join the Gestures tab with an
   animated badge that replays the learned motion, and they work like the
   built-ins: rename them, remove them, tune how strictly they match, and
-  bind them to any action from the same catalog (or leave them unassigned).
+  bind them to any action from the same catalog (or leave them unassigned);
+  per-app actions work here too.
   Each one can also require a hold before it fires (the pill counts the
   hold down), and a priority switch decides who wins when a gesture looks
   like a click: by default trained gestures keep matching through clicks
@@ -214,7 +231,8 @@ can read (**Settings → Voice → Open agent log**).
 
 [**Download Pawvis.zip**](https://github.com/alexandriax/pawvis/releases/latest/download/Pawvis.zip)
 (always the latest release), unzip, and drag **Pawvis.app** to your
-Applications folder.
+Applications folder. Homebrew users: a cask scaffold lives in
+`Casks/pawvis.rb`, pending submission to homebrew/cask.
 
 Pawvis starts with you after every login, so gesture control is just there.
 Turn it off in **Settings → General → Launch Pawvis at login** (or in System
@@ -255,7 +273,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # the full unit suite, keep it green
 swift build         # debug build
 ```
 

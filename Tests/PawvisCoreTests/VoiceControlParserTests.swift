@@ -44,10 +44,45 @@ final class VoiceControlParserTests: XCTestCase {
     }
 
     func testFuzzyWakeMishearings() {
-        for heard in ["Pavis", "Pawviz", "Paw vis", "Pawbis", "Jarvis", "Purvis"] {
+        for heard in ["Pavis", "Pawviz", "Paw vis", "Pawbis", "Purvis"] {
             let result = parse("\(heard) type hi")
             XCTAssertEqual(result.typing, [.type("hi")], "wake mishearing '\(heard)' must match")
         }
+    }
+
+    func testJarvisIsNotADefaultAlias() {
+        // "jarvis" shipped as a default alias once — a stock movie wake word
+        // with full strict-tier treatment, edit-distance fuzz included, so
+        // any TV audio saying "Jarvis, …" was a tier-1 accept. Fresh
+        // defaults no longer answer to it.
+        XCTAssertFalse(VoiceControlConfig().wakeWordAliases.contains("jarvis"))
+        XCTAssertEqual(parse("Jarvis open Safari"), VoiceParseResult())
+        XCTAssertEqual(parse("Jarvis type hi"), VoiceParseResult())
+        // And no distance-1 neighbor of it sneaks through either.
+        XCTAssertEqual(parse("Jarvus open Safari"), VoiceParseResult())
+    }
+
+    func testUserAddedJarvisAliasStillWakes() {
+        // Removing the default must not remove the ability: a user who
+        // wants it adds it back in Settings and gets the full treatment.
+        parser.config.wakeWordAliases.append("jarvis")
+        XCTAssertEqual(parse("Jarvis open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("Jarvis type hi").typing, [.type("hi")])
+    }
+
+    func testSavedAliasListsSurviveDecodeUntouched() throws {
+        // Existing saved configs keep whatever they saved — the default
+        // change reaches fresh configs only, never a persisted alias list
+        // (which may carry "jarvis" deliberately).
+        let saved = #"{"wakeWordAliases":["pawviz","jarvis"]}"#
+        let decoded = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(saved.utf8))
+        XCTAssertEqual(decoded.wakeWordAliases, ["pawviz", "jarvis"])
+        // A config saved without the key gets the new defaults.
+        let fresh = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data("{}".utf8))
+        XCTAssertEqual(fresh.wakeWordAliases, VoiceControlConfig().wakeWordAliases)
+        XCTAssertFalse(fresh.wakeWordAliases.contains("jarvis"))
     }
 
     func testUnrelatedWordsDoNotWake() {
@@ -195,6 +230,86 @@ final class VoiceControlParserTests: XCTestCase {
         // The glued-tier acceptance bar is "parses to typing or a plain
         // command" — typing counts too, not just VoiceCommand cases.
         XCTAssertEqual(parse("anyway anyway Pawvis type hello").typing, [.type("hello")])
+    }
+
+    // MARK: - Strict wake (agent hand-off live)
+
+    func testStrictWakeDisablesTheGluedTier() {
+        // Baseline: glued speech with a deterministic remainder accepts…
+        XCTAssertEqual(parse("anyway whatever Pawvis open Safari").command,
+                       .open(app: "Safari"))
+        // …but when accepting means handing the utterance to a
+        // permissions-bypassed agent, mid-utterance stitching is a surface
+        // no accept should ride: strict wake refuses it outright,
+        // deterministic remainder or not.
+        parser.config.strictWake = true
+        XCTAssertEqual(parse("anyway whatever Pawvis open Safari"), VoiceParseResult())
+        XCTAssertEqual(parse("anyway anyway Pawvis type hello"), VoiceParseResult())
+    }
+
+    func testStrictWakeKeepsTheUtteranceInitialAndFillerTiers() {
+        parser.config.strictWake = true
+        XCTAssertEqual(parse("Pawvis open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("Pavis open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("Um, Pawvis, open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("pawvis quit chrome").command, .quit(app: "chrome"))
+        // Free-form remainders still reach the ladder — strict wake tightens
+        // WHO gets addressed, not what an addressed utterance may say.
+        XCTAssertEqual(parse("Pawvis make it bigger").command,
+                       .resolve(transcript: "make it bigger"))
+    }
+
+    func testStrictWakeKeepsTheNearTierNominations() {
+        // The near tier only nominates for AI confirmation — never acts by
+        // itself — so it survives strict mode unchanged.
+        parser.config.strictWake = true
+        XCTAssertEqual(parser.nearWakeRemainder("Paw this open Safari"), "open Safari")
+        XCTAssertNil(parser.nearWakeRemainder("she said Paw this open Safari"))
+    }
+
+    func testStrictWakeOffKeepsGluedBehavior() {
+        // The default stays exactly as the earlier tests pin it: strictWake
+        // is opt-in per config, off unless the app turns it on.
+        XCTAssertFalse(parser.config.strictWake)
+        XCTAssertEqual(parse("anyway whatever Pawvis open Safari").command,
+                       .open(app: "Safari"))
+    }
+
+    func testStrictWakeIsTransientNotPersisted() throws {
+        // The flag is app policy, derived per-launch from the agent
+        // setting — a stale persisted copy could leave strict mode on (or
+        // off) against the current handler, so it must never round-trip.
+        var config = VoiceControlConfig()
+        config.strictWake = true
+        let decoded = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: JSONEncoder().encode(config))
+        XCTAssertFalse(decoded.strictWake)
+        // And no stored key can switch it on from disk.
+        let sneaky = #"{"strictWake":true}"#
+        XCTAssertFalse(try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(sneaky.utf8)).strictWake)
+    }
+
+    // MARK: - Wake word fuzz eligibility
+
+    func testShortCustomWakeWordMatchesExactlyOnly() {
+        // Under six folded characters there is no edit-distance tolerance —
+        // the Settings hint exists because this used to be silent.
+        parser.config.wakeWord = "rex"
+        parser.config.wakeWordAliases = []
+        XCTAssertEqual(parse("Rex open Safari").command, .open(app: "Safari"))
+        XCTAssertEqual(parse("Tex open Safari"), VoiceParseResult())
+        XCTAssertEqual(parse("Rexa open Safari"), VoiceParseResult())
+    }
+
+    func testSupportsFuzzyMatchingMirrorsTheMatcher() {
+        XCTAssertTrue(VoiceControlParser.supportsFuzzyMatching("Pawvis"))
+        // Folded the same way matching folds: spaces and case don't count.
+        XCTAssertTrue(VoiceControlParser.supportsFuzzyMatching("Hey Rex"))
+        XCTAssertFalse(VoiceControlParser.supportsFuzzyMatching("rex"))
+        XCTAssertFalse(VoiceControlParser.supportsFuzzyMatching("pavis"))
+        XCTAssertFalse(VoiceControlParser.supportsFuzzyMatching(""))
+        XCTAssertFalse(VoiceControlParser.supportsFuzzyMatching("   "))
     }
 
     // MARK: - Commands: go to / search
@@ -820,5 +935,29 @@ final class SpokenKeyParserTests: XCTestCase {
         XCTAssertNil(chord("the big red button"))
         XCTAssertNil(chord(""))
         XCTAssertNil(chord("command"), "modifier with no key is not a chord")
+    }
+}
+
+/// `VoiceControlConfig`'s field-tolerant decoding — most of its numeric
+/// fields are app-layer UI timers that already fail safe at their point of
+/// use, so they're deliberately left unclamped (the "benign cosmetic
+/// numbers" this repo's tolerant decoders leave alone). `agentTimeoutSeconds`
+/// is the one exception: it reaches `AgentSessionManager.run`, which does
+/// `Int(max(30, timeout))` — a decoded value large enough overflows that
+/// conversion and traps.
+final class VoiceControlConfigTests: XCTestCase {
+    func testAgentTimeoutSecondsClampsToSliderRangeOnDecode() throws {
+        let bogus = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":1e20}"#.utf8))
+        XCTAssertEqual(bogus.agentTimeoutSeconds, 300,
+                       "unclamped, Int(max(30, 1e20)) traps in AgentSessionManager")
+
+        let negative = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":-50}"#.utf8))
+        XCTAssertEqual(negative.agentTimeoutSeconds, 30, "Agent timeout slider min")
+
+        let inRange = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":90}"#.utf8))
+        XCTAssertEqual(inRange.agentTimeoutSeconds, 90, accuracy: 1e-9, "in-range values decode untouched")
     }
 }

@@ -1,5 +1,7 @@
+import AppKit
 import PawvisCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - The Custom tab
 //
@@ -51,6 +53,7 @@ struct CustomGesturesTab: View {
                 Button("Train New Gesture…") { TrainerWindow.show() }
                 CaptionText("Opens the camera. Pawvis control pauses while you train.")
             }
+            TrainedGestureImportExportRow(store: store)
             SettingToggle(
                 title: "Trained gestures take priority over clicks",
                 caption: "Matching keeps running through clicks and scrolls, and once a match is recognized and dwelling, finger dips can't click. A dip that lands before recognition can still click — give the gesture a hold time and the block covers the rest. Off: the mouse always wins, and a gesture that curls your index finger may click instead of firing.",
@@ -90,18 +93,25 @@ private struct CustomGestureRow: View {
         store.settings.customGestures.binding(for: gesture)?.action
     }
 
+    /// Live means it does something somewhere: a base action, or at least
+    /// one per-app action.
+    private var isLive: Bool {
+        store.settings.customGestures.binding(for: gesture)?.firesAnywhere ?? false
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             GestureGlyphView(gesture: gesture, size: 40)
                 .frame(width: 44)
-                .opacity(action == nil ? 0.45 : 1)
+                .opacity(isLive ? 1 : 0.45)
             VStack(alignment: .leading, spacing: 6) {
                 Text(gesture.displayName)
                     .font(.headline)
-                    .foregroundStyle(action == nil ? .secondary : .primary)
+                    .foregroundStyle(isLive ? .primary : .secondary)
                 CaptionText(gesture.howTo)
 
                 GestureActionPicker(action: actionBinding)
+                PerAppActionsEditor(overrides: overridesBinding)
 
                 DisclosureGroup(isExpanded: $showTuning) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -147,7 +157,7 @@ private struct CustomGestureRow: View {
         case .grabFling:
             LabeledSlider(
                 label: "Grab tightness",
-                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight pinch. Right: a looser bunch counts — try moving this right if grabs won't register.",
+                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight cluster. Right: a looser bunch counts — try moving this right if grabs won't register.",
                 value: $store.settings.customGestures.gatherSpread,
                 range: 0.22...0.50)
             LabeledSlider(
@@ -166,16 +176,36 @@ private struct CustomGestureRow: View {
 
     private func setAction(_ newAction: GestureAction?) {
         var bindings = store.settings.customGestures.bindings
-        if let newAction {
-            if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
-                bindings[index].action = newAction
-            } else {
-                bindings.append(CustomGestureBinding(gesture: gesture, action: newAction))
+        if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
+            bindings[index].action = newAction
+            // "Not assigned" with per-app actions still present keeps the
+            // row: that is the app-gated gesture. With neither, the row is
+            // just clutter and goes back to the unbound default.
+            if newAction == nil, bindings[index].overrides.isEmpty {
+                bindings.remove(at: index)
             }
-        } else {
-            bindings.removeAll { $0.gesture == gesture }
+        } else if let newAction {
+            bindings.append(CustomGestureBinding(gesture: gesture, action: newAction))
         }
         store.settings.customGestures.bindings = bindings
+    }
+
+    private var overridesBinding: Binding<[AppActionOverride]> {
+        Binding(
+            get: { store.settings.customGestures.binding(for: gesture)?.overrides ?? [] },
+            set: { newOverrides in
+                var bindings = store.settings.customGestures.bindings
+                if let index = bindings.firstIndex(where: { $0.gesture == gesture }) {
+                    bindings[index].overrides = newOverrides
+                    if bindings[index].action == nil, newOverrides.isEmpty {
+                        bindings.remove(at: index)
+                    }
+                } else if !newOverrides.isEmpty {
+                    bindings.append(CustomGestureBinding(gesture: gesture,
+                                                         overrides: newOverrides))
+                }
+                store.settings.customGestures.bindings = bindings
+            })
     }
 }
 
@@ -271,6 +301,209 @@ struct GestureActionPicker: View {
     }
 }
 
+// MARK: - Per-app actions (shared by built-in and trained rows)
+
+/// The "Per-app actions" accordion under a gesture's action picker: which
+/// apps get their own action instead of the main one. One component for
+/// both gesture kinds, like the action picker above it. Quiet by default —
+/// a gesture with no per-app actions shows only the collapsed caption line;
+/// one that has them opens showing its list, because active overrides that
+/// hide make a gesture's behavior mysterious.
+struct PerAppActionsEditor: View {
+    @Binding var overrides: [AppActionOverride]
+    @State private var expanded: Bool
+
+    init(overrides: Binding<[AppActionOverride]>) {
+        _overrides = overrides
+        _expanded = State(initialValue: !overrides.wrappedValue.isEmpty)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 10) {
+                CaptionText("When one of these apps is frontmost, its action fires instead of the one above. With the main action set to Not assigned, the gesture fires only in the apps listed here and does nothing anywhere else.")
+                ForEach(overrides) { override in
+                    overrideRow(override)
+                }
+                Button("Add App…") { addApp() }
+            }
+            .padding(.top, 8)
+        } label: {
+            Text(overrides.isEmpty
+                 ? "Per-app actions"
+                 : "Per-app actions · \(overrides.count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func overrideRow(_ override: AppActionOverride) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(nsImage: AppOverrideIcon.icon(bundleID: override.bundleID))
+                    .resizable()
+                    .frame(width: 18, height: 18)
+                Text(override.appName)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 130, alignment: .topLeading)
+            .padding(.top, 2)
+
+            GestureActionPicker(action: actionBinding(for: override.bundleID))
+
+            Button {
+                overrides.removeAll { $0.bundleID == override.bundleID }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Remove: \(override.appName) goes back to the main action")
+            .padding(.top, 4)
+        }
+    }
+
+    private func actionBinding(for bundleID: String) -> Binding<GestureAction?> {
+        Binding(
+            get: { overrides.first { $0.bundleID == bundleID }?.action },
+            set: { newAction in
+                guard let index = overrides.firstIndex(where: { $0.bundleID == bundleID })
+                else { return }
+                overrides[index].action = newAction
+            })
+    }
+
+    /// NSOpenPanel on /Applications: the chosen bundle supplies its own
+    /// identifier and display name; the icon is looked up live by bundle ID
+    /// (so nothing image-shaped is persisted).
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        panel.prompt = "Add"
+        panel.message = "Choose the app this gesture should act differently in."
+        guard panel.runModal() == .OK, let url = panel.url,
+              let bundle = Bundle(url: url),
+              let bundleID = bundle.bundleIdentifier else { return }
+        guard !overrides.contains(where: { $0.bundleID == bundleID }) else { return }
+        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
+        overrides.append(AppActionOverride(bundleID: bundleID, appName: name))
+    }
+}
+
+/// App icons by bundle ID, loaded once each — these views re-render on every
+/// settings change, and `NSWorkspace` lookups are not free. An uninstalled
+/// app keeps its saved name and wears the generic app icon.
+@MainActor
+private enum AppOverrideIcon {
+    private static var cache: [String: NSImage] = [:]
+
+    static func icon(bundleID: String) -> NSImage {
+        if let cached = cache[bundleID] { return cached }
+        let image: NSImage
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            image = NSWorkspace.shared.icon(forFile: url.path)
+        } else {
+            image = NSWorkspace.shared.icon(for: .applicationBundle)
+        }
+        cache[bundleID] = image
+        return image
+    }
+}
+
+// MARK: - Export / import
+
+/// Trained templates live only in this settings blob — there's no other copy
+/// anywhere, and no way to recreate one short of re-recording. Export writes
+/// every trained gesture (bound action included) to a `.pawvisgestures`
+/// file; Import reads one back and merges it into the current library as
+/// copies, never overwrites. Quiet by design: two buttons and a caption that
+/// doubles as the outcome report, matching how the rest of this tab reports
+/// state inline rather than with alerts.
+private struct TrainedGestureImportExportRow: View {
+    @ObservedObject var store: SettingsStore
+    @State private var feedback: String?
+
+    private static let fileType = UTType(filenameExtension: "pawvisgestures") ?? .data
+
+    private static let defaultCaption =
+        "Export saves every trained gesture, with its assigned action, to a file you can back up or share. Import merges another file's gestures into yours as copies: a name already in use gets renumbered, and nothing here is ever overwritten."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 10) {
+                Button("Export…") { exportGestures() }
+                    .disabled(store.settings.trainedGestures.gestures.isEmpty)
+                Button("Import…") { importGestures() }
+            }
+            CaptionText(feedback ?? Self.defaultCaption)
+        }
+    }
+
+    private func exportGestures() {
+        let gestures = store.settings.trainedGestures.gestures
+        guard !gestures.isEmpty else { return }
+        guard let data = try? PawvisGestureFile(gestures: gestures).encoded() else {
+            feedback = "Couldn't prepare the export"
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Export Trained Gestures"
+        panel.nameFieldStringValue = "Pawvis Gestures.pawvisgestures"
+        panel.allowedContentTypes = [Self.fileType]
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url, options: .atomic)
+                feedback = "Exported \(gestures.count) gesture\(gestures.count == 1 ? "" : "s")"
+            } catch {
+                feedback = "Couldn't write the file: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func importGestures() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Trained Gestures"
+        panel.allowedContentTypes = [Self.fileType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let data = try Data(contentsOf: url)
+                let file = try PawvisGestureFile.decoded(from: data)
+                guard !file.gestures.isEmpty else {
+                    feedback = "No gestures found in that file"
+                    return
+                }
+                let result = TrainedGestureImport.merge(
+                    existing: store.settings.trainedGestures.gestures,
+                    importing: file.gestures)
+                store.settings.trainedGestures.gestures = result.gestures
+                feedback = summary(for: result)
+            } catch {
+                feedback = "Couldn't import: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func summary(for result: TrainedGestureImport.Result) -> String {
+        let count = result.added.count
+        let noun = count == 1 ? "gesture" : "gestures"
+        guard result.renamedCount > 0 else { return "Imported \(count) \(noun)" }
+        return "Imported \(count) \(noun) (\(result.renamedCount) renamed)"
+    }
+}
+
 // MARK: - One trained gesture
 
 /// A trained gesture's settings row: the animated badge, an editable name,
@@ -292,7 +525,7 @@ private struct TrainedGestureRow: View {
             HStack(alignment: .top, spacing: 12) {
                 TrainedGestureBadge(gesture: gesture, size: 44)
                     .frame(width: 44)
-                    .opacity(gesture.action == nil ? 0.55 : 1)
+                    .opacity(gesture.firesAnywhere ? 1 : 0.55)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         // Display + pencil rather than a bare text field: a
@@ -332,6 +565,7 @@ private struct TrainedGestureRow: View {
                     }
 
                     GestureActionPicker(action: binding(\.action))
+                    PerAppActionsEditor(overrides: binding(\.overrides))
 
                     DisclosureGroup(isExpanded: $showTuning) {
                         VStack(alignment: .leading, spacing: 12) {
