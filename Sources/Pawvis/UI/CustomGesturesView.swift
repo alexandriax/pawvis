@@ -415,6 +415,9 @@ private enum AppOverrideIcon {
         }
         cache[bundleID] = image
         return image
+    }
+}
+
 // MARK: - Export / import
 
 /// Trained templates live only in this settings blob — there's no other copy
