@@ -159,6 +159,21 @@ final class AgentSessionManager: ObservableObject {
         terminate(run)
     }
 
+    /// Kill every running session — the spoken brake ("Pawvis, stop").
+    /// `cancel(_:)` alone is only reachable from mouse UI, and a voice user
+    /// may have neither pointer nor patience mid-run. Returns how many runs
+    /// are still alive (already-SIGTERMed ones included, so a repeated
+    /// "stop" during the kill grace still reads as braking, not as "nothing
+    /// running"); only not-yet-cancelled runs get a new SIGTERM.
+    @discardableResult
+    func cancelAll() -> Int {
+        let alive = runs.values.filter { $0.process.isRunning }
+        for run in alive where !run.cancelled {
+            cancel(run.id)
+        }
+        return alive.count
+    }
+
     // MARK: - Process plumbing
 
     /// SIGTERM now; SIGKILL if it's still alive after the grace period. The

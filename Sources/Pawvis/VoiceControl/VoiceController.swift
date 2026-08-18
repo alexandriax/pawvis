@@ -406,14 +406,30 @@ final class VoiceController: ObservableObject {
         }
         let result = parser.parseRemainder(command)
         if case .stopVoiceControl? = result.command {
+            // "Pawvis stop listening" stays what the README promises: local,
+            // instant, mic off. Background agent runs are deliberately left
+            // to finish — the activity panel belongs to their manager, not
+            // to voice state, so they remain visible and cancellable there.
             stop()
             return
         }
         if case .cancelActivity? = result.command {
             // "Pawvis stop": brake whatever is running; with nothing in
             // flight it keeps its original meaning and turns voice off.
-            if autopilotTask != nil {
+            // Background agent runs never live in autopilotTask — they must
+            // be braked through their manager, and voice must STAY ON while
+            // they wind down: turning it off here would silence the user's
+            // only hands-free brake while the agent kept working.
+            let agentRuns = agentSessions.cancelAll()
+            if autopilotTask != nil || agentRuns > 0 {
                 cancelAutopilot()
+                if agentRuns > 0 {
+                    // Instant acknowledgment — SIGTERM can take seconds to
+                    // land; each run's outcome still flashes when it dies.
+                    flashNotice(agentRuns == 1
+                        ? "Stopping agent run…"
+                        : "Stopping \(agentRuns) agent runs…")
+                }
             } else {
                 stop()
             }
