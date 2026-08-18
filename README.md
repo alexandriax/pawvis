@@ -147,8 +147,8 @@ with a ring that tightens as your click forms and a pulse confirming every
 click. Small dots mark each detected fingertip.
 
 The menu bar icon opens a live status panel (hands seen, whether control is
-armed, voice-control state) plus a **Gesture Guide** window that walks
-through every gesture.
+armed, voice-control state, and a camera picker once more than one camera is
+around) plus a **Gesture Guide** window that walks through every gesture.
 
 ## Voice control (beta)
 

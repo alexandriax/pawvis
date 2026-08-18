@@ -35,6 +35,14 @@ struct MenuContentView: View {
     @ObservedObject var controller: PawvisController
     @ObservedObject var voice: VoiceController
     @ObservedObject var updater: UpdateChecker
+    /// Same store `SettingsView`'s General tab reads and writes — passed
+    /// directly (not through `controller.settingsStore`) so the picker below
+    /// actually redraws when it writes to it. `PawvisController` doesn't
+    /// forward `SettingsStore`'s `objectWillChange` (see `AppDelegate`'s
+    /// comment on the same problem for `voice`), so observing it only through
+    /// `controller` would leave the checkmark stale until the menu closed and
+    /// reopened.
+    @ObservedObject var settingsStore: SettingsStore
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
@@ -91,6 +99,10 @@ struct MenuContentView: View {
                 tint: trackingTint,
                 text: trackingStatusText)
 
+            if showCameraRow {
+                cameraRow
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: voiceIcon)
                     .foregroundStyle(voiceTint)
@@ -124,6 +136,61 @@ struct MenuContentView: View {
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true) // wrap, never truncate
             Spacer()
+        }
+    }
+
+    // MARK: - Camera picker
+
+    /// Same enumeration `SettingsView`'s General tab uses — recomputed on
+    /// every body evaluation, so a replug shows up the next time the menu
+    /// opens without any extra observation plumbing.
+    private var cameras: [(id: String, name: String)] { CameraManager.availableCameras() }
+
+    /// Hidden in the common case (one camera, left on Automatic) where a
+    /// picker would only ever offer the choice already in effect. Shown the
+    /// moment there is an actual choice to make, or the moment the stored
+    /// pick stops being the automatic default — including when that pick
+    /// just disconnected, so it's never more than one click back to
+    /// Automatic from here.
+    private var showCameraRow: Bool {
+        cameras.count >= 2 || settingsStore.settings.general.cameraDeviceID != nil
+    }
+
+    /// Quick camera switch. A picker row, not a chip (AGENTS.md: hue is
+    /// meaning, and this row means nothing by color), so it keeps the
+    /// menu's plain icon/text/control shape instead of `PawvisButtonStyle`.
+    /// Reads and writes `settings.general.cameraDeviceID` directly, the
+    /// exact setting Settings → General's picker uses, so the two views can
+    /// never disagree about which camera is selected.
+    private var cameraRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "camera.fill")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            Text("Camera")
+                .font(.callout)
+            Spacer()
+            Picker("", selection: Binding(
+                get: { settingsStore.settings.general.cameraDeviceID ?? "" },
+                set: { settingsStore.settings.general.cameraDeviceID = $0.isEmpty ? nil : $0 })
+            ) {
+                Text("Automatic").tag("")
+                ForEach(cameras, id: \.id) { camera in
+                    Text(camera.name).tag(camera.id)
+                }
+                // The selected device vanished (unplugged, or a Continuity
+                // Camera that walked away). Rather than quietly relabeling
+                // the row "Automatic" while the stored ID still points at
+                // the missing camera, give that ID its own checkmarked
+                // entry — the honest state of the setting, not a guess.
+                if let selected = settingsStore.settings.general.cameraDeviceID,
+                   !cameras.contains(where: { $0.id == selected }) {
+                    Text("Unavailable — \(selected)").tag(selected)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: 160)
         }
     }
 
