@@ -536,7 +536,14 @@ a hypothesis, checked against the world before a run is allowed to finish
 (`AppNameMatch`, the same fuzzy rules as resolution); `goToURL`/`webSearch`
 confirm a browser is frontmost; click/scroll steps confirm the full-screen
 accessibility signature changed at all, against a baseline snapshot taken
-before the click. A verification failure becomes a failure-history line and
+before the click. The signature covers element *values* as well as labels
+and frames — a toggle flip is a value-only change (the switch's label and
+frame are identical on both sides of the click), and a value-blind
+signature read every successful toggle click as "nothing changed", so the
+failed check made the loop click the switch again, undoing the user's
+request until the failure cap aborted. Numeric values round to 2 decimals
+in the hash so a slider's float noise never reads as change. A
+verification failure becomes a failure-history line and
 the loop keeps going: honest failure beats a fake success. `typeText` and
 `pressKey` claims are still trusted as reported — an unverifiable false
 negative would just mean blind, destructive repetition.
