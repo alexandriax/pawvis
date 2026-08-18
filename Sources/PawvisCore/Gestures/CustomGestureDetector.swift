@@ -267,8 +267,17 @@ public final class CustomGestureDetector {
                 minJointConfidence: context.minJointConfidence)
 
             if context.pressOrScrollActive {
-                // A press always wins: every family resets outright.
+                // A press always wins: every family resets outright. That
+                // includes a wiggle's parked one-vs-two-hand decision —
+                // clearMotion() only wipes the motion buffers, not
+                // pendingAt/satisfiedAt, so without this a decision parked
+                // just before the press would still resolve (and fire)
+                // once the pair window elapsed, press or no press. A press
+                // is a change of intent: a wiggle satisfied before it must
+                // not fire during it, or after it either.
                 state.wiggle.clearMotion()
+                state.wiggle.pendingAt = -.infinity
+                state.wiggle.satisfiedAt = -.infinity
                 state.hold = HoldState()
                 state.grab = GrabState()
                 grabbingSlots.remove(input.slot)
@@ -526,8 +535,17 @@ public final class CustomGestureDetector {
         if holdStillHeld(current, loose) {
             hold.exitFrames = 0
             if !hold.fired, time - hold.start >= config.holdSeconds {
-                _ = fire(current, at: time, into: &fired)
-                hold.fired = true // one fire per dwell, however long it's held
+                // A dwell that completes inside the family refractory (e.g.
+                // fire, release, re-pose quickly) must not latch as fired —
+                // that would silently kill the gesture for the rest of the
+                // hold. Keep retrying on later frames, still held, until the
+                // refractory lets it through, then latch (the trained
+                // detector's retry idea: TrainedGestureDetector.process,
+                // where a blocked `bestFire` simply isn't cleared and is
+                // re-attempted next frame).
+                if fire(current, at: time, into: &fired) {
+                    hold.fired = true // one fire per dwell, however long it's held
+                }
             }
         } else {
             hold.exitFrames += 1

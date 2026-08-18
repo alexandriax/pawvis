@@ -82,8 +82,18 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// Switch camera without tearing down the pipeline (no-op if unchanged).
     func setDevice(deviceID: String?) {
         frameQueue.async { [self] in
-            guard deviceID != currentDeviceID, session.isRunning else {
-                currentDeviceID = deviceID
+            guard deviceID != currentDeviceID else { return }
+            currentDeviceID = deviceID
+            guard session.isRunning else {
+                // Stopped: configureIfNeeded's early-return only skips work
+                // when session.inputs is non-empty, so a bare currentDeviceID
+                // update isn't enough — it'd leave the old camera's input in
+                // place and the next start(deviceID:) would resume on it.
+                // Drop the stale input now so start reconfigures onto the
+                // newly recorded device instead.
+                session.beginConfiguration()
+                for input in session.inputs { session.removeInput(input) }
+                session.commitConfiguration()
                 return
             }
             configureIfNeeded(deviceID: deviceID, force: true)

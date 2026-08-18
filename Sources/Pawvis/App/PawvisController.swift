@@ -157,15 +157,37 @@ final class PawvisController: ObservableObject {
         }
         refreshPermissions()
 
+        trackingActive = true
+
+        guard !trainingActive else {
+            // The trainer window already owns the camera and deliberately
+            // hides the overlay (`beginTraining`); starting it here would
+            // pop an unrendered overlay over the trainer and fight it for
+            // the capture session. Flipping `trackingActive` is enough for
+            // the menu switch and status row to update right away —
+            // `endTraining` reconciles camera/overlay/engine against
+            // whatever `trackingActive` ends up being once the window
+            // closes, so the two callers can never leave the app disagreeing
+            // with its own menu about whether tracking is on.
+            Log.app.info("Tracking armed mid-training; camera/overlay follow once the trainer closes")
+            return
+        }
+        activateTrackingEffects()
+        Log.app.info("Tracking started")
+    }
+
+    /// Starts everything `trackingActive` implies for the engine, overlay,
+    /// camera and permission polling. Split out of `startTracking` so
+    /// `endTraining`'s post-training reconcile can apply exactly the same
+    /// effects instead of a hand-maintained duplicate that could drift.
+    private func activateTrackingEffects() {
         engine.reset()
         refreshProjector()
         overlay.show()
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
-        trackingActive = true
         startPermissionPolling()
         armStallClock(grace: Self.startupGraceSeconds)
         startWatchdog()
-        Log.app.info("Tracking started")
     }
 
     /// While tracking, re-check Accessibility every couple of seconds so the
@@ -182,19 +204,37 @@ final class PawvisController: ObservableObject {
 
     func stopTracking() {
         guard trackingActive else { return }
-        camera.stop()
-        releaseEverything()
-        overlay.hide()
         trackingActive = false
         handsDetected = 0
         grabbing = false
         controlArmed = true
-        cameraFailure = nil // switched off on purpose: nothing is failing
+
+        guard !trainingActive else {
+            // Stopping the capture session here would cut the trainer's own
+            // feed out from under it — the camera is shared while the
+            // window is open. Flip the flag now (the menu switch and status
+            // row read it directly) and let `endTraining` tear the camera/
+            // overlay down for real once the window closes.
+            Log.app.info("Tracking disarmed mid-training; camera/overlay follow once the trainer closes")
+            return
+        }
+        deactivateTrackingEffects()
+        Log.app.info("Tracking stopped")
+    }
+
+    /// Stops everything `trackingActive` implies, the mirror of
+    /// `activateTrackingEffects`. Always releases any held button first —
+    /// tracking must never leave one stuck down, no matter what state
+    /// training left the camera/overlay in.
+    private func deactivateTrackingEffects() {
+        camera.stop()
+        releaseEverything()
+        overlay.hide()
+        cameraFailure = nil // leaving tracking on purpose: nothing is failing
         permissionPollTimer?.invalidate()
         permissionPollTimer = nil
         watchdogTimer?.invalidate()
         watchdogTimer = nil
-        Log.app.info("Tracking stopped")
     }
 
     /// The one force-release path: the engine's held press unwinds through
@@ -220,11 +260,9 @@ final class PawvisController: ObservableObject {
     /// The trainer's frame feed, called on the main actor with camera-space
     /// hands and the frame timestamp.
     var trainingFrameTap: (([Hand], TimeInterval) -> Void)?
-    private var trainingHadTracking = false
 
     func beginTraining() {
         guard !trainingActive else { return }
-        trainingHadTracking = trackingActive
         trainingActive = true
         if trackingActive {
             // Let go of anything in flight and hide the overlay; the camera
@@ -252,21 +290,27 @@ final class PawvisController: ObservableObject {
                 cameraFailure = "Camera access denied — enable it in System Settings → Privacy"
             }
         }
-        Log.app.info("Gesture training started (tracking was \(self.trainingHadTracking))")
+        Log.app.info("Gesture training started (tracking was \(self.trackingActive))")
     }
 
     func endTraining() {
         guard trainingActive else { return }
         trainingActive = false
         trainingFrameTap = nil
-        if trainingHadTracking {
-            engine.reset() // a fresh start, not the pre-training leftovers
-            overlay.show()
-            // The watchdog sat out training; don't let it convict on frames
-            // that were someone else's to consume.
-            armStallClock(grace: 0)
+        // `trackingActive` may have changed while the trainer had the
+        // camera — `startTracking`/`stopTracking` deliberately keep the menu
+        // switch (and any other caller) live during training instead of
+        // blocking it, only deferring the camera/overlay/engine side
+        // effects. Reconcile against trackingActive's CURRENT value here,
+        // never a snapshot taken back at `beginTraining`, or camera/overlay
+        // can end up disagreeing with what the menu says. The reconcile
+        // re-arms the stall clock with the startup grace, so the watchdog
+        // (which sat out training) never convicts on frames that were the
+        // trainer's to consume.
+        if trackingActive {
+            activateTrackingEffects()
         } else {
-            camera.stop()
+            deactivateTrackingEffects()
         }
         Log.app.info("Gesture training ended")
     }
