@@ -243,6 +243,9 @@ struct MenuContentView: View {
         // that persists after the overlay pill times out.
         if let failure = controller.cameraFailure { return failure }
         guard controller.trackingActive else { return "Tracking off" }
+        // Paused (the lock screen), not stopped: the toggle stays on, and
+        // the reason takes the status line until tracking resumes.
+        if let reason = controller.pauseReason { return reason }
         switch controller.handsDetected {
         case 0: return "No hands in view"
         case 1: return modeText

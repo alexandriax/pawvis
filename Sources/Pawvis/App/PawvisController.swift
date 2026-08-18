@@ -25,9 +25,16 @@ final class PawvisController: ObservableObject {
     /// frames arriving. The menu status line and the overlay pill read it;
     /// frames resuming clears it.
     @Published private(set) var cameraFailure: String?
+    /// Why tracking is resting while `trackingActive` stays true (the lock
+    /// screen), for the menu's status line. nil whenever tracking is live —
+    /// a pause is not a stop, so the toggle stays on.
+    @Published private(set) var pauseReason: String?
 
     private let camera = CameraManager()
     private let tracking = HandTrackingService()
+    /// The idle frame-skip policy's thread-safe face, consulted at the
+    /// camera tap (see `FrameThrottleBox`).
+    private let throttle = FrameThrottleBox()
     private let engine: GestureEngine
     private let mouse: MouseController
     private let overlay = OverlayController()
@@ -54,11 +61,21 @@ final class PawvisController: ObservableObject {
 
         camera.onFrame = { [weak self] sampleBuffer in
             guard let self else { return }
+            // Idle throttle, decided here at the tap: with no hands around
+            // for a while, most frames skip Vision entirely — the cheap,
+            // glitch-free lever (the AVCaptureSession itself is never
+            // touched). A skipped frame never reaches the engine, whose only
+            // clock is the timestamps of the frames it is given, so the gap
+            // reads as nothing at all.
+            guard self.throttle.shouldRunInference(at: CACurrentMediaTime()) else { return }
             // Camera queue: run Vision synchronously, then hop to main.
             // DispatchQueue.main (not Task) — the main queue is FIFO, so
             // down/drag/up frame batches can never arrive reordered.
             let hands = self.tracking.detectHands(in: sampleBuffer)
             let time = CACurrentMediaTime()
+            // The first frame containing a hand exits the throttle at once:
+            // every following frame processes again, full rate.
+            self.throttle.sawHands(!hands.isEmpty, at: time)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self.processFrame(hands: hands, at: time)
@@ -109,6 +126,36 @@ final class PawvisController: ObservableObject {
             object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.refreshProjector() }
+        }
+
+        // The lock screen: synthetic mouse events land on it like any other
+        // window, so a hand in front of the camera could click around the
+        // password field. Tracking pauses on lock and resumes on unlock —
+        // these are the distributed notifications loginwindow posts.
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.screenDidLock() }
+        }
+        distributed.addObserver(
+            forName: Notification.Name("com.apple.screenIsUnlocked"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.screenDidUnlock() }
+        }
+
+        // Low Power Mode tightens the idle throttle (a shorter no-hands
+        // delay, a sparser probe rate). Seed the current state, then track it.
+        throttle.setLowPower(ProcessInfo.processInfo.isLowPowerModeEnabled)
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.throttle.setLowPower(ProcessInfo.processInfo.isLowPowerModeEnabled)
+            }
         }
 
         // Sleep is a camera interruption by another name: frames stop, but
@@ -182,12 +229,18 @@ final class PawvisController: ObservableObject {
     /// effects instead of a hand-maintained duplicate that could drift.
     private func activateTrackingEffects() {
         engine.reset()
+        throttle.reset()
         refreshProjector()
         overlay.show()
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         startPermissionPolling()
         armStallClock(grace: Self.startupGraceSeconds)
         startWatchdog()
+
+        // Started while the screen is locked (a voice command can): tracking
+        // comes up already paused, and unlock resumes it. The pause quiets
+        // the watchdog too — a camera resting on purpose is not a failure.
+        if screenLocked { pauseForScreenLock() }
     }
 
     /// While tracking, re-check Accessibility every couple of seconds so the
@@ -208,6 +261,11 @@ final class PawvisController: ObservableObject {
         handsDetected = 0
         grabbing = false
         controlArmed = true
+        // A stop while paused on the lock screen (a voice command can) is a
+        // real stop: unlock must not resurrect the camera.
+        pausedForLock = false
+        pauseReason = nil
+        throttle.setInteracting(false)
 
         guard !trainingActive else {
             // Stopping the capture session here would cut the trainer's own
@@ -251,6 +309,63 @@ final class PawvisController: ObservableObject {
         trackingActive ? stopTracking() : startTracking()
     }
 
+    // MARK: - Screen lock
+
+    /// Whether the screen is currently locked, per loginwindow's distributed
+    /// notifications. Consulted by `startTracking` so a session started from
+    /// the lock screen (voice) comes up paused.
+    private var screenLocked = false
+    /// True while tracking is paused because of the lock screen: the camera
+    /// is stopped but `trackingActive` stays true — a pause, not a stop.
+    private var pausedForLock = false
+
+    private func screenDidLock() {
+        screenLocked = true
+        pauseForScreenLock()
+    }
+
+    private func screenDidUnlock() {
+        screenLocked = false
+        resumeFromScreenLock()
+    }
+
+    /// On lock: let go of anything held (the same release path `stopTracking`
+    /// uses — a button must never stay logically down behind the lock
+    /// screen), then stop the camera. Without this, a hand in front of the
+    /// camera kept posting synthetic events onto the lock screen itself.
+    /// The trainer is left alone: it posts no events, and freezing its
+    /// preview mid-recording would corrupt the take.
+    private func pauseForScreenLock() {
+        guard trackingActive, !pausedForLock, !trainingActive else { return }
+        pausedForLock = true
+        pauseReason = "Paused on the lock screen"
+        mouse.apply(engine.forceRelease(at: CACurrentMediaTime()))
+        mouse.releaseAllButtons()
+        engine.reset() // stale press/arm state must not survive into resume
+        camera.stop()
+        overlay.hide()
+        handsDetected = 0
+        grabbing = false
+        controlArmed = true
+        throttle.setInteracting(false)
+        Log.app.info("Tracking paused: screen locked")
+    }
+
+    /// On unlock: pick up where lock left off — camera back on, overlay
+    /// back, the engine and throttle starting fresh (the open-hand trigger
+    /// re-arms from scratch, exactly like a new session).
+    private func resumeFromScreenLock() {
+        guard pausedForLock else { return }
+        pausedForLock = false
+        pauseReason = nil
+        guard trackingActive else { return }
+        engine.reset()
+        throttle.reset()
+        overlay.show()
+        camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
+        Log.app.info("Tracking resumed: screen unlocked")
+    }
+
     // MARK: - Gesture training
 
     /// While the trainer window is open, camera frames bypass the engine
@@ -264,6 +379,9 @@ final class PawvisController: ObservableObject {
     func beginTraining() {
         guard !trainingActive else { return }
         trainingActive = true
+        // The trainer wants every frame: a throttled preview would record
+        // throttled templates.
+        throttle.setTraining(true)
         if trackingActive {
             // Let go of anything in flight and hide the overlay; the camera
             // keeps running, now feeding only the trainer.
@@ -297,6 +415,7 @@ final class PawvisController: ObservableObject {
         guard trainingActive else { return }
         trainingActive = false
         trainingFrameTap = nil
+        throttle.setTraining(false)
         // `trackingActive` may have changed while the trainer had the
         // camera — `startTracking`/`stopTracking` deliberately keep the menu
         // switch (and any other caller) live during training instead of
@@ -375,7 +494,7 @@ final class PawvisController: ObservableObject {
     }
 
     private func watchdogTick() {
-        guard trackingActive, !trainingActive, !asleep else { return }
+        guard trackingActive, !trainingActive, !asleep, !pausedForLock else { return }
         let now = CACurrentMediaTime()
         if let failure = cameraFailure {
             // Keep the pill's copy of the reason alive. StatusPillPolicy
@@ -392,7 +511,7 @@ final class PawvisController: ObservableObject {
     /// button — the same force-release path stopTracking uses — park the
     /// overlay with the reason, and publish it for the menu.
     private func enterCameraFailure(_ reason: String) {
-        guard trackingActive, !trainingActive, !asleep else { return }
+        guard trackingActive, !trainingActive, !asleep, !pausedForLock else { return }
         if cameraFailure == nil {
             Log.app.error("Camera failure while tracking: \(reason, privacy: .public)")
             releaseEverything()
@@ -507,6 +626,15 @@ final class PawvisController: ObservableObject {
         }
 
         mouse.apply(events)
+
+        // While a button is held or a scroll is active, the idle throttle
+        // must never engage. Hands are obviously in view then — the no-hands
+        // clock isn't even running — but the guard is explicit rather than
+        // inferred: dropping frames mid-press is the one failure this
+        // feature must not be able to cause.
+        throttle.setInteracting(
+            overlayState.grabbed || overlayState.rightGrabbed || overlayState.isScrolling)
+
         overlay.render(
             overlay: overlayState,
             voice: hudLine(at: time),
