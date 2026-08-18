@@ -294,6 +294,7 @@ final class PawvisController: ObservableObject {
         let count = overlayState.hands.count
         if count != handsDetected { handsDetected = count }
         let anyGrab = overlayState.grabbed || overlayState.rightGrabbed
+            || overlayState.middleGrabbed
         if anyGrab != grabbing { grabbing = anyGrab }
         if overlayState.armed != controlArmed { controlArmed = overlayState.armed }
     }
@@ -361,6 +362,9 @@ final class PawvisController: ObservableObject {
 
     private func apply(settings: PawvisSettings) {
         engine.config = settings.gestures
+        // The engine emits normalized scroll deltas; the speed dial applies
+        // where the wheel pixels are composed.
+        mouse.scrollGain = settings.gestures.scrollGain
         engine.customConfig = settings.customGestures.detectorConfig()
         // Trained gestures share the custom library's master switch.
         engine.trainedConfig = settings.trainedGestures.detectorConfig(

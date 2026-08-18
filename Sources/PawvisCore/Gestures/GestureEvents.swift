@@ -1,7 +1,7 @@
 import Foundation
 
 public enum MouseButton: String, Codable, Equatable, Sendable {
-    case left, right
+    case left, right, middle
 }
 
 /// Discrete output of the gesture engine, consumed by the app's mouse
@@ -10,16 +10,19 @@ public enum MouseButton: String, Codable, Equatable, Sendable {
 /// The gesture model is deliberately minimal: the palm moves the cursor,
 /// dipping the index finger presses the left button (click), moving while
 /// dipped drags, lifting the finger releases; a second finger's dip does the
-/// same on the right button; and the scroll pose scrolls.
+/// same on the right button (and, optionally, a third finger's on the
+/// middle); and the scroll pose scrolls.
 public enum GestureEvent: Equatable, Sendable {
     case move(to: Vec2)
     case buttonDown(MouseButton, at: Vec2, clickCount: Int)
     case drag(MouseButton, to: Vec2)
     case buttonUp(MouseButton, at: Vec2, clickCount: Int)
-    /// Scroll-wheel travel in screen-normalized units: positive = scroll up
-    /// (toward the top of the document), matching Quartz's positive axis-1
-    /// wheel direction. The cursor does not move.
-    case scroll(deltaY: Double)
+    /// Scroll-wheel travel in screen-normalized units, already in Quartz's
+    /// wheel directions: positive `deltaY` = scroll up (toward the top of
+    /// the document, positive axis-1), positive `deltaX` = scroll left
+    /// (toward the left of the document, positive axis-2). `deltaX` stays 0
+    /// unless horizontal scrolling is enabled. The cursor does not move.
+    case scroll(deltaX: Double, deltaY: Double)
     /// The criss-cross tracking-off wave completed: the app should switch
     /// hand tracking off entirely (camera and all), exactly as the menu bar
     /// toggle does. `PawvisController` intercepts it before the rest of the
@@ -57,13 +60,16 @@ public struct OverlayState: Equatable, Sendable {
     /// True while the right-click finger is dipped (right button down). Kept
     /// separate from `grabbed`, which stays left-only.
     public var rightGrabbed: Bool = false
+    /// True while the middle-click finger is dipped (middle button down).
+    /// Same contract as `rightGrabbed`.
+    public var middleGrabbed: Bool = false
     /// True once a press has moved past the drag threshold.
     public var isDragging: Bool = false
     /// True while the scroll pose is held: the cursor is parked
     /// and vertical hand movement scrolls.
     public var isScrolling: Bool = false
     /// Pinch strength ramp: 0 = tips comfortably apart, 1 = pinched. Drives the
-    /// closing-ring feedback around the cursor. Pinned at 1 while *either*
+    /// closing-ring feedback around the cursor. Pinned at 1 while *any*
     /// button is down — the ring says "you are pressing", not which finger.
     public var closingProgress: Double = 0
 

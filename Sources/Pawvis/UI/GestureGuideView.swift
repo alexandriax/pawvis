@@ -96,15 +96,28 @@ struct GestureGuideView: View {
                 detail: "Dip your \(fingerName) finger the same way — the claw turns blue while it's down. Hold it to right-drag."))
         }
 
+        if store.settings.gestures.middleClickEnabled {
+            let finger = store.settings.gestures.middleClickFinger
+            let fingerName = finger == .little ? "pinky" : finger.rawValue
+            rows.append(Row(
+                symbol: "hand.point.up.braille.fill",
+                panel: "full-right-click-\(finger.rawValue)",
+                title: "Middle-click",
+                detail: "Dip your \(fingerName) finger the same way — the claw turns pink while it's down. Hold it to middle-drag."))
+        }
+
         if store.settings.gestures.scrollEnabled {
             let direction = store.settings.gestures.scrollInvert
                 ? "Move your hand up to scroll down and down to scroll up (you inverted the direction in Settings)."
                 : "Move your hand up to scroll up and down to scroll down."
+            let sideways = store.settings.gestures.scrollAxes == .both
+                ? " Sideways movement scrolls sideways."
+                : ""
             rows.append(Row(
                 symbol: "arrow.up.arrow.down.circle.fill",
                 panel: "full-scroll",
                 title: "Scroll",
-                detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
+                detail: "Fold your middle and ring fingers in — index and pinky stay up. \(direction)\(sideways) The cursor parks (with a light-blue ring) while the pose is held; relax your hand to let go."))
         }
 
         if store.settings.gestures.crissCrossDisableEnabled {

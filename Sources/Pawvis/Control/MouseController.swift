@@ -15,7 +15,15 @@ final class MouseController {
     private(set) var projector: ScreenProjector
     private var leftDown = false
     private var rightDown = false
+    private var middleDown = false
     private var lastPoint: CGPoint = .zero
+
+    /// Screen-heights (or -widths) of content scrolled per screen-height (or
+    /// -width) of hand travel — the Scroll speed slider, threaded in from
+    /// `gestures.scrollGain`. The engine's deltas stay normalized; the gain
+    /// applies here, at the posting layer. Main-thread only (set from
+    /// settings propagation, read when composing the event to post).
+    var scrollGain: Double = GestureConfig.default.scrollGain
 
     private let source = CGEventSource(stateID: .hidSystemState)
     private static let minPostInterval: TimeInterval = 0.006
@@ -37,9 +45,9 @@ final class MouseController {
                 post(type: .mouseMoved, at: projector.toGlobal(to), button: .left)
             case .buttonDown(let button, let at, let clickCount):
                 setButtonState(button, down: true)
-                post(type: button == .left ? .leftMouseDown : .rightMouseDown,
+                post(type: button.downEventType,
                      at: projector.toGlobal(at),
-                     button: button == .left ? .left : .right,
+                     button: button.cgButton,
                      clickCount: clickCount)
             case .drag(let button, let to):
                 // A drag immediately followed by the same button's up is
@@ -49,17 +57,17 @@ final class MouseController {
                    upButton == button {
                     continue
                 }
-                post(type: button == .left ? .leftMouseDragged : .rightMouseDragged,
+                post(type: button.dragEventType,
                      at: projector.toGlobal(to),
-                     button: button == .left ? .left : .right)
+                     button: button.cgButton)
             case .buttonUp(let button, let at, let clickCount):
                 setButtonState(button, down: false)
-                post(type: button == .left ? .leftMouseUp : .rightMouseUp,
+                post(type: button.upEventType,
                      at: projector.toGlobal(at),
-                     button: button == .left ? .left : .right,
+                     button: button.cgButton,
                      clickCount: clickCount)
-            case .scroll(let deltaY):
-                postScroll(deltaY)
+            case .scroll(let deltaX, let deltaY):
+                postScroll(deltaX: deltaX, deltaY: deltaY)
             case .disableTracking, .customGesture, .trainedGesture:
                 // Not mouse events — PawvisController intercepts them before
                 // apply. One that slips through is a no-op.
@@ -68,19 +76,19 @@ final class MouseController {
         }
     }
 
-    /// Screen-heights of content scrolled per screen-height of hand travel.
-    /// >1 because a page-per-sweep felt sluggish next to a trackpad.
-    private static let scrollGain: Double = 2.2
-
-    /// Posts one continuous (trackpad-style) pixel scroll step. `deltaY` is
-    /// the engine's screen-normalized wheel delta, positive = scroll up —
-    /// already Quartz's positive axis-1 direction, so no flip here.
-    private func postScroll(_ deltaY: Double) {
-        let pixels = Int32((deltaY * projector.targetRect.height * Self.scrollGain).rounded())
-        guard pixels != 0,
+    /// Posts one continuous (trackpad-style) pixel scroll step. The deltas
+    /// are the engine's screen-normalized wheel travel, already in Quartz's
+    /// directions — positive `deltaY` = scroll up (axis-1), positive
+    /// `deltaX` = scroll left (axis-2) — so no flips here. `scrollGain`
+    /// (the Scroll speed slider) scales both axes on the way to pixels.
+    private func postScroll(deltaX: Double, deltaY: Double) {
+        let rect = projector.targetRect
+        let vertical = Int32((deltaY * rect.height * scrollGain).rounded())
+        let horizontal = Int32((deltaX * rect.width * scrollGain).rounded())
+        guard vertical != 0 || horizontal != 0,
               let event = CGEvent(
                 scrollWheelEvent2Source: source, units: .pixel,
-                wheelCount: 1, wheel1: pixels, wheel2: 0, wheel3: 0) else { return }
+                wheelCount: 2, wheel1: vertical, wheel2: horizontal, wheel3: 0) else { return }
         // Continuous = smooth pixel scrolling; apps animate it like a trackpad.
         event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
         postQueue.async {
@@ -95,7 +103,8 @@ final class MouseController {
         let position = CGEvent(source: nil)?.location ?? .zero
         let source = CGEventSource(stateID: .hidSystemState)
         for (type, button) in [(CGEventType.leftMouseUp, CGMouseButton.left),
-                               (CGEventType.rightMouseUp, CGMouseButton.right)] {
+                               (CGEventType.rightMouseUp, CGMouseButton.right),
+                               (CGEventType.otherMouseUp, CGMouseButton.center)] {
             let event = CGEvent(mouseEventSource: source, mouseType: type,
                                 mouseCursorPosition: position, mouseButton: button)
             event?.setIntegerValueField(.mouseEventClickState, value: 1)
@@ -116,8 +125,12 @@ final class MouseController {
         if rightDown, let e = makeEvent(type: .rightMouseUp, at: lastPoint, button: .right, clickCount: 1) {
             events.append(e)
         }
+        if middleDown, let e = makeEvent(type: .otherMouseUp, at: lastPoint, button: .center, clickCount: 1) {
+            events.append(e)
+        }
         leftDown = false
         rightDown = false
+        middleDown = false
         guard !events.isEmpty else { return }
         postQueue.sync {
             for event in events {
@@ -130,6 +143,7 @@ final class MouseController {
         switch button {
         case .left: leftDown = down
         case .right: rightDown = down
+        case .middle: middleDown = down
         }
     }
 
@@ -145,7 +159,8 @@ final class MouseController {
             mouseEventSource: source, mouseType: type,
             mouseCursorPosition: clamped, mouseButton: button) else { return nil }
         switch type {
-        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp:
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+             .otherMouseDown, .otherMouseUp:
             // Downs/ups always carry a valid clickState (a clickState-0 up is
             // malformed). Drags already default to clickState 1 / pressure 1.
             event.setIntegerValueField(.mouseEventClickState, value: Int64(max(clickCount, 1)))
@@ -185,6 +200,43 @@ final class MouseController {
         return CGPoint(
             x: min(max(p.x, r.minX), r.maxX - 1),
             y: min(max(p.y, r.minY), r.maxY - 1))
+    }
+}
+
+/// The engine's button mapped onto CGEvent's vocabulary. The middle button
+/// is Quartz's `.center` (button number 2), posted through the `other*`
+/// event types — there is no dedicated `centerMouse*` CGEventType.
+private extension PawvisCore.MouseButton {
+    var cgButton: CGMouseButton {
+        switch self {
+        case .left: return .left
+        case .right: return .right
+        case .middle: return .center
+        }
+    }
+
+    var downEventType: CGEventType {
+        switch self {
+        case .left: return .leftMouseDown
+        case .right: return .rightMouseDown
+        case .middle: return .otherMouseDown
+        }
+    }
+
+    var upEventType: CGEventType {
+        switch self {
+        case .left: return .leftMouseUp
+        case .right: return .rightMouseUp
+        case .middle: return .otherMouseUp
+        }
+    }
+
+    var dragEventType: CGEventType {
+        switch self {
+        case .left: return .leftMouseDragged
+        case .right: return .rightMouseDragged
+        case .middle: return .otherMouseDragged
+        }
     }
 }
 
