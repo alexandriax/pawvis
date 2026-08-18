@@ -31,4 +31,30 @@
     revealed.forEach(function (el) { el.classList.add("is-visible"); });
   }
 
+  /* ------------------------------------------------ hero film
+     The hero shows the film's own still until someone presses play, then
+     swaps in the YouTube player. Nothing reaches youtube.com before that
+     click. Without JS the cover stays a plain link to the video. */
+  var film = document.getElementById("demoVideo");
+
+  if (film && film.dataset.embed) {
+    film.addEventListener("click", function (event) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      event.preventDefault();
+
+      var player = document.createElement("iframe");
+      player.id = "demoVideo";
+      player.src = film.dataset.embed;
+      player.width = 1280;
+      player.height = 720;
+      player.title = film.dataset.title;
+      player.referrerPolicy = "strict-origin-when-cross-origin";
+      player.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+      player.allowFullscreen = true;
+
+      film.replaceWith(player);
+      player.focus();
+    });
+  }
+
 })();
