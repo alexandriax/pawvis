@@ -167,6 +167,20 @@ final class GestureEngineDwellTests: XCTestCase {
         XCTAssertTrue(downs(held).isEmpty, "no dwell click while the right button is down")
     }
 
+    func testDwellNeverFiresWhileTheMiddleButtonIsHeld() {
+        var config = Self.dwellConfig()
+        config.middleClickEnabled = true
+        engine = GestureEngine(config: config)
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        let held = feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 60) // 2 s
+        let middleDowns = held.compactMap { event -> Vec2? in
+            if case .buttonDown(.middle, let at, _) = event { return at }
+            return nil
+        }
+        XCTAssertEqual(middleDowns.count, 1, "the real middle press, and nothing else")
+        XCTAssertTrue(downs(held).isEmpty, "no dwell click while the middle button is down")
+    }
+
     func testDwellNeverFiresMidDrag() {
         feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.4, 0.7))], from: 0, count: 3)
         feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.4, 0.7))], from: 0.1, count: 3)

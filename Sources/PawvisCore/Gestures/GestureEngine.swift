@@ -573,6 +573,7 @@ public final class GestureEngine {
         // blocks it, and a fired dwell re-arms only once the cursor leaves.
         updateDwell(
             blocked: press != nil || leftButton.engaged || rightButton.engaged
+                || middleButton.engaged
                 || scroll.active || crissCross.engaged || grabParked
                 || pointedParked || trainedDwellBlock || !armed,
             at: frame.time, events: &events)
