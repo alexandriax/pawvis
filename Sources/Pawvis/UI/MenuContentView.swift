@@ -87,8 +87,8 @@ struct MenuContentView: View {
     private var statusRows: some View {
         VStack(alignment: .leading, spacing: 6) {
             statusRow(
-                icon: "hand.raised.fill",
-                tint: controller.handsDetected > 0 ? .green : .secondary,
+                icon: controller.cameraFailure == nil ? "hand.raised.fill" : "video.slash.fill",
+                tint: trackingTint,
                 text: trackingStatusText)
 
             HStack(spacing: 8) {
@@ -116,11 +116,13 @@ struct MenuContentView: View {
     }
 
     private func statusRow(icon: String, tint: Color, text: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
                 .frame(width: 18)
-            Text(text).font(.callout)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true) // wrap, never truncate
             Spacer()
         }
     }
@@ -181,19 +183,31 @@ struct MenuContentView: View {
 
     /// Sky for Settings, violet for the guide, and Quit on the quiet chip:
     /// leaving is mundane, not dangerous, so it gets the least ink in the
-    /// row rather than a red slab.
+    /// row rather than a red slab. The welcome tour sits on the quiet chip
+    /// too, tucked under the navigation cluster: a one-time helper worth
+    /// finding again, not a daily destination, so it takes the least ink —
+    /// and a fourth chip in the main row wouldn't fit the menu's width
+    /// without truncating.
     private var footer: some View {
-        HStack {
-            Button("Settings…") { openSettingsInFront() }
-                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
-            Button("Gesture Guide") {
-                dismiss() // close the menu bar popover — it floats above windows
-                openWindow(id: GuideWindow.id)
-                NSApp.activate(ignoringOtherApps: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button("Settings…") { openSettingsInFront() }
+                    .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
+                Button("Gesture Guide") {
+                    dismiss() // close the menu bar popover — it floats above windows
+                    openWindow(id: GuideWindow.id)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                Spacer()
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipQuiet))
             }
-            Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+            Button("Welcome tour") {
+                dismiss() // close the menu bar popover — it floats above windows
+                openWindow(id: WelcomeWindow.id)
+                NSApp.activate(ignoringOtherApps: true)
             }
             .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipQuiet))
         }
@@ -217,7 +231,17 @@ struct MenuContentView: View {
 
     // MARK: - Status text
 
+    /// Red only for genuine errors, where it means what it says — and a dead
+    /// camera is one: the menu must not claim tracking while no frames come.
+    private var trackingTint: Color {
+        if controller.cameraFailure != nil { return .red }
+        return controller.handsDetected > 0 ? .green : .secondary
+    }
+
     private var trackingStatusText: String {
+        // Camera trouble beats every happier status: this line is the copy
+        // that persists after the overlay pill times out.
+        if let failure = controller.cameraFailure { return failure }
         guard controller.trackingActive else { return "Tracking off" }
         switch controller.handsDetected {
         case 0: return "No hands in view"
@@ -230,7 +254,7 @@ struct MenuContentView: View {
         if controller.settingsStore.settings.gestures.controlTrigger == .gesturesOnly {
             return "Watching for gestures"
         }
-        if controller.grabbing { return "Clicking (pinched)" }
+        if controller.grabbing { return "Clicking" }
         return controller.controlArmed ? "Pointing" : "Show an open hand to control"
     }
 

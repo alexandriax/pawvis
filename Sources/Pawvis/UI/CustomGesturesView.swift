@@ -147,7 +147,7 @@ private struct CustomGestureRow: View {
         case .grabFling:
             LabeledSlider(
                 label: "Grab tightness",
-                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight pinch. Right: a looser bunch counts — try moving this right if grabs won't register.",
+                caption: "How snugly your fingertips must bunch to count as a grab. Left: only a tight cluster. Right: a looser bunch counts — try moving this right if grabs won't register.",
                 value: $store.settings.customGestures.gatherSpread,
                 range: 0.22...0.50)
             LabeledSlider(
