@@ -151,6 +151,36 @@ Measured on macOS 26, and easy to get wrong:
 - `PAWVIS_NO_AUTOSTART=1` skips the reconcile as well as the camera, so
   automated runs don't leave a login item behind pointing at a build directory.
 
+## Energy and idle
+
+With the defaults, the camera and per-frame Vision inference run from login
+to shutdown, so the app owns two rest states (`PawvisController`):
+
+- **The lock screen pauses tracking** (`com.apple.screenIsLocked` /
+  `com.apple.screenIsUnlocked` over `DistributedNotificationCenter`). On
+  lock: release anything held (the same release path `stopTracking` uses —
+  synthetic events used to land on the lock screen itself), stop the camera,
+  and keep `trackingActive` true; the menu's status line shows the published
+  `pauseReason` ("Paused on the lock screen"). Unlock resumes with a fresh
+  engine, and a session started while locked (a voice command can) comes up
+  paused. Sleep/wake and capture-failure recovery are deliberately separate
+  paths, not this one.
+- **No hands for 10 s throttles Vision, never the camera** (`IdleThrottle`,
+  pure PawvisCore and clock-free like the rest of it; `FrameThrottleBox` is
+  its lock-guarded face at the camera tap). Frames skip inference before it
+  runs — one in six processes, ~5 fps of the locked 30 — because skipping
+  inference is free while reconfiguring the AVCaptureSession glitches. The
+  first processed frame containing a hand exits the throttle at once. Low
+  Power Mode shortens the no-hands delay to 3 s and sparsens the probe to
+  one frame in fifteen (~2 fps). The thresholds are constants, chosen
+  rather than measured; make them settings only if someone actually asks.
+- **Skipped frames never reach the gesture engine**, whose only clock is
+  the timestamps of the frames it is given — a delivery gap reads as a slow
+  camera, which the tracking-loss grace already tolerates. A held button,
+  an active scroll, or the open trainer exempts every frame explicitly:
+  throttling mid-press must be impossible by construction, even though the
+  no-hands clock could not be running then anyway.
+
 ## Gesture engine
 
 `PawvisCore` is pure logic — no AppKit, no AVFoundation, no clocks. All timing
