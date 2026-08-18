@@ -70,6 +70,14 @@ final class UpdateChecker: ObservableObject {
 
     init() {
         lastChecked = defaults.object(forKey: Key.lastChecked) as? Date
+        // A previous run may have quit expecting to come back up as a new
+        // version and instead had to roll back mid-swap — that failure has
+        // nowhere to surface except the next launch. Reuses the ordinary
+        // "failed" state rather than adding a dedicated UI for it.
+        if let failure = SelfUpdater.consumeFailureMarker() {
+            Log.app.error("Update rolled back: \(failure, privacy: .public)")
+            state = .failed(failure)
+        }
     }
 
     // MARK: - Checking

@@ -89,6 +89,54 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(fired, [.twoHandFingerWiggle])
     }
 
+    func testPressBlocksPendingWiggle() {
+        // Both variants bound: a lone hand's wiggle is satisfied but parks
+        // rather than firing, waiting out the 0.35s pair window to see if a
+        // second hand joins. Engaging a press before that window elapses
+        // must cancel the parked decision outright — it must not fire
+        // mid-press, and (since the press is a change of intent) not after
+        // the press lets go either.
+        enable(.fingerWiggle, .twoHandFingerWiggle)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        let w = Vec2(0.5, 0.7)
+        for i in 0..<12 {
+            fired += feed([(0, SyntheticHand.wigglePhase(contracted: i % 2 == 1, wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "the two-hand variant is bound, so a lone wiggle must park, not fire")
+
+        // Dip the index and hold the click well past the pair window.
+        for _ in 0..<25 {
+            fired += feed([(0, SyntheticHand.fingerDip(.index, wrist: w))], at: t, press: true)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "a parked wiggle decision must not fire while a button is down")
+
+        // Release, and give it another dozen frames of stillness: the
+        // parked decision must not fire after the fact either.
+        for _ in 0..<12 {
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "a wiggle satisfied before the press must not fire after it either")
+    }
+
+    func testPendingWiggleFiresWithoutPress() {
+        // Control for the press gate above: with no press ever happening,
+        // the same parked one-vs-two-hand decision must still resolve to
+        // the single-hand gesture once the pair window expires.
+        enable(.fingerWiggle, .twoHandFingerWiggle)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        let w = Vec2(0.5, 0.7)
+        for i in 0..<20 {
+            fired += feed([(0, SyntheticHand.wigglePhase(contracted: i % 2 == 1, wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.fingerWiggle])
+    }
+
     func testWiggleRunsDuringCrissCrossEngage() {
         // Two splayed hands held still engage the wave; wiggling fingers are
         // not a wave, so the in-place family keeps running.
@@ -280,6 +328,81 @@ final class CustomGestureDetectorTests: XCTestCase {
             t += 1.0 / 30
         }
         XCTAssertEqual(fired, [.thumbsUp, .thumbsUp])
+    }
+
+    func testDwellBlockedByRefractoryRetriesUntilItFires() {
+        // Fire once, release just long enough to reset the hold, then
+        // re-pose immediately: the new dwell completes well inside the
+        // 0.8s hold-family refractory. Before the fix, the blocked fire()
+        // still latched `hold.fired = true`, so the pose could never fire
+        // again no matter how long it was then held — exactly what "thumbs
+        // up twice in a row" (testing a new binding) does.
+        enable(.thumbsUp)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+
+        // First dwell, held from rest: fires once (~0.37s in).
+        for _ in 0..<12 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp], "first dwell fires")
+
+        // Release for exactly the exit-debounce, so the hold state resets.
+        for _ in 0..<4 {
+            fired += feed([(0, SyntheticHand.openRelaxed())], at: t)
+            t += 1.0 / 30
+        }
+
+        // Re-pose immediately. The dwell is running again but not yet
+        // complete.
+        for _ in 0..<11 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp], "second dwell still running")
+
+        // One more frame completes the second dwell — inside the
+        // refractory (well under 0.8s since the first fire), so the fire
+        // is blocked and must NOT fire yet.
+        fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+        t += 1.0 / 30
+        XCTAssertEqual(fired, [.thumbsUp], "blocked by the refractory, not fired")
+
+        // The countdown pill must stay sensible while blocked: the dwell
+        // has completed (0s left), not gone dark and not restarted from
+        // the top.
+        guard let progress = detector.holdProgress else {
+            return XCTFail("a completed-but-blocked dwell must still be visible")
+        }
+        XCTAssertEqual(progress.gesture, .thumbsUp)
+        XCTAssertEqual(progress.remaining, 0, accuracy: 0.0001)
+
+        // Keep holding — no release — until the refractory clears. The
+        // gesture must retry and fire, not stay dead for the rest of the
+        // hold. (~0.8s after the first fire.)
+        for _ in 0..<15 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp, .thumbsUp],
+                       "a dwell blocked by the refractory retries and fires once it clears")
+    }
+
+    func testFiredLatchSurvivesRefractoryDuringOneContinuousHold() {
+        // The retry-until-it-lands fix must not turn an ordinary,
+        // uninterrupted hold into a repeat fire just because the family
+        // refractory that blocked it has, in general, long since cleared:
+        // the latch from a *successful* fire must still stand for as long
+        // as the pose is held without ever releasing.
+        enable(.thumbsUp)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        for _ in 0..<75 { // 2.5s continuous hold, well past the 0.8s refractory
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp])
     }
 
     func testShakaHoldFires() {
