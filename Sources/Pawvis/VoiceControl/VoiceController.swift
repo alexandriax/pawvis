@@ -68,6 +68,20 @@ final class VoiceController: ObservableObject {
     private var engine: SpeechEngine?
     private var config = VoiceControlConfig()
     private var noticeTimer: Timer?
+    /// An agent-bound command read back and waiting for a spoken yes/no
+    /// (confirm mode, on by default). Nothing is sent while this is set.
+    private struct PendingAgentSend {
+        let instruction: String
+        let tool: AgentCLIExecutor.Tool
+    }
+    private var pendingAgentSend: PendingAgentSend?
+    private var confirmTimer: Timer?
+    /// Seconds a read-back waits for its yes/no; silence cancels the send.
+    private static let confirmWindowSeconds: TimeInterval = 10
+    /// True from an agent hand-off until its outcome resolves — the
+    /// one-session cap. Tracked here (not just via the session list) so two
+    /// finals in one main-actor breath can't both slip past the cap.
+    private var agentRunInFlight = false
     /// Stitches a bare-wake-word final to the command final that follows it.
     private var gate = UtteranceGate()
     private var gateWindowTimer: Timer?
@@ -188,6 +202,8 @@ final class VoiceController: ObservableObject {
         engine?.stop()
         engine = nil
         clearNotice()
+        // Voice off can't hear a "yes" — a pending read-back dies with it.
+        clearPendingAgentSend()
         transcriptOverlay.hide()
         gate.disarm()
         gateWindowTimer?.invalidate()
@@ -340,7 +356,13 @@ final class VoiceController: ObservableObject {
                     guard let self else { return }
                     self.gate.disarm()
                     if !self.liveShown {
-                        self.transcriptOverlay.hide()
+                        if self.pendingAgentSend != nil {
+                            // The lapsed window must not hide a read-back
+                            // that is still waiting for its yes/no.
+                            self.showConfirmPrompt()
+                        } else {
+                            self.transcriptOverlay.hide()
+                        }
                     }
                 }
             }
@@ -398,7 +420,12 @@ final class VoiceController: ObservableObject {
 
     private func dropFinal(_ transcript: String, showedLive: Bool) {
         Log.voice.log("Final dropped (no wake word; shown live: \(showedLive)): \(transcript, privacy: .private)")
-        if showedLive {
+        if pendingAgentSend != nil {
+            // A read-back is still waiting: bring the question back rather
+            // than hiding it (or burying it under a wake-word warning) —
+            // the utterance that just fell through didn't answer it.
+            showConfirmPrompt()
+        } else if showedLive {
             // A partial hypothesis matched the wake word but the final lost
             // it — the user watched the capsule accept their words.
             flashNotice("⚠️ Didn't catch “\(config.wakeWord)” — try again")
@@ -409,7 +436,8 @@ final class VoiceController: ObservableObject {
 
     /// Run one wake-stripped command: stop and cancel phrases always work
     /// locally and instantly; agent mode pipes everything else to the chosen
-    /// CLI; the on-device path runs the grammar, then the autopilot loop.
+    /// CLI (read back first, in confirm mode); the on-device path runs the
+    /// grammar, then the autopilot loop.
     private func dispatch(_ command: String, tool: AgentCLIExecutor.Tool?) {
         // Belt and suspenders under the per-path guards above: a command
         // must never START while the UI says voice control is off. Nothing
@@ -419,6 +447,23 @@ final class VoiceController: ObservableObject {
         guard state.isActive else {
             Log.voice.log("Dispatch dropped — voice control is not active: \(command, privacy: .private)")
             return
+        }
+        // A pending read-back owns yes/no first. The confirm classifier is
+        // consulted ONLY here, so those phrases answer the question and are
+        // never commands; "stop"/"cancel" are deny members, so they cancel
+        // the pending send rather than reaching the general brake below.
+        if pendingAgentSend != nil {
+            switch parser.confirmResponse(command) {
+            case .confirm:
+                confirmPendingAgentSend()
+                return
+            case .deny:
+                denyPendingAgentSend()
+                return
+            case nil:
+                // A new command — it replaces the pending one below.
+                break
+            }
         }
         let result = parser.parseRemainder(command)
         if case .stopVoiceControl? = result.command {
@@ -455,7 +500,7 @@ final class VoiceController: ObservableObject {
         // during a runaway autopilot means both things the user said.
         cancelAutopilot()
         if let tool {
-            runAgent(command, tool: tool)
+            requestAgentRun(command, tool: tool)
             return
         }
         typer.perform(result.typing)
@@ -666,11 +711,93 @@ final class VoiceController: ObservableObject {
 
     // MARK: - Agent runs
 
+    /// Every agent-bound command enters here: the one-session cap first
+    /// (never stack a second run), then either an immediate send (confirm
+    /// off) or the read-back that waits for a spoken yes/no.
+    private func requestAgentRun(_ instruction: String, tool: AgentCLIExecutor.Tool) {
+        guard !agentBusy else {
+            flashNotice("Already running an agent task; say “\(config.wakeWord) stop” to cancel it")
+            return
+        }
+        guard config.agentConfirm else {
+            runAgent(instruction, tool: tool)
+            return
+        }
+        // A newer command replaces a pending one — the read-back always
+        // shows the latest thing said, and says so when it swapped.
+        let replaced = pendingAgentSend != nil
+        pendingAgentSend = PendingAgentSend(instruction: instruction, tool: tool)
+        armConfirmTimer()
+        showConfirmPrompt(replaced: replaced)
+    }
+
+    /// The cap's ground truth: a run this controller started that hasn't
+    /// resolved, or any session the manager still reports running.
+    private var agentBusy: Bool {
+        agentRunInFlight || agentSessions.runningCount > 0
+    }
+
+    /// The read-back capsule. Re-shown whenever another capsule message
+    /// would otherwise leave a still-pending question invisible.
+    private func showConfirmPrompt(replaced: Bool = false) {
+        guard let pending = pendingAgentSend else { return }
+        let ask = "Send to \(pending.tool.displayName): “\(pending.instruction)”? "
+            + "Say “\(config.wakeWord) yes” to send it, “\(config.wakeWord) no” to cancel."
+        transcriptOverlay.prompt(replaced ? "Replaced the pending command. \(ask)" : ask)
+    }
+
+    private func armConfirmTimer() {
+        confirmTimer?.invalidate()
+        confirmTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.confirmWindowSeconds, repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor in
+                // Silence is not consent: the window lapsing cancels the
+                // send, and says so — never a quiet vanish.
+                guard let self, let pending = self.pendingAgentSend else { return }
+                self.clearPendingAgentSend()
+                self.flashNotice("Heard no answer; nothing was sent to \(pending.tool.displayName)")
+            }
+        }
+    }
+
+    private func confirmPendingAgentSend() {
+        guard let pending = pendingAgentSend else { return }
+        clearPendingAgentSend()
+        runAgent(pending.instruction, tool: pending.tool)
+    }
+
+    private func denyPendingAgentSend() {
+        guard let pending = pendingAgentSend else { return }
+        clearPendingAgentSend()
+        flashNotice("Cancelled; nothing was sent to \(pending.tool.displayName)")
+    }
+
+    private func clearPendingAgentSend() {
+        confirmTimer?.invalidate()
+        confirmTimer = nil
+        guard pendingAgentSend != nil else { return }
+        pendingAgentSend = nil
+        if !config.transcriptOverlayEnabled {
+            // The prompt bypasses the transcript switch; with the capsule
+            // otherwise disabled no follow-up text will replace it, so take
+            // it down here instead of leaving a stale question up.
+            transcriptOverlay.hide()
+        }
+    }
+
     /// Background agent run: voice control stays fully responsive (the run
     /// doesn't hold the parser or the HUD state). The bottom-right activity
     /// panel streams the CLI's output live with a Cancel button, and the
     /// outcome ALWAYS flashes in the capsule — success or failure.
     private func runAgent(_ transcript: String, tool: AgentCLIExecutor.Tool) {
+        // Belt and braces under the cap: every send re-checks, so no path
+        // (immediate, confirmed, or future) can stack a second run.
+        guard !agentBusy else {
+            flashNotice("Already running an agent task; say “\(config.wakeWord) stop” to cancel it")
+            return
+        }
+        agentRunInFlight = true
         transcriptOverlay.showLive("🤖 \(tool.displayName): “\(transcript)”…")
         notice = "\(tool.displayName) is working…"
         let timeout = config.agentTimeoutSeconds
@@ -678,6 +805,7 @@ final class VoiceController: ObservableObject {
             guard let self else { return }
             let outcome = await self.agentSessions.run(
                 instruction: transcript, tool: tool, timeout: timeout)
+            self.agentRunInFlight = false
             self.showAgentOutcome(outcome, tool: tool)
         }
     }

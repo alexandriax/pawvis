@@ -33,6 +33,11 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     /// "codex" (Codex CLI). The agent runs headless with permission checks
     /// bypassed — strictly opt-in.
     public var agentExecutor: String = ""
+    /// Read an agent-bound command back and wait for a spoken yes/no before
+    /// anything is sent. ON by default: the agent runs without its own
+    /// permission prompts, so this read-back is the last moment a misheard
+    /// command can be stopped.
+    public var agentConfirm: Bool = true
     /// Seconds before a background agent run is abandoned.
     public var agentTimeoutSeconds: Double = 120
     /// Quiet time (legacy SFSpeechRecognizer path only) before an utterance is
@@ -53,7 +58,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         case enabled, language, wakeWord, wakeWordAliases
         case visualContextEnabled, vadSilenceMs
         case transcriptOverlayEnabled, transcriptOverlaySeconds, transcriptOverlayManualDismiss
-        case agentExecutor, agentTimeoutSeconds
+        case agentExecutor, agentConfirm, agentTimeoutSeconds
     }
 
     /// Field-tolerant decoding, matching GestureConfig's behavior. Keys from
@@ -84,6 +89,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Double.self, forKey: .transcriptOverlaySeconds) { transcriptOverlaySeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayManualDismiss) { transcriptOverlayManualDismiss = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .agentExecutor) { agentExecutor = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .agentConfirm) { agentConfirm = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .agentTimeoutSeconds) {
             // "Agent timeout" slider (`range: 30...300`) — also the ceiling
             // that keeps AgentSessionManager's `Int(max(30, timeout))` from
