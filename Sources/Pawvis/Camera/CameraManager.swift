@@ -14,9 +14,27 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     var onFrame: ((CMSampleBuffer) -> Void)?
     /// Called on the main queue when the running state changes.
     var onRunningChanged: ((Bool) -> Void)?
+    /// Called on the main queue when capture dies underneath us — a session
+    /// runtime error, or the active device unplugged — with a human-readable
+    /// reason. Frames may never arrive again; the caller owns saying so.
+    var onFailure: ((String) -> Void)?
+    /// Called on the main queue when the system interrupts capture (another
+    /// app claimed the device, …) with a reason, and again with nil when the
+    /// interruption ends.
+    var onInterruption: ((String?) -> Void)?
 
     private(set) var isRunning = false
     private var currentDeviceID: String?
+    private var observers: [NSObjectProtocol] = []
+
+    override init() {
+        super.init()
+        observeCaptureLifecycle()
+    }
+
+    deinit {
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
 
     static func availableCameras() -> [(id: String, name: String)] {
         let discovery = AVCaptureDevice.DiscoverySession(
@@ -70,6 +88,126 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             }
             configureIfNeeded(deviceID: deviceID, force: true)
         }
+    }
+
+    // MARK: - Failure, interruption, disconnect
+
+    /// The session dying is not an event AVFoundation surfaces through the
+    /// frame path: frames just stop, silently. These observers are the only
+    /// honest signal that the camera was unplugged, claimed by another app,
+    /// or hit a runtime error — without them a drag in progress stays held
+    /// system-wide with nobody left to release it.
+    private func observeCaptureLifecycle() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session, queue: nil
+        ) { [weak self] note in self?.handleRuntimeError(note) })
+        observers.append(center.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session, queue: nil
+        ) { [weak self] note in self?.handleInterruption(began: true, note: note) })
+        observers.append(center.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session, queue: nil
+        ) { [weak self] note in self?.handleInterruption(began: false, note: note) })
+        // Device notifications carry the device as the object and are not
+        // session-scoped: filter to our active input in the handler.
+        observers.append(center.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification,
+            object: nil, queue: nil
+        ) { [weak self] note in self?.handleDeviceDisconnected(note) })
+        observers.append(center.addObserver(
+            forName: AVCaptureDevice.wasConnectedNotification,
+            object: nil, queue: nil
+        ) { [weak self] note in self?.handleDeviceConnected(note) })
+    }
+
+    private func handleRuntimeError(_ note: Notification) {
+        let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
+        let description = error?.localizedDescription ?? "unknown error"
+        Log.camera.error("Capture session runtime error: \(description, privacy: .public)")
+        // No blind restart here: on macOS a runtime error is not one of the
+        // documented-recoverable kinds, and a failed startRunning can post
+        // another runtime error — a loop. Recovery comes from the device
+        // reconnect handler, wake, interruption end, or the user's toggle.
+        frameQueue.async { [self] in
+            guard isRunning else { return }
+            isRunning = session.isRunning
+            let running = isRunning
+            DispatchQueue.main.async {
+                self.onRunningChanged?(running)
+                self.onFailure?("Camera error: \(description)")
+            }
+        }
+    }
+
+    private func handleInterruption(began: Bool, note: Notification) {
+        guard began else {
+            Log.camera.info("Capture interruption ended")
+            DispatchQueue.main.async { self.onInterruption?(nil) }
+            return
+        }
+        // macOS doesn't expose the interruption reason (the key is iOS-only),
+        // so say what is knowable: capture paused and it wasn't us.
+        let reason = "Camera interrupted — another app may have taken it"
+        Log.camera.error("Capture interrupted")
+        DispatchQueue.main.async { self.onInterruption?(reason) }
+    }
+
+    /// The active camera vanished (unplugged, Continuity Camera walked away).
+    /// Reconfigure around it: the requested device lookup already falls back
+    /// to the built-in camera, then anything — and the report says honestly
+    /// which of those happened.
+    private func handleDeviceDisconnected(_ note: Notification) {
+        guard let device = note.object as? AVCaptureDevice else { return }
+        let goneID = device.uniqueID
+        let goneName = device.localizedName
+        frameQueue.async { [self] in
+            guard activeInputDeviceID() == goneID else { return }
+            Log.camera.error("Camera disconnected: \(goneName, privacy: .public)")
+            // Reconfigure even while stopped: AVFoundation leaves the dead
+            // device's input attached, and a later start would ride it into
+            // a session that can never produce a frame.
+            configureIfNeeded(deviceID: currentDeviceID, force: true)
+            guard isRunning else { return }
+            let fallback = session.inputs
+                .compactMap { ($0 as? AVCaptureDeviceInput)?.device.localizedName }
+                .first
+            DispatchQueue.main.async {
+                if let fallback {
+                    self.onFailure?("\(goneName) disconnected — switching to \(fallback)")
+                } else {
+                    self.onFailure?("\(goneName) disconnected — no other camera found")
+                }
+            }
+        }
+    }
+
+    /// A camera appeared. Only interesting while running with no camera at
+    /// all (the one we lost came back) or when the user's chosen device
+    /// returns while we ride a fallback — anything else would thrash the
+    /// session every time a virtual camera registers itself.
+    private func handleDeviceConnected(_ note: Notification) {
+        guard let device = note.object as? AVCaptureDevice,
+              device.hasMediaType(.video) else { return }
+        let newID = device.uniqueID
+        frameQueue.async { [self] in
+            guard isRunning else { return }
+            let active = activeInputDeviceID()
+            let cameraless = active == nil
+            let chosenReturned = currentDeviceID == newID && active != newID
+            guard cameraless || chosenReturned else { return }
+            Log.camera.info("Camera connected, reconfiguring")
+            configureIfNeeded(deviceID: currentDeviceID, force: true)
+        }
+    }
+
+    /// Unique ID of the device currently feeding the session (frameQueue only).
+    private func activeInputDeviceID() -> String? {
+        session.inputs
+            .compactMap { ($0 as? AVCaptureDeviceInput)?.device.uniqueID }
+            .first
     }
 
     private func configureIfNeeded(deviceID: String?, force: Bool = false) {

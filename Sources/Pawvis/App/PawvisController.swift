@@ -20,7 +20,11 @@ final class PawvisController: ObservableObject {
     @Published private(set) var controlArmed = true
     @Published private(set) var cameraPermission = Permissions.camera()
     @Published private(set) var accessibilityGranted = Permissions.accessibility() == .granted
-    @Published private(set) var lastError: String?
+    /// Why the camera pipeline is broken right now, or nil while healthy:
+    /// access denied, device unplugged, claimed by another app, or simply no
+    /// frames arriving. The menu status line and the overlay pill read it;
+    /// frames resuming clears it.
+    @Published private(set) var cameraFailure: String?
 
     private let camera = CameraManager()
     private let tracking = HandTrackingService()
@@ -62,6 +66,35 @@ final class PawvisController: ObservableObject {
             }
         }
 
+        // Camera lifecycle (all delivered on the main queue). A session that
+        // just came up gets a fresh warm-up leash on the stall clock; a
+        // session that died or was interrupted goes through the one failure
+        // path, because frames have stopped and nothing else will run.
+        camera.onRunningChanged = { [weak self] running in
+            MainActor.assumeIsolated {
+                guard let self, running else { return }
+                self.armStallClock(grace: Self.startupGraceSeconds)
+            }
+        }
+        camera.onFailure = { [weak self] reason in
+            MainActor.assumeIsolated {
+                self?.enterCameraFailure(reason)
+            }
+        }
+        camera.onInterruption = { [weak self] reason in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let reason {
+                    self.enterCameraFailure(reason)
+                } else {
+                    // The system says capture is back. Clear the failure and
+                    // re-arm the stall clock: if frames don't actually
+                    // return, the watchdog re-trips honestly.
+                    self.clearCameraFailure()
+                }
+            }
+        }
+
         settingsStore.$settings
             .removeDuplicates()
             .sink { [weak self] newSettings in
@@ -77,18 +110,33 @@ final class PawvisController: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.refreshProjector() }
         }
+
+        // Sleep is a camera interruption by another name: frames stop, but
+        // no AVFoundation notification says so. Let go of anything held
+        // before the machine goes down, and quiet the watchdog until wake.
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.systemWillSleep() }
+        }
+        workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.systemDidWake() }
+        }
     }
 
     // MARK: - Lifecycle
 
     func startTracking() {
         guard !trackingActive else { return }
-        lastError = nil
+        cameraFailure = nil
 
         switch Permissions.camera() {
         case .denied:
             cameraPermission = .denied
-            lastError = "Camera access denied — enable it in System Settings → Privacy"
+            cameraFailure = "Camera access denied — enable it in System Settings → Privacy"
             return
         case .notDetermined:
             Task { [weak self] in
@@ -115,6 +163,8 @@ final class PawvisController: ObservableObject {
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         trackingActive = true
         startPermissionPolling()
+        armStallClock(grace: Self.startupGraceSeconds)
+        startWatchdog()
         Log.app.info("Tracking started")
     }
 
@@ -133,16 +183,28 @@ final class PawvisController: ObservableObject {
     func stopTracking() {
         guard trackingActive else { return }
         camera.stop()
-        mouse.apply(engine.forceRelease(at: CACurrentMediaTime()))
-        mouse.releaseAllButtons()
+        releaseEverything()
         overlay.hide()
         trackingActive = false
         handsDetected = 0
         grabbing = false
         controlArmed = true
+        cameraFailure = nil // switched off on purpose: nothing is failing
         permissionPollTimer?.invalidate()
         permissionPollTimer = nil
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
         Log.app.info("Tracking stopped")
+    }
+
+    /// The one force-release path: the engine's held press unwinds through
+    /// the same paced posting queue as every other event, then the mouse's
+    /// own bookkeeping lets go of anything left. stopTracking, the training
+    /// hand-off, camera failure, and system sleep all funnel through here so
+    /// a stuck synthetic button is impossible.
+    private func releaseEverything() {
+        mouse.apply(engine.forceRelease(at: CACurrentMediaTime()))
+        mouse.releaseAllButtons()
     }
 
     func toggleTracking() {
@@ -167,8 +229,7 @@ final class PawvisController: ObservableObject {
         if trackingActive {
             // Let go of anything in flight and hide the overlay; the camera
             // keeps running, now feeding only the trainer.
-            mouse.apply(engine.forceRelease(at: CACurrentMediaTime()))
-            mouse.releaseAllButtons()
+            releaseEverything()
             engine.reset()
             overlay.hide()
         } else {
@@ -188,7 +249,7 @@ final class PawvisController: ObservableObject {
                 }
             case .denied:
                 cameraPermission = .denied
-                lastError = "Camera access denied — enable it in System Settings → Privacy"
+                cameraFailure = "Camera access denied — enable it in System Settings → Privacy"
             }
         }
         Log.app.info("Gesture training started (tracking was \(self.trainingHadTracking))")
@@ -201,6 +262,9 @@ final class PawvisController: ObservableObject {
         if trainingHadTracking {
             engine.reset() // a fresh start, not the pre-training leftovers
             overlay.show()
+            // The watchdog sat out training; don't let it convict on frames
+            // that were someone else's to consume.
+            armStallClock(grace: 0)
         } else {
             camera.stop()
         }
@@ -223,9 +287,120 @@ final class PawvisController: ObservableObject {
         accessibilityGranted = Permissions.accessibility() == .granted
     }
 
+    // MARK: - Camera failure watchdog
+
+    /// The engine only runs when a frame arrives, and its tracking-loss grace
+    /// needs an *empty* frame — a dead camera sends none at all. So when the
+    /// webcam is unplugged, claimed by another app, or wedged, a drag in
+    /// progress would stay held system-wide forever, under an overlay frozen
+    /// at screen-saver level, with the menu still claiming all is well. This
+    /// watchdog is the clock that keeps ticking when frames don't: past the
+    /// stall window it force-releases every button, parks the overlay, and
+    /// says why — and the moment frames return, everything comes back.
+
+    /// No frames for this long while tracking means the camera is gone.
+    /// Comfortably above any real inter-frame gap at the locked 30 fps, and
+    /// short enough that a stuck drag doesn't wander far.
+    private static let frameStallSeconds: TimeInterval = 2
+    /// Cold cameras (and cameras waking from sleep) take a while to deliver
+    /// the first frame; the stall verdict waits this long after a (re)start.
+    private static let startupGraceSeconds: TimeInterval = 5
+
+    private var watchdogTimer: Timer?
+    /// When the last frame reached `processFrame` (media time).
+    private var lastFrameAt: TimeInterval = 0
+    /// No stall verdict before this deadline — warm-up isn't failure.
+    private var stallGraceUntil: TimeInterval = 0
+    /// Between willSleep and didWake the watchdog stays quiet: the whole
+    /// machine has stopped, which is nobody's failure.
+    private var asleep = false
+
+    /// Restart the no-frames countdown, optionally with a warm-up grace.
+    private func armStallClock(grace: TimeInterval) {
+        let now = CACurrentMediaTime()
+        lastFrameAt = now
+        stallGraceUntil = now + grace
+    }
+
+    private func startWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.watchdogTick() }
+        }
+        watchdogTimer?.tolerance = 0.1
+    }
+
+    private func watchdogTick() {
+        guard trackingActive, !trainingActive, !asleep else { return }
+        let now = CACurrentMediaTime()
+        if let failure = cameraFailure {
+            // Keep the pill's copy of the reason alive. StatusPillPolicy
+            // still times it out and honors the ✕, exactly like the
+            // Accessibility warning; the menu line is the copy that stays.
+            overlay.parkForFailure(failure, now: now)
+        } else if now >= stallGraceUntil, now - lastFrameAt >= Self.frameStallSeconds {
+            enterCameraFailure("Camera stopped sending frames — check it's connected and free")
+        }
+    }
+
+    /// The one entry into the failed state, whatever the trigger (stall,
+    /// runtime error, interruption, disconnect): let go of every held
+    /// button — the same force-release path stopTracking uses — park the
+    /// overlay with the reason, and publish it for the menu.
+    private func enterCameraFailure(_ reason: String) {
+        guard trackingActive, !trainingActive, !asleep else { return }
+        if cameraFailure == nil {
+            Log.app.error("Camera failure while tracking: \(reason, privacy: .public)")
+            releaseEverything()
+            engine.reset()
+            handsDetected = 0
+            grabbing = false
+        }
+        cameraFailure = reason
+        overlay.parkForFailure(reason, now: CACurrentMediaTime())
+    }
+
+    /// Frames are back (or the interruption ended): un-park and say so.
+    /// Rendering resumes with the next frame; the engine restarts clean.
+    private func clearCameraFailure() {
+        armStallClock(grace: Self.startupGraceSeconds)
+        guard cameraFailure != nil, trackingActive else { return }
+        cameraFailure = nil
+        engine.reset()
+        overlay.endFailure()
+        gestureNotice = (text: "🐾 Camera is back",
+                         until: CACurrentMediaTime() + Self.gestureNoticeSeconds)
+        Log.app.info("Camera recovered; tracking resumed")
+    }
+
+    // MARK: - Sleep / wake
+
+    /// Sleep is an interruption without a notification from AVFoundation:
+    /// release anything held before the machine goes down, and quiet the
+    /// watchdog — no failure UI for a screen that is off.
+    private func systemWillSleep() {
+        asleep = true
+        guard trackingActive else { return }
+        releaseEverything()
+        engine.reset()
+        Log.app.info("System sleeping; released buttons and paused the watchdog")
+    }
+
+    /// Tracking that was on stays on across sleep: nudge the camera (a
+    /// no-op if the session survived) and give it the startup grace before
+    /// the watchdog may complain.
+    private func systemDidWake() {
+        asleep = false
+        guard trackingActive || trainingActive else { return }
+        armStallClock(grace: Self.startupGraceSeconds)
+        camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
+        Log.app.info("System woke; resuming camera")
+    }
+
     // MARK: - Frame pipeline
 
     private func processFrame(hands: [Hand], at time: TimeInterval) {
+        lastFrameAt = time // any frame at all feeds the stall watchdog
         if trainingActive {
             // The trainer owns the stream; nothing reaches the engine or
             // the mouse while its window is open.
@@ -233,6 +408,10 @@ final class PawvisController: ObservableObject {
             return
         }
         guard trackingActive else { return }
+        if cameraFailure != nil {
+            // The camera is delivering again — failure over, overlay back.
+            clearCameraFailure()
+        }
         var (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
 
         // Fired custom gestures are commands for this controller, not mouse
