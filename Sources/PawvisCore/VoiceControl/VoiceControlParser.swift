@@ -42,10 +42,14 @@ public final class VoiceControlParser {
     /// - Glued mid-utterance (the recognizer joined ambient speech to the
     ///   command segment): accepted ONLY when what follows the wake word
     ///   parses as a deterministic command — "she said pawvis was busy"
-    ///   stays ambient, "…anyway pawvis open safari" acts.
+    ///   stays ambient, "…anyway pawvis open safari" acts. With
+    ///   `config.strictWake` on (the agent hand-off is live), this tier is
+    ///   disabled outright: mid-utterance stitching is a mishearing surface
+    ///   no accept should ride when accepting means arbitrary execution.
     public func wakeRemainder(_ transcript: String) -> String? {
         guard let match = wakeMatch(in: transcript, tolerance: 1) else { return nil }
         if match.trusted { return match.remainder }
+        if config.strictWake { return nil }
         return remainderIsDeterministicCommand(match.remainder) ? match.remainder : nil
     }
 
@@ -64,8 +68,10 @@ public final class VoiceControlParser {
     }
 
     /// True when a remainder parses to a plain deterministic command (or
-    /// typing) — the acceptance bar for glued-speech wake matches.
-    func remainderIsDeterministicCommand(_ remainder: String) -> Bool {
+    /// typing) — the acceptance bar for glued-speech wake matches, and (via
+    /// `UtteranceGate.decide(strictCommandBar:)`) for what the armed capture
+    /// window may take when strict wake is on.
+    public func remainderIsDeterministicCommand(_ remainder: String) -> Bool {
         let result = parseRemainder(remainder)
         if !result.typing.isEmpty { return true }
         switch result.command {
@@ -114,6 +120,88 @@ public final class VoiceControlParser {
         }
         return VoiceParseResult(command: .resolve(transcript: cleaned))
     }
+
+    // MARK: - Agent confirmation
+
+    /// How an utterance answers a pending agent hand-off read-back.
+    public enum ConfirmResponse: Equatable, Sendable {
+        case confirm
+        case deny
+    }
+
+    /// Deterministic classification of a wake-stripped utterance while an
+    /// agent hand-off is waiting for confirmation. Only the pending-
+    /// confirmation state machine consults this, which is what keeps "yes"
+    /// spoken outside that state an ordinary free-form utterance: the
+    /// regular grammar never produces these responses, and this entry never
+    /// runs the regular grammar. Returns nil when the utterance is neither a
+    /// confirmation nor a denial — the caller treats it as a new command.
+    ///
+    /// Matching is exact-phrase over normalized tokens, tolerant of the same
+    /// politeness padding as the stop phrases ("yes please", "okay send it"),
+    /// plus a leading yes/no glued to another phrase of the same family
+    /// ("yes, do it", "no, cancel that"). Anything looser would let ordinary
+    /// speech answer a question it never heard.
+    public func confirmResponse(_ remainder: String) -> ConfirmResponse? {
+        let tokens = Self.normalize(remainder).split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        if let response = Self.confirmMatch(tokens.joined(separator: " ")) {
+            return response
+        }
+        // Politeness padding never changes an answer's meaning ("yes
+        // please", "please cancel", "ok go ahead") — same rule as the stop
+        // phrases. Stripping can leave nothing ("please"), which is no
+        // answer at all.
+        let depolited = tokens.filter { !Self.politenessTokens.contains($0) }
+        guard !depolited.isEmpty else { return nil }
+        if let response = Self.confirmMatch(depolited.joined(separator: " ")) {
+            return response
+        }
+        // "yes, send it" / "no, cancel that": a leading yes/no plus a phrase
+        // from the SAME family is still that answer. Mixed families ("yes
+        // cancel") stay nil — a contradiction is not an answer.
+        if depolited.count >= 2 {
+            let rest = depolited.dropFirst().joined(separator: " ")
+            if Self.confirmLeads.contains(depolited[0]),
+               Self.confirmMatch(rest) == .confirm {
+                return .confirm
+            }
+            if Self.denyLeads.contains(depolited[0]),
+               Self.confirmMatch(rest) == .deny {
+                return .deny
+            }
+        }
+        return nil
+    }
+
+    private static func confirmMatch(_ phrase: String) -> ConfirmResponse? {
+        if confirmPhrases.contains(phrase) { return .confirm }
+        if denyPhrases.contains(phrase) { return .deny }
+        return nil
+    }
+
+    /// Whole-utterance phrases that send a pending agent command. "ok" and
+    /// "okay" belong here even though they double as politeness padding: as
+    /// the entire answer to "send it?", they mean yes.
+    private static let confirmPhrases: Set<String> = [
+        "yes", "yeah", "yep", "yup", "sure", "ok", "okay",
+        "confirm", "confirmed", "proceed", "affirmative",
+        "go ahead", "go for it", "do it", "send", "send it",
+    ]
+
+    /// Whole-utterance phrases that cancel a pending agent command. The
+    /// stop/cancel family is deliberately included: "stop" while a read-back
+    /// waits must cancel the send, never fall through to the general brake.
+    private static let denyPhrases: Set<String> = [
+        "no", "nope", "nah", "negative",
+        "cancel", "cancel that", "cancel it",
+        "stop", "stop it", "never mind", "nevermind",
+        "dont", "do not", "dont send", "dont send it", "dont do it",
+        "no thanks", "no thank you",
+    ]
+
+    private static let confirmLeads: Set<String> = ["yes", "yeah", "yep", "yup", "sure"]
+    private static let denyLeads: Set<String> = ["no", "nope", "nah"]
 
     // MARK: - Clause sequences
 
@@ -539,6 +627,20 @@ public final class VoiceControlParser {
     /// How far into an utterance the wake word may sit (chunks skipped).
     private static let maxWakeSkip = 3
 
+    /// Fuzzy (edit-distance) wake matching needs candidates at least this
+    /// long: at five characters, one edit reaches common names ("pavis" ± 1
+    /// = "Davis", "Paris"). Shorter wake words and aliases still match —
+    /// exactly, as written.
+    public static let fuzzyMinCandidateLength = 6
+
+    /// True when this wake word (or alias) is long enough for edit-distance
+    /// tolerance, measured on the same folded token matching uses ("Paw
+    /// Viz" → "pawviz"). Settings shows a hint when it isn't, so nobody
+    /// discovers by mishearing that a short wake word matches strictly.
+    public static func supportsFuzzyMatching(_ wakeWord: String) -> Bool {
+        foldedWakeToken(wakeWord).count >= fuzzyMinCandidateLength
+    }
+
     /// Finds the wake word within the first few chunks of the utterance.
     /// Skipped filler keeps full trust; skipped non-filler (the recognizer
     /// glued ambient speech to a command segment) is matched but marked
@@ -581,15 +683,16 @@ public final class VoiceControlParser {
         for k in 1...min(maxCandidateWords + 1, chunks.count) {
             let joined = chunks[0..<k].map { Self.normalize(String($0)) }.joined()
             guard joined.count >= 3 else { continue }
-            // Fuzzy matching needs 6+ character candidates (at five, one
-            // edit reaches common names — "pavis" ± 1 = "Davis", "Paris")
-            // and a shared initial letter (a garble that loses the opening
-            // consonant is beyond rescuing; requiring it keeps "Davis, open
-            // the meeting notes" ambient at every tier). Short aliases
-            // still match — exactly, as written.
+            // Fuzzy matching needs `fuzzyMinCandidateLength`+ character
+            // candidates (at five, one edit reaches common names — "pavis"
+            // ± 1 = "Davis", "Paris") and a shared initial letter (a garble
+            // that loses the opening consonant is beyond rescuing; requiring
+            // it keeps "Davis, open the meeting notes" ambient at every
+            // tier). Short aliases still match — exactly, as written.
             let matched = candidates.contains(joined)
                 || candidates.contains { candidate in
-                    candidate.count >= 6 && candidate.first == joined.first
+                    candidate.count >= Self.fuzzyMinCandidateLength
+                        && candidate.first == joined.first
                         && abs(candidate.count - joined.count) <= tolerance
                         && Self.editDistance(joined, candidate, isAtMost: tolerance)
                 }

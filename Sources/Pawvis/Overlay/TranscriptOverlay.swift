@@ -55,6 +55,18 @@ final class TranscriptOverlay {
         scheduleHide(after: timeout)
     }
 
+    /// A question that waits on a spoken answer (the agent confirm
+    /// read-back). Deliberately NOT gated on `enabled`: that switch governs
+    /// echoing what Pawvis hears, but a prompt that holds an action until
+    /// it's answered must be visible to be answerable. Stays up until
+    /// replaced or hidden — the pending state machine owns its lifetime.
+    func prompt(_ text: String) {
+        guard !text.isEmpty else { return }
+        hideTimer?.invalidate()
+        hideTimer = nil
+        display(text)
+    }
+
     /// A transient status message ("→ reddit.com", "⚠️ …") using the same
     /// capsule; auto-hides even in manual mode (it's feedback, not a record).
     func flash(_ text: String) {

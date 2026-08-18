@@ -2,16 +2,38 @@ import Foundation
 
 /// Which landmark drives the on-screen cursor.
 public enum PointerSource: String, Codable, CaseIterable, Sendable {
-    /// Centroid of the wrist + knuckles, falling back to the thumb tip when the
-    /// palm is occluded. The most stable choice — pinching moves the fingers
-    /// but not the palm, so the cursor holds still through clicks. Default.
+    /// Midpoint of the wrist and the middle-finger knuckle, falling back to
+    /// the thumb tip (then the index tip) when the palm is occluded. The most
+    /// stable choice — finger gestures barely move the palm, so the cursor
+    /// holds still through clicks. Default.
     case palmCenter
-    /// The thumb tip — steadier than the index during pinches.
+    /// The thumb tip — steadier than the index during finger dips.
     case thumbTip
-    /// The index fingertip. Most direct, but the cursor shifts when you pinch.
+    /// The index fingertip. Most direct, but the cursor shifts when a finger
+    /// gesture moves it.
     case indexTip
     /// Midpoint of thumb tip and index tip.
     case pinchMidpoint
+
+    public var displayName: String {
+        switch self {
+        case .palmCenter: return "Palm (steady)"
+        case .thumbTip: return "Thumb tip"
+        case .indexTip: return "Index fingertip"
+        case .pinchMidpoint: return "Pinch midpoint (thumb and index)"
+        }
+    }
+
+    /// The phrase copy drops into "the cursor rides your …", so the guide
+    /// and the settings captions stay honest whichever source is chosen.
+    public var inlineName: String {
+        switch self {
+        case .palmCenter: return "palm"
+        case .thumbTip: return "thumb tip"
+        case .indexTip: return "index fingertip"
+        case .pinchMidpoint: return "pinch midpoint"
+        }
+    }
 }
 
 /// Tunable thresholds for pose classification.

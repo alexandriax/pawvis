@@ -6,26 +6,43 @@ import Foundation
 public struct CustomGestureBinding: Codable, Equatable, Sendable, Identifiable {
     public var gesture: CustomGesture
     public var action: GestureAction?
+    /// Per-app exceptions: in a listed app, that app's action fires instead
+    /// of `action`. With `action` nil, the gesture only fires in the listed
+    /// apps (see `PerAppAction`).
+    public var overrides: [AppActionOverride]
 
     /// One binding per gesture, so the gesture is the identity.
     public var id: CustomGesture { gesture }
 
-    public init(gesture: CustomGesture, action: GestureAction? = nil) {
+    public init(gesture: CustomGesture, action: GestureAction? = nil,
+                overrides: [AppActionOverride] = []) {
         self.gesture = gesture
         self.action = action
+        self.overrides = overrides
+    }
+
+    /// Whether the binding does anything in any app — the detection gate.
+    public var firesAnywhere: Bool {
+        PerAppAction.firesAnywhere(base: action, overrides: overrides)
     }
 
     enum CodingKeys: String, CodingKey {
-        case gesture, action
+        case gesture, action, overrides
     }
 
     /// `gesture` decodes strictly (a binding for a gesture this build doesn't
     /// know is dropped by the lossy list below); an unreadable action just
-    /// leaves the binding unbound.
+    /// leaves the binding unbound. The overrides list is element-tolerant
+    /// like the bindings list itself: one unreadable override drops alone.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         gesture = try c.decode(CustomGesture.self, forKey: .gesture)
         action = try? c.decodeIfPresent(GestureAction.self, forKey: .action)
+        overrides = []
+        if let v = try? c.decodeIfPresent([Lossy<AppActionOverride>].self, forKey: .overrides) {
+            var seen: Set<String> = []
+            overrides = v.compactMap(\.value).filter { seen.insert($0.bundleID).inserted }
+        }
     }
 }
 
@@ -60,18 +77,22 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
         bindings.first { $0.gesture == gesture }
     }
 
-    /// The action a fired gesture should perform, honoring the master switch.
-    public func action(for gesture: CustomGesture) -> GestureAction? {
-        guard enabled else { return nil }
-        return binding(for: gesture)?.action
+    /// The action a fired gesture should perform, honoring the master switch
+    /// and any per-app override matching the frontmost app.
+    public func action(for gesture: CustomGesture,
+                       frontmostBundleID: String? = nil) -> GestureAction? {
+        guard enabled, let binding = binding(for: gesture) else { return nil }
+        return PerAppAction.resolve(base: binding.action, overrides: binding.overrides,
+                                    frontmostBundleID: frontmostBundleID)
     }
 
     /// What the engine's detector should watch: only gestures whose binding
-    /// has an action, and nothing at all while the master switch is off.
+    /// does something somewhere (a base action, or at least one per-app
+    /// action), and nothing at all while the master switch is off.
     public func detectorConfig() -> CustomGestureDetector.Config {
         var config = CustomGestureDetector.Config()
         guard enabled else { return config }
-        config.enabled = Set(bindings.compactMap { $0.action != nil ? $0.gesture : nil })
+        config.enabled = Set(bindings.filter(\.firesAnywhere).map(\.gesture))
         config.wiggleReversals = wiggleReversals
         config.holdSeconds = holdSeconds
         config.flingTravel = flingTravel
@@ -87,6 +108,14 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
     /// Field-tolerant decoding, like every settings section; the bindings
     /// list is additionally element-tolerant, so one unreadable binding (say,
     /// from a newer build's gesture) drops alone instead of resetting the list.
+    ///
+    /// The four tuning dials are family-wide thresholds fed straight into
+    /// `CustomGestureDetector`'s state machines (wiggle, hold-pose,
+    /// grab-fling), so each is clamped to its settings-UI slider/stepper
+    /// range after decoding — the same hazard, and the same fix, as
+    /// `GestureConfig`: an out-of-range value doesn't just fail to apply, it
+    /// can make a whole gesture family permanently unfireable (or, in the
+    /// grab/fling case, fire on nearly anything).
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -95,10 +124,22 @@ public struct CustomGestureSettings: Codable, Equatable, Sendable {
             var seen: Set<CustomGesture> = []
             bindings = v.compactMap(\.value).filter { seen.insert($0.gesture).inserted }
         }
-        if let v = try? c.decodeIfPresent(Int.self, forKey: .wiggleReversals) { wiggleReversals = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .holdSeconds) { holdSeconds = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .flingTravel) { flingTravel = v }
-        if let v = try? c.decodeIfPresent(Double.self, forKey: .gatherSpread) { gatherSpread = v }
+        if let v = try? c.decodeIfPresent(Int.self, forKey: .wiggleReversals) {
+            // "Wiggle vigor" stepper (`in: 2...5`).
+            wiggleReversals = v.clamped(to: 2...5)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .holdSeconds) {
+            // "Hold time" slider (`range: 0.2...0.8`).
+            holdSeconds = v.clamped(to: 0.2...0.8)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .flingTravel) {
+            // "Fling distance" slider (`range: 0.10...0.30`).
+            flingTravel = v.clamped(to: 0.10...0.30)
+        }
+        if let v = try? c.decodeIfPresent(Double.self, forKey: .gatherSpread) {
+            // "Grab tightness" slider (`range: 0.22...0.50`).
+            gatherSpread = v.clamped(to: 0.22...0.50)
+        }
     }
 }
 

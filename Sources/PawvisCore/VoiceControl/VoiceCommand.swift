@@ -41,9 +41,14 @@ public enum ScrollAmount: String, Equatable, Sendable {
     case nudge, step, page
 }
 
-/// Hardware media keys the system routes to the now-playing app.
+/// Hardware media keys, delivered as systemDefined NSEvents rather than
+/// regular key codes. `playPause` is routed by macOS to whatever's playing;
+/// the volume and brightness keys act on the system directly (macOS shows
+/// its own HUD) and need no "now playing" app at all.
 public enum MediaKey: String, Equatable, Sendable {
     case playPause
+    case volumeUp, volumeDown, volumeMute
+    case brightnessUp, brightnessDown
 }
 
 /// A machine-control command parsed from a wake-word utterance. Typing is not
