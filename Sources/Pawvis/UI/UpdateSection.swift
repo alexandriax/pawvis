@@ -52,8 +52,17 @@ struct UpdateSection: View {
             }
 
             if case .downloading(let progress) = updater.state {
-                ProgressView(value: progress)
-                    .frame(maxWidth: 320)
+                Group {
+                    if let progress {
+                        ProgressView(value: progress)
+                    } else {
+                        // Size unknown (no Content-Length): indeterminate
+                        // rather than a determinate bar stuck at empty.
+                        ProgressView()
+                    }
+                }
+                .progressViewStyle(.linear)
+                .frame(maxWidth: 320)
             }
 
             if case .readyToRelaunch = updater.state {

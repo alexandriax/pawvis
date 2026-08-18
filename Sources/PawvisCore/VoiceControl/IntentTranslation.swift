@@ -67,15 +67,6 @@ public enum TranslationPolicy {
         "Command: “\(goal)”"
     }
 
-    /// App qualifiers that name "the web", not an app. The small model
-    /// regularly emits these (measured live: app "web" on plain search
-    /// requests); they mean "wherever the default browser is" — nil.
-    private static let genericWebQualifiers: Set<String> = [
-        "web", "the web", "internet", "the internet", "online",
-        "browser", "the browser", "my browser", "a browser",
-        "default browser", "the default browser",
-    ]
-
     /// Intent names, folded — the model occasionally bleeds the schema into
     /// an argument (measured live: quitApp with argument "needsScreen").
     /// Such an argument is noise, never a real target.
@@ -109,7 +100,7 @@ public enum TranslationPolicy {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         var qualifier = (app?.isEmpty ?? true) ? nil : app
         if let named = qualifier,
-           genericWebQualifiers.contains(VoiceControlParser.normalize(named))
+           AppNameMatch.genericWebQualifiers.contains(VoiceControlParser.normalize(named))
             || intentNames.contains(named.lowercased())
             || placeholderArguments.contains(VoiceControlParser.normalize(named)) {
             qualifier = nil
