@@ -242,7 +242,7 @@ struct MenuContentView: View {
         if controller.settingsStore.settings.gestures.controlTrigger == .gesturesOnly {
             return "Watching for gestures"
         }
-        if controller.grabbing { return "Clicking (pinched)" }
+        if controller.grabbing { return "Clicking" }
         return controller.controlArmed ? "Pointing" : "Show an open hand to control"
     }
 
