@@ -126,6 +126,13 @@ final class CommandExecutor {
     /// abort.
     private func goTo(url: String, app spokenApp: String?) async -> ExecutionOutcome {
         guard !Task.isCancelled else { return .done(notice: "Stopped") }
+        // The grammar deliberately passes generic qualifiers ("the browser",
+        // "my browser") straight through uninterpreted — normalizing them is
+        // resolution's job, not the parser's. Left alone, "the browser"
+        // would reach AppCatalog.resolve, lose its article, and prefix-match
+        // any installed app literally named Browser (Brave, Tor) instead of
+        // meaning "no app in particular".
+        let spokenApp = AppNameMatch.resolvedAppQualifier(spokenApp)
         guard let full = URL(string: url.contains("://") ? url : "https://\(url)") else {
             return .failed("Couldn't form a URL from “\(url)”")
         }
@@ -175,6 +182,11 @@ final class CommandExecutor {
     /// search it was meant to abort.
     private func webSearch(query: String, app spokenApp: String?) async -> ExecutionOutcome {
         guard !Task.isCancelled else { return .done(notice: "Stopped") }
+        // Same generic-qualifier normalization as goTo, and for the same
+        // reason: unnormalized, "in the browser" would try to launch an app
+        // named "the browser" and could resolve to whatever installed app's
+        // name happens to prefix-match "browser".
+        let spokenApp = AppNameMatch.resolvedAppQualifier(spokenApp)
         // A named browser gets fronted first, then its address bar does the
         // searching — the omnibox treats "discord" exactly the way the user's
         // own typing would (autocomplete or search). If the named app never
