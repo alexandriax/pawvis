@@ -151,6 +151,11 @@ final class TextTyper {
         let keyType: Int32
         switch media {
         case .playPause: keyType = 16 // NX_KEYTYPE_PLAY
+        case .volumeUp: keyType = 0 // NX_KEYTYPE_SOUND_UP
+        case .volumeDown: keyType = 1 // NX_KEYTYPE_SOUND_DOWN
+        case .brightnessUp: keyType = 2 // NX_KEYTYPE_BRIGHTNESS_UP
+        case .brightnessDown: keyType = 3 // NX_KEYTYPE_BRIGHTNESS_DOWN
+        case .volumeMute: keyType = 7 // NX_KEYTYPE_MUTE
         }
         for down in [true, false] {
             let data1 = Int((keyType << 16) | Int32((down ? 0xA : 0xB) << 8))
