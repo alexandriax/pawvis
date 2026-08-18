@@ -267,8 +267,17 @@ public final class CustomGestureDetector {
                 minJointConfidence: context.minJointConfidence)
 
             if context.pressOrScrollActive {
-                // A press always wins: every family resets outright.
+                // A press always wins: every family resets outright. That
+                // includes a wiggle's parked one-vs-two-hand decision —
+                // clearMotion() only wipes the motion buffers, not
+                // pendingAt/satisfiedAt, so without this a decision parked
+                // just before the press would still resolve (and fire)
+                // once the pair window elapsed, press or no press. A press
+                // is a change of intent: a wiggle satisfied before it must
+                // not fire during it, or after it either.
                 state.wiggle.clearMotion()
+                state.wiggle.pendingAt = -.infinity
+                state.wiggle.satisfiedAt = -.infinity
                 state.hold = HoldState()
                 state.grab = GrabState()
                 grabbingSlots.remove(input.slot)

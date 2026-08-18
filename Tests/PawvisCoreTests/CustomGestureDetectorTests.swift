@@ -89,6 +89,54 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(fired, [.twoHandFingerWiggle])
     }
 
+    func testPressBlocksPendingWiggle() {
+        // Both variants bound: a lone hand's wiggle is satisfied but parks
+        // rather than firing, waiting out the 0.35s pair window to see if a
+        // second hand joins. Engaging a press before that window elapses
+        // must cancel the parked decision outright — it must not fire
+        // mid-press, and (since the press is a change of intent) not after
+        // the press lets go either.
+        enable(.fingerWiggle, .twoHandFingerWiggle)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        let w = Vec2(0.5, 0.7)
+        for i in 0..<12 {
+            fired += feed([(0, SyntheticHand.wigglePhase(contracted: i % 2 == 1, wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "the two-hand variant is bound, so a lone wiggle must park, not fire")
+
+        // Dip the index and hold the click well past the pair window.
+        for _ in 0..<25 {
+            fired += feed([(0, SyntheticHand.fingerDip(.index, wrist: w))], at: t, press: true)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "a parked wiggle decision must not fire while a button is down")
+
+        // Release, and give it another dozen frames of stillness: the
+        // parked decision must not fire after the fact either.
+        for _ in 0..<12 {
+            fired += feed([(0, SyntheticHand.openRelaxed(wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [], "a wiggle satisfied before the press must not fire after it either")
+    }
+
+    func testPendingWiggleFiresWithoutPress() {
+        // Control for the press gate above: with no press ever happening,
+        // the same parked one-vs-two-hand decision must still resolve to
+        // the single-hand gesture once the pair window expires.
+        enable(.fingerWiggle, .twoHandFingerWiggle)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        let w = Vec2(0.5, 0.7)
+        for i in 0..<20 {
+            fired += feed([(0, SyntheticHand.wigglePhase(contracted: i % 2 == 1, wrist: w))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.fingerWiggle])
+    }
+
     func testWiggleRunsDuringCrissCrossEngage() {
         // Two splayed hands held still engage the wave; wiggling fingers are
         // not a wave, so the in-place family keeps running.
