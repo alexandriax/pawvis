@@ -6,7 +6,9 @@ import PawvisCore
 
 enum ExecutionOutcome: Equatable {
     /// Executed; `notice` is a short HUD confirmation ("Opening Safari"), nil
-    /// for self-evident actions (typing, key presses).
+    /// for self-evident actions (typing, key presses). Also how a cancelled
+    /// command reports itself (`notice: "Stopped"`) — cancellation is an
+    /// honest, non-error outcome, never `.failed`.
     case done(notice: String?)
     case failed(String)
 }
@@ -116,8 +118,21 @@ final class CommandExecutor {
     /// Chrome"): hand the URL straight to that app with NSWorkspace — the
     /// system opens a tab whether or not the app is already running, no GUI
     /// driving involved — and fall back to the default browser, saying so,
-    /// rather than failing the navigation over the app name.
+    /// rather than failing the navigation over the app name. Cancellation is
+    /// checked at entry and again around the address-bar drive; a stopped
+    /// task reports "Stopped" honestly — the NSWorkspace fallback below is
+    /// reserved for a genuine address-bar failure and must never fire for a
+    /// stop, or "cancel" would complete the very navigation it was meant to
+    /// abort.
     private func goTo(url: String, app spokenApp: String?) async -> ExecutionOutcome {
+        guard !Task.isCancelled else { return .done(notice: "Stopped") }
+        // The grammar deliberately passes generic qualifiers ("the browser",
+        // "my browser") straight through uninterpreted — normalizing them is
+        // resolution's job, not the parser's. Left alone, "the browser"
+        // would reach AppCatalog.resolve, lose its article, and prefix-match
+        // any installed app literally named Browser (Brave, Tor) instead of
+        // meaning "no app in particular".
+        let spokenApp = AppNameMatch.resolvedAppQualifier(spokenApp)
         guard let full = URL(string: url.contains("://") ? url : "https://\(url)") else {
             return .failed("Couldn't form a URL from “\(url)”")
         }
@@ -142,19 +157,36 @@ final class CommandExecutor {
             }
         }
         if frontmostBrowser != nil {
-            if await driveAddressBar(text: url) {
+            switch await driveAddressBar(text: url) {
+            case .success:
                 return .done(notice: "→ \(url)")
+            case .cancelled:
+                return .done(notice: "Stopped")
+            case .failed:
+                // The address bar never verifiably held the text — open the
+                // URL through the system instead of pressing Return on
+                // faith. Genuine failure only: a cancellation is handled
+                // above and can never land here.
+                NSWorkspace.shared.open(full)
+                return .done(notice: "→ \(url) (address bar balked — opened via the system)")
             }
-            // The address bar never verifiably held the text — open the URL
-            // through the system instead of pressing Return on faith.
-            NSWorkspace.shared.open(full)
-            return .done(notice: "→ \(url) (address bar balked — opened via the system)")
         }
         NSWorkspace.shared.open(full)
         return .done(notice: "→ \(url)")
     }
 
+    /// Cancellation is checked at entry and again around each address-bar
+    /// drive; a stopped task reports "Stopped" honestly — the search-URL
+    /// fallback at the bottom is reserved for a genuine address-bar failure
+    /// and must never fire for a stop, or "cancel" would complete the very
+    /// search it was meant to abort.
     private func webSearch(query: String, app spokenApp: String?) async -> ExecutionOutcome {
+        guard !Task.isCancelled else { return .done(notice: "Stopped") }
+        // Same generic-qualifier normalization as goTo, and for the same
+        // reason: unnormalized, "in the browser" would try to launch an app
+        // named "the browser" and could resolve to whatever installed app's
+        // name happens to prefix-match "browser".
+        let spokenApp = AppNameMatch.resolvedAppQualifier(spokenApp)
         // A named browser gets fronted first, then its address bar does the
         // searching — the omnibox treats "discord" exactly the way the user's
         // own typing would (autocomplete or search). If the named app never
@@ -163,15 +195,32 @@ final class CommandExecutor {
             if case .done = await openApp(named: spokenApp) {
                 _ = await waitForFrontmost(appNamed: spokenApp, timeout: 3.0)
                 try? await Task.sleep(for: .milliseconds(250))
-                if frontmostBrowser != nil, await driveAddressBar(text: query) {
-                    return .done(notice: "Searching: \(query)")
+                guard !Task.isCancelled else { return .done(notice: "Stopped") }
+                if frontmostBrowser != nil {
+                    switch await driveAddressBar(text: query) {
+                    case .success:
+                        return .done(notice: "Searching: \(query)")
+                    case .cancelled:
+                        return .done(notice: "Stopped")
+                    case .failed:
+                        break  // Genuine failure — fall through and retry below.
+                    }
                 }
             }
         }
-        if frontmostBrowser != nil, await driveAddressBar(text: query) {
+        guard !Task.isCancelled else { return .done(notice: "Stopped") }
+        if frontmostBrowser != nil {
             // The address bar searches with the user's own default engine.
-            return .done(notice: "Searching: \(query)")
+            switch await driveAddressBar(text: query) {
+            case .success:
+                return .done(notice: "Searching: \(query)")
+            case .cancelled:
+                return .done(notice: "Stopped")
+            case .failed:
+                break  // Genuine failure — fall through to the search URL.
+            }
         }
+        guard !Task.isCancelled else { return .done(notice: "Stopped") }
         let escaped = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         guard let url = URL(string: "https://www.google.com/search?q=\(escaped)") else {
             return .failed("Couldn't form a search for “\(query)”")
@@ -180,21 +229,41 @@ final class CommandExecutor {
         return .done(notice: "Searching: \(query)")
     }
 
+    /// `driveAddressBar`'s outcome. `.failed` is a genuine address-bar
+    /// problem (the field never verifiably held the text) — the only case
+    /// callers may fall through to the NSWorkspace fallback. `.cancelled`
+    /// means the task was stopped mid-drive; callers must report it
+    /// honestly (e.g. "Stopped") and must never treat it as `.failed`, or a
+    /// cancelled command would complete anyway through the fallback path.
+    private enum AddressBarResult {
+        case success
+        case failed
+        case cancelled
+    }
+
     /// ⌘L (focus address bar) → type → VERIFY → return. Return is gated on
     /// the focused field verifiably holding what was typed (read back over
     /// accessibility), because a Return pressed into an unknown field state
     /// navigates to whatever is there — the "went to the URL I already had"
     /// failure. One reselect-and-retype retry; then fail honestly rather
-    /// than press Return on faith. Returns false when the text never
-    /// verifiably landed.
-    private func driveAddressBar(text: String) async -> Bool {
+    /// than press Return on faith. Cancellation is checked at the top of
+    /// every loop pass and after every await that could straddle a cancel
+    /// (a `try? await Task.sleep` swallows `CancellationError` silently, so
+    /// without an explicit check afterward a cancelled retry would spin at
+    /// full speed and could still type or press Return on stale intent).
+    private func driveAddressBar(text: String) async -> AddressBarResult {
+        guard !Task.isCancelled else { return .cancelled }
         typer.press(KeyChord(key: "l", modifiers: [.command]))
         // The browser may still be becoming key after an activation — wait
         // for an editable focused field before typing at it.
-        guard await waitForFocusedEditableField(timeout: 1.5) else { return false }
+        guard await waitForFocusedEditableField(timeout: 1.5) else {
+            return Task.isCancelled ? .cancelled : .failed
+        }
         for _ in 0..<2 {
+            guard !Task.isCancelled else { return .cancelled }
             typer.type(text)
             try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return .cancelled }
             // Inline autocomplete extends typed text with a selected
             // completion ("youtube.com" → the user's most-visited channel);
             // Return would navigate to the completion, not the command.
@@ -205,17 +274,19 @@ final class CommandExecutor {
                value.lowercased().hasPrefix(text.lowercased()) {
                 typer.press(KeyChord(key: "forwarddelete"))
                 try? await Task.sleep(for: .milliseconds(80))
+                guard !Task.isCancelled else { return .cancelled }
             }
             if focusedFieldHolds(text) {
                 typer.press(KeyChord(key: "return"))
-                return true
+                return .success
             }
             // Reselect the address bar (⌘L selects-all, so retyping
             // replaces whatever half-state the last attempt left).
             typer.press(KeyChord(key: "l", modifiers: [.command]))
             try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return .cancelled }
         }
-        return false
+        return .failed
     }
 
     // MARK: - Focused-field verification (accessibility)

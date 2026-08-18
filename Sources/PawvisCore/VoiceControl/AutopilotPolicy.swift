@@ -139,17 +139,36 @@ public enum AutopilotPolicy {
     // MARK: - Progress
 
     /// A stable fingerprint of what the screen looks like. Frames are
-    /// rounded to 8 pt so sub-pixel relayout jitter doesn't read as change.
+    /// rounded to 8 pt so sub-pixel relayout jitter doesn't read as change,
+    /// and numeric values to 2 decimals so a slider's float noise doesn't
+    /// either. Element values are in the hash at all because a toggle flip
+    /// is a value-ONLY change — same label, same frame — and a signature
+    /// blind to it read a successful click as "nothing on screen changed",
+    /// so the completion check fed the loop a failure and the loop clicked
+    /// the toggle AGAIN, undoing the user's request.
     public static func screenSignature(_ screen: AutopilotScreen) -> Int {
         var hasher = Hasher()
         hasher.combine(screen.appName)
         hasher.combine(screen.windowTitle)
         for element in screen.elements {
             hasher.combine(element.label)
+            hasher.combine(signatureValue(element.value))
             hasher.combine(Int((element.x / 8).rounded()))
             hasher.combine(Int((element.y / 8).rounded()))
         }
         return hasher.finalize()
+    }
+
+    /// An element value in signature-stable form. Numeric strings are
+    /// re-rendered at exactly 2 decimal places (locale-free), so the far
+    /// decimals of a continuous control's value (a slider reporting
+    /// 0.4999996, then 0.5000004) never read as a screen change, while
+    /// every real state flip (0 → 1, 0.50 → 0.75) survives the rounding.
+    /// Non-numeric values hash as-is.
+    static func signatureValue(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        guard let number = Double(raw), number.isFinite else { return raw }
+        return String(format: "%.2f", number)
     }
 
     public struct ProposedRecord: Equatable, Sendable {

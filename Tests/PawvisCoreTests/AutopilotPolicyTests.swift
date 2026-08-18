@@ -19,10 +19,10 @@ final class AutopilotPolicyTests: XCTestCase {
     }
 
     private func element(_ label: String, kind: String = "button",
-                         actionable: Bool = true, x: Double = 10,
-                         y: Double = 10) -> AutopilotElement {
+                         actionable: Bool = true, value: String? = nil,
+                         x: Double = 10, y: Double = 10) -> AutopilotElement {
         AutopilotElement(label: label, kind: kind, actionable: actionable,
-                         x: x, y: y, width: 80, height: 24)
+                         value: value, x: x, y: y, width: 80, height: 24)
     }
 
     // MARK: - Scope
@@ -145,6 +145,36 @@ final class AutopilotPolicyTests: XCTestCase {
         XCTAssertEqual(AutopilotPolicy.screenSignature(steady),
                        AutopilotPolicy.screenSignature(jittered))
         XCTAssertNotEqual(AutopilotPolicy.screenSignature(steady),
+                          AutopilotPolicy.screenSignature(moved))
+    }
+
+    func testScreenSignatureSeesValueOnlyChanges() {
+        // A toggle flip is a value-ONLY change: same label, same frame. A
+        // signature blind to values read the successful click as "nothing
+        // on screen changed", so completion verification failed the step
+        // and the loop clicked the toggle AGAIN — the safeguard causing
+        // the destructive repetition it exists to prevent.
+        let off = screen(elements: [element("Dark Mode", kind: "checkbox", value: "0")])
+        let on = screen(elements: [element("Dark Mode", kind: "checkbox", value: "1")])
+        XCTAssertNotEqual(AutopilotPolicy.screenSignature(off),
+                          AutopilotPolicy.screenSignature(on))
+        // Selection-style (non-numeric) state counts the same way.
+        let row = screen(elements: [element("Inbox", kind: "row", value: "unselected")])
+        let selectedRow = screen(elements: [element("Inbox", kind: "row", value: "selected")])
+        XCTAssertNotEqual(AutopilotPolicy.screenSignature(row),
+                          AutopilotPolicy.screenSignature(selectedRow))
+    }
+
+    func testScreenSignatureIgnoresNumericValueFloatNoise() {
+        // A continuous control's value jitters in the far decimals from
+        // frame to frame; values normalize to 2 decimals in the hash so
+        // float noise is not change — while a real move still is.
+        let a = screen(elements: [element("Volume", kind: "slider", value: "0.4999996")])
+        let b = screen(elements: [element("Volume", kind: "slider", value: "0.5000004")])
+        let moved = screen(elements: [element("Volume", kind: "slider", value: "0.75")])
+        XCTAssertEqual(AutopilotPolicy.screenSignature(a),
+                       AutopilotPolicy.screenSignature(b))
+        XCTAssertNotEqual(AutopilotPolicy.screenSignature(a),
                           AutopilotPolicy.screenSignature(moved))
     }
 
