@@ -242,7 +242,7 @@ private struct GeneralSettingsTab: View {
 
             SettingToggle(
                 title: "Show tracking diagnostics",
-                caption: "Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
+                caption: "Live fps, click-dip ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
                 isOn: $store.settings.general.showDiagnostics)
         }
         .onAppear {
@@ -351,7 +351,7 @@ private struct MouseSettingsTab: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Click — mouse tap")
                     .font(.callout)
-                CaptionText("Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your palm.")
+                CaptionText("Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your \(store.settings.gestures.pointerSource.inlineName).")
             }
 
             LabeledSlider(
@@ -401,6 +401,32 @@ private struct MouseSettingsTab: View {
 
             Divider()
 
+            SettingToggle(
+                title: "Dwell click",
+                caption: "Clicking without the finger dip: park the cursor on a target, hold it still, and after the dwell time a left click fires on its own (the ring around the claw tightens as it counts down). Move the cursor away to arm the next one. It never fires while a button is held, while scrolling, or while the cursor is parked.",
+                isOn: $store.settings.gestures.dwellClickEnabled)
+
+            LabeledSlider(
+                label: "Dwell time",
+                caption: "\(String(format: "%.1f", store.settings.gestures.dwellSeconds)) s of holding still before the click fires. Shorter clicks sooner but fires more easily while you rest; longer is calmer but slower.",
+                value: $store.settings.gestures.dwellSeconds,
+                range: 0.5...3.0)
+                .disabled(!store.settings.gestures.dwellClickEnabled)
+
+            SettingRow(
+                title: "The cursor rides",
+                caption: "The palm barely moves while a finger dips, which is what keeps clicks from smearing into drags. The fingertip sources point more directly but wobble during finger clicks; they pair best with dwell click, where clicking moves no fingers."
+            ) {
+                Picker("", selection: $store.settings.gestures.pointerSource) {
+                    ForEach(PointerSource.allCases, id: \.self) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                .frame(maxWidth: 320)
+            }
+
+            Divider()
+
             SettingToggle(title: "Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
             SettingToggle(title: "Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
             SettingToggle(title: "Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
@@ -419,7 +445,7 @@ private struct MouseSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, dwell click, the pointer source, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
             }
         }
     }
@@ -446,7 +472,7 @@ private enum AgentRiskCopy {
         """
         \(tool.displayName) is launched with its own permission prompts turned off, so nothing pauses to confirm anything. It carries out what it was handed, as you, with your files, your logged-in sessions and your credentials: deleting or rewriting files, installing software, running shell commands, opening apps, sending things on your behalf.
 
-        Everything you say after “\(wake)” is sent to it, and speech recognition is not perfect, so a misheard command is still executed. This is also the only mode that sends what you say beyond this Mac. Only “\(wake), stop listening” stays local.
+        Everything you say after “\(wake)” is sent to it, and speech recognition is not perfect, so a misheard command is still executed. This is also the only mode that sends what you say beyond this Mac. Only “\(wake), stop listening” stays local. By default Pawvis reads each command back on screen and sends it only after you say “\(wake) yes”; switch that confirmation off in Settings → Voice and commands go the moment they are heard.
 
         Stay on Apple Intelligence (on-device) if you want a handler that can only do what Pawvis itself can do.
 
@@ -490,6 +516,7 @@ private struct VoiceControlSettingsTab: View {
     @ObservedObject var store: SettingsStore
     @State private var screenRecording = Permissions.screenRecording()
     @State private var consent: AgentConsentRequest?
+    @FocusState private var wakeWordFocused: Bool
 
     private var wake: String { store.settings.voiceControl.wakeWord }
 
@@ -526,9 +553,23 @@ private struct VoiceControlSettingsTab: View {
                 title: "Wake word",
                 caption: "Every command starts with this word — speech without it is ignored. “\(wake) go to github.com”, “\(wake) type hello”, “\(wake) press enter”, “\(wake) open Safari”, “\(wake) click”, “\(wake) scroll down”."
             ) {
-                TextField("", text: $store.settings.voiceControl.wakeWord)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 220)
+                VStack(alignment: .leading, spacing: 5) {
+                    TextField("", text: $store.settings.voiceControl.wakeWord)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .focused($wakeWordFocused)
+                        .onSubmit { commitWakeWord() }
+                    if !VoiceControlParser.supportsFuzzyMatching(store.settings.voiceControl.wakeWord) {
+                        CaptionText("Short wake words match strictly, with no tolerance for mishearings.")
+                    }
+                }
+                // Commit on every way of leaving the field: Return
+                // (onSubmit above), focus moving elsewhere, or the tab or
+                // window going away mid-edit.
+                .onChange(of: wakeWordFocused) { _, focused in
+                    if !focused { commitWakeWord() }
+                }
+                .onDisappear { commitWakeWord() }
             }
 
             SettingRow(
@@ -607,6 +648,11 @@ private struct VoiceControlSettingsTab: View {
                     }
                 }
 
+                SettingToggle(
+                    title: "Confirm before sending to the agent",
+                    caption: "The command is read back in the top-of-screen capsule and sent only after you say “\(wake) yes” (“\(wake) no” cancels, and so do ten seconds of silence). Off: everything after the wake word goes to \(tool.displayName) the moment it is heard.",
+                    isOn: $store.settings.voiceControl.agentConfirm)
+
                 LabeledSlider(
                     label: "Agent timeout",
                     caption: "Give up on a background run after \(Int(store.settings.voiceControl.agentTimeoutSeconds)) s.",
@@ -670,6 +716,18 @@ private struct VoiceControlSettingsTab: View {
             return "On-device: the instant grammar runs first, then Apple Intelligence carries out the rest step by step, grounded in what is on screen. Private and fast."
         }
         return "EVERYTHING after the wake word goes to the agent, asked to perform it via computer use. Slower than on-device and far more capable; the run streams in the corner panel and the outcome flashes in the top-of-screen capsule."
+    }
+
+    /// The wake word, committed: trimmed, and never empty. A blank wake word
+    /// would leave voice control with no address at all, so it snaps back to
+    /// the default instead of being saved.
+    private func commitWakeWord() {
+        let current = store.settings.voiceControl.wakeWord
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let committed = trimmed.isEmpty ? VoiceControlConfig().wakeWord : trimmed
+        if committed != current {
+            store.settings.voiceControl.wakeWord = committed
+        }
     }
 
     private func listBinding(_ source: Binding<[String]>) -> Binding<String> {
@@ -805,6 +863,10 @@ private struct AgentSessionsSection: View {
                             .fill(Color(nsColor: .quaternarySystemFill)))
                 }
             }
+
+            Button("Open agent log") { AgentAuditLog.shared.revealInFinder() }
+                .controlSize(.small)
+            CaptionText("Every hand-off is written to a local log only you can read: when, which agent, the exact instruction sent, and how the run ended.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -839,7 +901,7 @@ private struct AboutTab: View {
                     Image(systemName: "pawprint.fill").font(.system(size: 64))
                 }
                 Text("Pawvis").font(.title2.bold())
-                Text("macOS visual gesture & voice control")
+                Text("Touch-free hand control for your Mac")
                     .italic()
                     .foregroundStyle(.secondary)
                 Text("Version \(AppVersion.current)")

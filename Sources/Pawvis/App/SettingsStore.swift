@@ -25,9 +25,11 @@ final class SettingsStore: ObservableObject {
     /// (Most retirement happens in the tolerant decoders instead. Dictation-era
     /// keys — engine, model, API key — are absorbed by PawvisSettings, which
     /// maps the legacy `dictation` section onto `voiceControl` and no longer
-    /// reads the OpenAI keychain entry; retired gesture keys — pointer source,
-    /// the click-gesture picker whose mouse-tap mode won and became the only
-    /// click — are simply ignored.)
+    /// reads the OpenAI keychain entry; the retired click-gesture picker key,
+    /// whose mouse-tap mode won and became the only click, is simply ignored.
+    /// `pointerSource` is live again as the accessibility pointer setting —
+    /// its pre-v0.1.0 ancestor never shipped in a release, so there is no
+    /// stored value to collide with.)
     private func migrate() {
         let defaults = UserDefaults.standard
         // v7: voice control entered beta — off until explicitly enabled,

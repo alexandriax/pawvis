@@ -81,7 +81,10 @@ enum AgentCLIExecutor {
         Drive the Mac directly — use your computer-use tools (screenshot, \
         click, type) when you have them; otherwise fall back to shell \
         commands, `open`, or AppleScript via `osascript`. The text comes \
-        from speech recognition, so read it charitably.
+        from speech recognition, so read it charitably. But never guess: if \
+        the request is ambiguous, garbled, or would be destructive or \
+        irreversible, do NOT act on it. Decline instead, with a FAILED: line \
+        that says what you heard and why you declined.
 
         End your reply with exactly one final line:
         DONE: <what you did, under 10 words>

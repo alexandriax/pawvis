@@ -7,7 +7,8 @@ import Foundation
 /// The gesture model is intentionally minimal:
 ///   open hand shown     → cursor control arms (see `config.controlTrigger`;
 ///                         `.anyHand` skips the ceremony, a fist parks it again)
-///   hand tracked        → the cursor rides the palm
+///   hand tracked        → the cursor rides the palm (or the configured
+///                         `pointerSource` landmark)
 ///   the index finger dips → left button down (click; twice quickly = double-click)
 ///   move while dipped   → drag
 ///   the finger lifts    → button up
@@ -47,6 +48,17 @@ public final class GestureEngine {
                 // Off mid-scroll: stop scrolling at once. On: the pose still
                 // has to engage from scratch.
                 scroll = ScrollState()
+            }
+            if config.dwellClickEnabled != oldValue.dwellClickEnabled {
+                // Off mid-dwell: the timer dies with the switch. On: a fresh
+                // settle starts it from zero.
+                dwell = DwellState()
+            }
+            if config.pointerSource != oldValue.pointerSource {
+                // The cursor anchor jumps to a different landmark, which
+                // would smear a held press into a drag — same story as
+                // retargeting the right-click finger mid-press.
+                pendingEvents = forceRelease(at: lastHandTime)
             }
             if config.crissCrossDisableEnabled != oldValue.crissCrossDisableEnabled
                 || config.crissCrossDisableCrossings != oldValue.crissCrossDisableCrossings {
@@ -164,6 +176,22 @@ public final class GestureEngine {
         var anchorY: Double?
     }
 
+    /// The dwell click's state: where the cursor settled, when, and whether
+    /// the last dwell's click is still waiting for the cursor to move away.
+    private struct DwellState {
+        /// The settled position stillness is measured against — and, after a
+        /// fire, the spot the cursor must leave before the next dwell may
+        /// begin. Anchor-based like the scroll and drag deadbands: slow
+        /// drift inside the radius never restarts the clock.
+        var anchor: Vec2?
+        /// When the cursor settled at `anchor`.
+        var settledAt: TimeInterval = 0
+        /// True from a dwell's click until the cursor exits the radius:
+        /// movement is the only re-arm, so resting in place clicks exactly
+        /// once, never a stream.
+        var awaitingExit = false
+    }
+
     /// The criss-cross tracking-off wave's state: both hands up, open and
     /// splayed, then traded sides. Engages like every other pose (strict
     /// pose + debounce), then counts debounced side swaps until the
@@ -215,6 +243,14 @@ public final class GestureEngine {
     /// closing the hand *into* a click can never drop control mid-gesture.
     private static let triggerDisarmFrames = 9
 
+    /// How far (screen-normalized) the cursor may wander from its settled
+    /// anchor and still count as dwelling — and the distance it must then
+    /// clear to re-arm after a dwell click. A few times the drag jitter
+    /// deadband: tight enough to read as "holding still" on targets the
+    /// size of a toolbar button, loose enough that a tracked hand's
+    /// residual drift can actually satisfy it.
+    private static let dwellRadius = 0.02
+
     /// Palms must stand at least this far apart (screen-normalized x) to
     /// count as being on distinct sides for the criss-cross wave. Inside the
     /// band the hands are mid-crossing and their order is ambiguous — frames
@@ -257,6 +293,7 @@ public final class GestureEngine {
     private var leftButton = ButtonState()
     private var rightButton = ButtonState()
     private var scroll = ScrollState()
+    private var dwell = DwellState()
     private var crissCross = CrissCrossState()
     /// EMA of the primary hand's raw camera-space scale; nil until a hand is
     /// seen (and again once one is truly gone).
@@ -295,6 +332,7 @@ public final class GestureEngine {
     public func reset() {
         _ = forceRelease(at: 0)
         scroll = ScrollState()
+        dwell = DwellState()
         crissCross = CrissCrossState()
         customDetector.reset()
         trainedDetector.reset()
@@ -327,13 +365,29 @@ public final class GestureEngine {
         let tracked = assignAndSmooth(hands: usableHands, at: frame.time)
         lastHandTime = frame.time
 
-        // 2. Pick the primary (gesture-driving) hand, sticky across frames.
-        var primary: TrackedHand
-        if let id = primarySlotID, let match = tracked.first(where: { $0.slotID == id }) {
-            primary = match
-        } else {
-            primary = tracked.max(by: { $0.hand.confidence < $1.hand.confidence })!
-            primarySlotID = primary.slotID
+        // 2. Pick the primary (gesture-driving) hand, sticky across frames —
+        // in `.openHand` mode sticky *through the tracking-loss grace*, and
+        // past it the trigger is re-checked on whichever hand inherits
+        // (see `pickPrimary`).
+        guard var primary = pickPrimary(tracked, at: frame.time, events: &events) else {
+            // Hold frame: the armed hand is missing but inside the grace
+            // while a bystander stays visible. Everything the primary drives
+            // holds — cursor, press, trigger, scroll — the same hold a
+            // no-hands dropout gets; the subsystems that watch every tracked
+            // hand still tick.
+            if updateCrissCross(tracked, at: frame.time) {
+                events.append(.disableTracking)
+            }
+            events += processCustomGestures(tracked, at: frame.time)
+            overlay.hands = overlayHands(tracked)
+            overlay.armed = armed
+            overlay.cursor = cursor
+            overlay.grabbed = leftButton.engaged
+            overlay.rightGrabbed = rightButton.engaged
+            overlay.isDragging = press?.dragging ?? false
+            overlay.isScrolling = scroll.active
+            overlay.closingProgress = closingProgress(for: nil)
+            return (events, overlay)
         }
 
         // While waiting for the trigger, prefer whichever hand is showing it:
@@ -382,9 +436,10 @@ public final class GestureEngine {
         let grabParked = customDetector.grabbingSlots.contains(primary.slotID)
 
         if armed, let pointer = pointerPoint(features) {
-            // 5. Cursor follows the palm (chosen so the click gesture barely
-            // moves it) — unless the scroll pose holds it parked, in which
-            // case vertical palm travel becomes wheel events instead.
+            // 5. Cursor follows the configured pointer landmark (the palm by
+            // default, chosen so the click gesture barely moves it) — unless
+            // the scroll pose holds it parked, in which case vertical palm
+            // travel becomes wheel events instead.
             let clamped = pointer.clampedToUnit()
             if scroll.active {
                 if let anchor = scroll.anchorY {
@@ -469,18 +524,24 @@ public final class GestureEngine {
                          at: frame.time, events: &events)
         }
 
+        // 6½. Dwell-to-click: with control armed and nothing else in flight,
+        // a cursor parked inside `dwellRadius` for `dwellSeconds` clicks
+        // where it settled. Runs after the buttons so a press that began
+        // this very frame already stands it down; every park and press
+        // blocks it, and a fired dwell re-arms only once the cursor leaves.
+        updateDwell(
+            blocked: press != nil || leftButton.engaged || rightButton.engaged
+                || scroll.active || crissCross.engaged || grabParked
+                || pointedParked || trainedDwellBlock || !armed,
+            at: frame.time, events: &events)
+
         // 7. Fit the interaction box to the hand (auto reach). Last, so the
         // box that mapped this frame is the one the press — if any — began in.
         // Runs while disarmed too: the box is fitted by the time control arms.
         updateReach(rawHand: primary.raw)
 
         // 8. Overlay state.
-        overlay.hands = tracked.map { th in
-            var oh = OverlayHand()
-            oh.isPrimary = th.slotID == primarySlotID
-            for (joint, p) in th.hand.fingertips { oh.fingertips[joint] = p }
-            return oh
-        }
+        overlay.hands = overlayHands(tracked)
         overlay.armed = armed
         overlay.cursor = cursor
         overlay.grabbed = leftButton.engaged
@@ -488,8 +549,58 @@ public final class GestureEngine {
         overlay.isDragging = press?.dragging ?? false
         overlay.isScrolling = scroll.active
         overlay.closingProgress = closingProgress(for: ratio)
+        overlay.dwellProgress = dwellProgress(at: frame.time)
 
         return (events, overlay)
+    }
+
+    // MARK: - Primary hand
+
+    /// The primary (gesture-driving) hand, sticky across frames — or nil for
+    /// a hold frame.
+    ///
+    /// In `.openHand` mode, armed, the claim on the cursor belongs to the
+    /// *hand*, not to whichever slot survives: while the armed hand is
+    /// missing but inside the tracking-loss grace (with a bystander still
+    /// visible, or `handleNoHands` would own the frame), nothing reassigns —
+    /// a one-frame Vision dropout must not hand the cursor, or a held drag,
+    /// to a hand that never showed the trigger. Past the grace the best
+    /// surviving hand inherits the slot; the departed hand's press — if any —
+    /// lands where it was held (one release, exactly as the all-hands-gone
+    /// grace does it); and control stays armed only if the inheriting hand is
+    /// showing the trigger *at that moment*, read through the same
+    /// engage-grade `armFeatures` check that arms. Otherwise control disarms
+    /// and the ceremony starts over — which is also what lets the open-hand
+    /// preference in `process` reclaim primary for the original hand when it
+    /// returns open. `.anyHand` and `.gesturesOnly` keep the immediate
+    /// reassignment they always had.
+    private func pickPrimary(_ tracked: [TrackedHand], at time: TimeInterval,
+                             events: inout [GestureEvent]) -> TrackedHand? {
+        if let id = primarySlotID, let match = tracked.first(where: { $0.slotID == id }) {
+            return match
+        }
+        if config.controlTrigger == .openHand, armed, let id = primarySlotID,
+           let lastSeen = slots.first(where: { $0.id == id })?.lastSeen,
+           time - lastSeen <= config.trackingLossGrace {
+            return nil // the armed hand may be right back: hold, never flap
+        }
+        let primary = tracked.max(by: { $0.hand.confidence < $1.hand.confidence })!
+        let inherited = primarySlotID != nil
+        primarySlotID = primary.slotID
+        if inherited, config.controlTrigger == .openHand, armed {
+            // The grace just expired: the departed hand's press releases
+            // where it was held, and its click chain and half-run button
+            // debounces go with it. Inheriting the slot is not opting in —
+            // a merely visible hand must never drag the cursor — so the
+            // survivor keeps control only if it is showing the trigger.
+            events += forceRelease(at: time)
+            armFrames = 0
+            disarmFrames = 0
+            if armFeatures(of: primary.hand)?.isOpenHand() != true {
+                armed = false
+            }
+        }
+        return primary
     }
 
     // MARK: - Control trigger
@@ -587,12 +698,14 @@ public final class GestureEngine {
         features?.indexTapRatio()
     }
 
-    /// The landmark that drives the cursor — the palm, the one part of the
-    /// hand no finger gesture moves. (A fingertip centroid shifts ~0.08
-    /// screen-normalized when the hand opens to release — enough to smear
-    /// every click into a drag.)
+    /// The landmark that drives the cursor, per `config.pointerSource`. The
+    /// palm default is the one part of the hand no finger gesture moves (a
+    /// fingertip centroid shifted ~0.08 screen-normalized when a hand opened
+    /// to release — enough to smear every click into a drag); the fingertip
+    /// sources trade that steadiness for directness, for control styles
+    /// whose clicks move no fingers (dwell clicking above all).
     private func pointerPoint(_ features: HandFeatures?) -> Vec2? {
-        features?.pointerPoint(.palmCenter)
+        features?.pointerPoint(config.pointerSource)
     }
 
     /// Whether every joint the click ratio depends on is tracked confidently
@@ -680,6 +793,53 @@ public final class GestureEngine {
         case .ring: return features.isExtended(.middle) != true
         case .index, .little: return false
         }
+    }
+
+    // MARK: - Dwell click
+
+    /// The dwell-to-click state machine: anchor wherever the cursor settles,
+    /// fire one full click — down and up, through the normal press path, so
+    /// position, chaining, and the app layer's event pacing all behave —
+    /// once the cursor has stayed inside `dwellRadius` for
+    /// `config.dwellSeconds`, then demand the cursor leave that radius
+    /// before the next dwell may begin.
+    ///
+    /// `blocked` frames (a press in flight or engaging, a scroll, any of the
+    /// parks, disarmed control) clear the timer but keep a fired dwell's
+    /// exit requirement: an interruption is not movement, and only movement
+    /// re-arms. A real click resetting the timer is exactly this path — the
+    /// press blocks the dwell, and the clock starts over once it releases.
+    private func updateDwell(blocked: Bool, at time: TimeInterval,
+                             events: inout [GestureEvent]) {
+        guard config.dwellClickEnabled else {
+            dwell = DwellState()
+            return
+        }
+        guard !blocked, let position = cursor else {
+            if !dwell.awaitingExit { dwell.anchor = nil }
+            return
+        }
+        if let anchor = dwell.anchor, position.distance(to: anchor) <= Self.dwellRadius {
+            guard !dwell.awaitingExit else { return } // still on the clicked spot
+            guard time - dwell.settledAt >= config.dwellSeconds else { return }
+            beginPress(.left, at: time, events: &events)
+            endPress(.left, at: time, events: &events)
+            dwell.awaitingExit = true
+        } else {
+            // Settled somewhere new (or moved off the clicked spot): the
+            // clock starts here.
+            dwell = DwellState(anchor: position, settledAt: time)
+        }
+    }
+
+    /// 0 while no dwell is running (idle, blocked, or waiting for the cursor
+    /// to move off a clicked spot), ramping to 1 as the stillness timer
+    /// approaches its click — the overlay's click ring tightens with it,
+    /// exactly as it does with `closingProgress`.
+    private func dwellProgress(at time: TimeInterval) -> Double {
+        guard config.dwellClickEnabled, !dwell.awaitingExit, dwell.anchor != nil,
+              config.dwellSeconds > 0 else { return 0 }
+        return min(max((time - dwell.settledAt) / config.dwellSeconds, 0), 1)
     }
 
     // MARK: - Criss-cross tracking-off wave
@@ -968,6 +1128,18 @@ public final class GestureEngine {
         press = nil
     }
 
+    /// The overlay's per-hand dots. On a hold frame the primary slot's hand
+    /// is absent, so no rendered hand is marked primary — honest about who
+    /// is (not) driving.
+    private func overlayHands(_ tracked: [TrackedHand]) -> [OverlayHand] {
+        tracked.map { th in
+            var oh = OverlayHand()
+            oh.isPrimary = th.slotID == primarySlotID
+            for (joint, p) in th.hand.fingertips { oh.fingertips[joint] = p }
+            return oh
+        }
+    }
+
     // MARK: - No-hands path
 
     private func handleNoHands(at time: TimeInterval) -> (events: [GestureEvent], overlay: OverlayState) {
@@ -985,6 +1157,7 @@ public final class GestureEngine {
         if time - lastHandTime > config.trackingLossGrace {
             events.append(contentsOf: forceRelease(at: time))
             scroll = ScrollState() // a returning hand re-anchors from scratch
+            dwell = DwellState() // …and must settle all over again to dwell
             crissCross = CrissCrossState() // hands truly gone: the wave restarts
             primarySlotID = nil
             // The hand is genuinely gone: the next one sizes the auto box from
@@ -1023,9 +1196,16 @@ public final class GestureEngine {
             effectiveInteractionBox = config.interactionBox // manual: verbatim, at once
             return
         }
-        // Never mid-press: the box is a coordinate transform, so moving it
-        // under a held button would slide whatever is being dragged.
-        guard press == nil, let scale = smoothedHandScale else { return }
+        // Never mid-press, and never mid-scroll: the box is a coordinate
+        // transform, so moving it under a held button would slide whatever
+        // is being dragged — and scroll deltas are measured from the very
+        // pointer this box maps (see `pointerPoint`), so a box drifting
+        // under an active scroll remaps a motionless palm to a moving y and
+        // scrolls on its own (measured: a hand-scale ramp of 0.15→0.30 under
+        // a fixed palm emitted ~0.19 screen-normalized units of phantom
+        // scroll before this guard existed). Released, either way, the
+        // drift picks back up.
+        guard press == nil, !scroll.active, let scale = smoothedHandScale else { return }
         let target = Self.targetBox(forHandScale: scale)
         func drift(_ edge: Double, toward goal: Double) -> Double {
             edge + (goal - edge) * Self.reachLerp

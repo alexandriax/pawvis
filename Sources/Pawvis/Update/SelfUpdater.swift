@@ -12,6 +12,29 @@ enum SelfUpdater {
     /// Where the verified replacement is waiting, if `install` succeeded.
     private(set) static var stagedBundle: URL?
 
+    /// Where a swap script that had to roll back leaves its breadcrumb. The
+    /// process that hit the failure is gone by definition — it quit to let
+    /// the script run — so this is how the *next* launch finds out.
+    private static var failureMarkerURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("Pawvis", isDirectory: true)
+            .appendingPathComponent("last-update-failed.txt")
+    }
+
+    /// Reads and clears the failure marker, if a swap rolled back since the
+    /// last time this ran. One-shot by design: call once at launch and the
+    /// message surfaces exactly once, through the ordinary "failed" update
+    /// state — there is no separate persisted history of update failures.
+    static func consumeFailureMarker() -> String? {
+        let url = failureMarkerURL
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        try? FileManager.default.removeItem(at: url)
+        let text = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     static func install(zipAt zipURL: URL) throws {
         let fm = FileManager.default
         let currentBundle = Bundle.main.bundleURL
@@ -55,27 +78,81 @@ enum SelfUpdater {
             spawnRelaunch(target: currentBundle)
             return
         }
+        // A sibling of the current bundle, so setting it aside is a rename
+        // on the same volume: atomic, and always reversible if ditto fails.
+        let backup = currentBundle.deletingLastPathComponent()
+            .appendingPathComponent(
+                currentBundle.lastPathComponent + ".pawvis-old-\(UUID().uuidString)")
+        let marker = failureMarkerURL
+        // Transactional swap: the old bundle is moved aside (never deleted)
+        // before ditto runs, and only removed once the new copy is confirmed
+        // in place. Any failure — the staged copy missing, the move aside
+        // failing, or ditto itself failing — leaves the previous app intact
+        // and relaunches it, rather than leaving nothing installed at all.
         let script = """
-        #!/bin/bash
-        # Wait for Pawvis to exit before replacing its bundle.
+        #!/bin/sh
+        # Wait for Pawvis to exit before touching its bundle.
         for _ in $(seq 1 100); do
             kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null || break
             sleep 0.1
         done
-        rm -rf "\(currentBundle.path)"
-        /usr/bin/ditto "\(staged.path)" "\(currentBundle.path)" || exit 1
-        # Downloads carry a quarantine flag; left in place, Gatekeeper blocks
-        # the app we just installed on the user's behalf.
-        /usr/bin/xattr -dr com.apple.quarantine "\(currentBundle.path)" 2>/dev/null
-        rm -rf "\(staged.deletingLastPathComponent().path)"
-        /usr/bin/open "\(currentBundle.path)"
+
+        current="\(currentBundle.path)"
+        staged="\(staged.path)"
+        backup="\(backup.path)"
+        marker="\(marker.path)"
+
+        # Leaves a marker the next launch reads and reports through the
+        # update UI, plus a line on stderr for anyone looking at the script
+        # directly — the app that would normally show a live error is, by
+        # definition, the one that just failed to come back up.
+        fail() {
+            mkdir -p "$(dirname "$marker")" 2>/dev/null
+            printf '%s\\n' "$1" > "$marker" 2>/dev/null
+            echo "Pawvis update: $1" 1>&2
+        }
+
+        # The staged copy lives in a temp directory macOS can reap on its own
+        # schedule, and "ready to relaunch" can sit for hours before the user
+        # clicks it. If it's gone, there's nothing to install — leave the
+        # current app untouched and just bring it back.
+        if [ ! -d "$staged" ]; then
+            fail "The downloaded update was no longer available, so it wasn't installed. Pawvis is unchanged."
+            /usr/bin/open "$current"
+            exit 1
+        fi
+
+        # Move the old bundle aside instead of deleting it. On the same
+        # volume this is an atomic rename, so "$current" is either the old
+        # app or briefly missing — never a half-deleted mess — and a failed
+        # ditto below can always be undone by moving "$backup" straight back.
+        if ! mv "$current" "$backup"; then
+            fail "The update could not be installed — Pawvis could not be moved aside, so it was left as-is."
+            /usr/bin/open "$current"
+            exit 1
+        fi
+
+        if /usr/bin/ditto "$staged" "$current"; then
+            # Downloads carry a quarantine flag; left in place, Gatekeeper
+            # blocks the app we just installed on the user's behalf.
+            /usr/bin/xattr -dr com.apple.quarantine "$current" 2>/dev/null
+            rm -rf "$backup"
+            rm -rf "\(staged.deletingLastPathComponent().path)"
+            /usr/bin/open "$current"
+        else
+            fail "The last update failed to copy into place and was rolled back to the previous version."
+            rm -rf "$current" 2>/dev/null
+            mv "$backup" "$current"
+            /usr/bin/open "$current"
+            exit 1
+        fi
         """
         runDetached(script: script)
     }
 
     private static func spawnRelaunch(target: URL) {
         let script = """
-        #!/bin/bash
+        #!/bin/sh
         for _ in $(seq 1 100); do
             kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null || break
             sleep 0.1
@@ -93,7 +170,7 @@ enum SelfUpdater {
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments = [scriptURL.path]
             try process.run() // detached: we exit immediately after
         } catch {

@@ -68,6 +68,29 @@ final class OverlayController {
         }
     }
 
+    /// The camera stopped delivering: the per-frame render loop has gone
+    /// silent with the last fingertip dots frozen on screen at screen-saver
+    /// level, looking like live tracking. Park instead — clear every window
+    /// (they stay up, ready for frames to resume) and put the reason in the
+    /// status pill with the Accessibility warning's red treatment. Driven by
+    /// the failure watchdog, the one clock still ticking, so the pill policy
+    /// keeps getting the `now` it needs to time out and honor the ✕.
+    func parkForFailure(_ message: String, now: TimeInterval) {
+        guard visible else { return }
+        windows.forEach { $0.contentOverlayView.clear() }
+        guard config.showStatusPill else { return }
+        statusPill.present(
+            .init(text: "⚠️ \(message)",
+                  background: NSColor.systemRed.withAlphaComponent(0.92)),
+            now: now)
+    }
+
+    /// The failure cleared. Retire its pill copy now — frames may still be a
+    /// beat away, and until one arrives nothing else would repaint it.
+    func endFailure() {
+        statusPill.hide()
+    }
+
     private func rebuildWindows() {
         let wasVisible = visible
         windows.forEach { $0.orderOut(nil) }
@@ -146,7 +169,9 @@ final class OverlayController {
                         fillColor: PawvisTheme.blueLight.withAlphaComponent(0.25),
                         alpha: 1))
                 } else if config.showPinchRing, overlay.armed {
-                    let progress = overlay.closingProgress
+                    // A running dwell drives the same ring as a forming
+                    // click: the tightening IS the countdown.
+                    let progress = max(overlay.closingProgress, overlay.dwellProgress)
                     let ringRadius: CGFloat = anyGrab
                         ? (overlay.isDragging ? 26 : 20)
                         : 30 - 12 * progress

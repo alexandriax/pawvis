@@ -45,13 +45,21 @@ public struct AutopilotElement: Equatable, Sendable {
     public var kind: String
     /// Actionable controls sort ahead of passive text when trimming.
     public var actionable: Bool
+    /// The element's live state, when it has any: a checkbox's 0-or-1, a
+    /// slider's number, a row's selection. Captured for the completion
+    /// signature — a toggle flip is a value-ONLY change (same label, same
+    /// frame), invisible to a signature that ignores this field — and
+    /// deliberately not rendered into the prompt.
+    public var value: String?
     public var x: Double, y: Double, width: Double, height: Double
 
     public init(label: String, kind: String, actionable: Bool,
+                value: String? = nil,
                 x: Double, y: Double, width: Double, height: Double) {
         self.label = label
         self.kind = kind
         self.actionable = actionable
+        self.value = value
         self.x = x
         self.y = y
         self.width = width
