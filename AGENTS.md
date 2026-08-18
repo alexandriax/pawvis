@@ -524,6 +524,22 @@ rather than verified.
    away by the final ("Pawvis" → "Paw this"), lets the near remainder act
    directly, no AI round-trip (`VoiceController.handleFinal`).
 
+**Agent mode runs the ladder strict** (`VoiceControlConfig.strictWake`,
+transient — never persisted; `VoiceController.setConfig` switches it on
+whenever `agentExecutor` is non-empty, because an accept there hands the
+utterance to a permissions-bypassed CLI): tier 3 is disabled outright, and
+the utterance gate's capture window stops taking the next final verbatim — a
+wake-less capture must itself parse deterministically
+(`UtteranceGate.decide(strictCommandBar:)`; a final that carries the wake
+word never consults the bar, so wake-led free-form speech still reaches the
+agent). Tiers 1/2/4/5 stay. PawvisCore stays app-agnostic: the core takes
+the flag, the app decides when it's on. Related hardening: "jarvis" left the
+default aliases (a stock movie wake word made any TV audio a full-trust
+accept; saved alias lists keep whatever they saved), the Settings wake-word
+field trims on commit and snaps an emptied field back to the default, and a
+wake word under `fuzzyMinCandidateLength` (six folded characters) shows a
+"matches strictly" hint instead of silently losing edit-distance tolerance.
+
 `Pawvis --wake-eval "<transcript as the recognizer wrote it>" …` prints the
 tier verdict per transcript, no model — paste real mishearings to debug a
 miss. New verbs must keep `.resolve` and the safety phrases out of a
