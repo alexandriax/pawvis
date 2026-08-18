@@ -184,15 +184,17 @@ final class TrainedGestureTests: XCTestCase {
     // MARK: - Live matching
 
     private func compiled(from takes: [GestureTake], handCount: Int = 1,
-                          sensitivity: Double = 0.5) -> TrainedGestureDetector.Compiled? {
+                          sensitivity: Double = 0.5,
+                          holdSeconds: Double = 0) -> TrainedGestureDetector.Compiled? {
         guard let build = TrainedGestureBuilder.build(takes: takes) else { return nil }
         let gesture = TrainedGesture(
             name: "Test", handCount: handCount, template: build.template,
             duration: build.duration, baseThreshold: build.baseThreshold,
-            sensitivity: sensitivity)
+            sensitivity: sensitivity, holdSeconds: holdSeconds)
         return TrainedGestureDetector.Compiled(
             id: gesture.id, handCount: handCount, template: gesture.template,
-            duration: gesture.duration, threshold: gesture.threshold)
+            duration: gesture.duration, threshold: gesture.threshold,
+            holdSeconds: holdSeconds)
     }
 
     private func context(at time: TimeInterval, press: Bool = false,
@@ -277,6 +279,54 @@ final class TrainedGestureTests: XCTestCase {
 
         let fired = perform(detector, press: true) { [self.swipeHand(progress: $0)] }
         XCTAssertEqual(fired, [], "presses always win")
+    }
+
+    func testMouseOverrideMatchesThroughPresses() {
+        // The priority toggle: with it on, a press no longer cancels the
+        // match — the fix for gestures whose own finger curl clicks.
+        guard let gesture = compiled(from: swipeTakes(3)) else { return XCTFail("no build") }
+        var config = TrainedGestureDetector.Config()
+        config.gestures = [gesture]
+        config.overridesMouse = true
+        let detector = TrainedGestureDetector(config: config)
+
+        let fired = perform(detector, press: true) { [self.swipeHand(progress: $0)] }
+        XCTAssertEqual(fired, [gesture.id])
+    }
+
+    func testHoldToConfirmGatesTheFire() {
+        let takes = (0..<3).compactMap { _ in recordTake { _ in [self.poseHand()] } }
+        guard let gesture = compiled(from: takes, holdSeconds: 0.5) else {
+            return XCTFail("no build")
+        }
+        var config = TrainedGestureDetector.Config()
+        config.gestures = [gesture]
+        let detector = TrainedGestureDetector(config: config)
+
+        // Held only briefly: the dwell never completes, nothing fires —
+        // and the dwell is visible while it runs.
+        var fired: [UUID] = []
+        var t = 0.0
+        var sawDwell = false
+        for _ in 0..<15 { // 0.5 s of pose: coverage ~0.3 s in, dwell barely starts
+            fired += detector.process(hands: snapshotInputs([poseHand()]), context: context(at: t))
+            if detector.holdProgress != nil { sawDwell = true }
+            t += dt
+        }
+        for _ in 0..<20 { // hand gone
+            fired += detector.process(hands: [], context: context(at: t))
+            t += dt
+        }
+        XCTAssertEqual(fired, [], "a hold released early must not fire")
+        XCTAssertTrue(sawDwell, "the dwell must be visible while it runs")
+
+        // Held properly: exactly one fire once the dwell elapses.
+        detector.reset()
+        for _ in 0..<60 { // 2 s
+            fired += detector.process(hands: snapshotInputs([poseHand()]), context: context(at: t))
+            t += dt
+        }
+        XCTAssertEqual(fired.count, 1, "the completed hold fires once")
     }
 
     func testTwoHandGestureNeedsBothHands() {

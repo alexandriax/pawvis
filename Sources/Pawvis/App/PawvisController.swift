@@ -263,6 +263,15 @@ final class PawvisController: ObservableObject {
                              holding.gesture.displayName, holding.remaining),
                 until: time + 0.4)
         }
+        // Trained gestures with a hold-to-confirm get the same countdown:
+        // "recognized, keep going" is the difference between a gesture that
+        // feels alive and one that seems ignored.
+        if let holding = engine.trainedHoldProgress,
+           let gesture = settingsStore.settings.trainedGestures.gesture(withID: holding.id) {
+            gestureNotice = (
+                text: String(format: "🐾 %@ · hold… %.1f s", gesture.name, holding.remaining),
+                until: time + 0.4)
+        }
 
         // The criss-cross wave completed: deliver everything else this frame
         // produced (a queued release must still land), then stop tracking

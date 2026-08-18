@@ -18,13 +18,17 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
     public var baseThreshold: Double
     /// 0 = strict … 1 = forgiving. Default 0.5.
     public var sensitivity: Double
+    /// Hold-to-confirm: the match must hold this long before firing.
+    /// 0 (the default) fires the moment it matches.
+    public var holdSeconds: Double
     /// What firing does; nil while unassigned (an unassigned gesture is
     /// never matched, exactly like the built-in library).
     public var action: GestureAction?
 
     public init(id: UUID = UUID(), name: String, handCount: Int,
                 template: [[Double]], duration: Double, baseThreshold: Double,
-                sensitivity: Double = 0.5, action: GestureAction? = nil) {
+                sensitivity: Double = 0.5, holdSeconds: Double = 0,
+                action: GestureAction? = nil) {
         self.id = id
         self.name = name
         self.handCount = handCount
@@ -32,6 +36,7 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
         self.duration = duration
         self.baseThreshold = baseThreshold
         self.sensitivity = sensitivity
+        self.holdSeconds = holdSeconds
         self.action = action
     }
 
@@ -42,7 +47,8 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, handCount, template, duration, baseThreshold, sensitivity, action
+        case id, name, handCount, template, duration, baseThreshold
+        case sensitivity, holdSeconds, action
     }
 
     /// The identity and the learned template decode strictly — without them
@@ -57,6 +63,7 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
         duration = try c.decode(Double.self, forKey: .duration)
         baseThreshold = try c.decode(Double.self, forKey: .baseThreshold)
         sensitivity = (try? c.decodeIfPresent(Double.self, forKey: .sensitivity)) ?? 0.5
+        holdSeconds = (try? c.decodeIfPresent(Double.self, forKey: .holdSeconds)) ?? 0
         action = try? c.decodeIfPresent(GestureAction.self, forKey: .action)
     }
 }
@@ -67,6 +74,11 @@ public struct TrainedGesture: Codable, Equatable, Sendable, Identifiable {
 /// gesture, trained ones included.
 public struct TrainedGestureSettings: Codable, Equatable, Sendable {
     public var gestures: [TrainedGesture] = []
+    /// Trained gestures take priority over the mouse: matching keeps
+    /// running through presses, and new clicks are blocked while a match
+    /// is dwelling. On by default — someone who trained a gesture that
+    /// curls a finger wants the gesture, not the click it resembles.
+    public var mouseOverride: Bool = true
 
     public init() {}
 
@@ -80,18 +92,19 @@ public struct TrainedGestureSettings: Codable, Equatable, Sendable {
     public func detectorConfig(enabled: Bool) -> TrainedGestureDetector.Config {
         var config = TrainedGestureDetector.Config()
         guard enabled else { return config }
+        config.overridesMouse = mouseOverride
         config.gestures = gestures.compactMap { gesture in
             guard gesture.action != nil, !gesture.template.isEmpty else { return nil }
             return TrainedGestureDetector.Compiled(
                 id: gesture.id, handCount: gesture.handCount,
                 template: gesture.template, duration: gesture.duration,
-                threshold: gesture.threshold)
+                threshold: gesture.threshold, holdSeconds: gesture.holdSeconds)
         }
         return config
     }
 
     enum CodingKeys: String, CodingKey {
-        case gestures
+        case gestures, mouseOverride
     }
 
     /// Element-tolerant, like the custom bindings list: one unreadable
@@ -103,6 +116,7 @@ public struct TrainedGestureSettings: Codable, Equatable, Sendable {
             var seen: Set<UUID> = []
             gestures = v.compactMap(\.value).filter { seen.insert($0.id).inserted }
         }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .mouseOverride) { mouseOverride = v }
     }
 }
 
