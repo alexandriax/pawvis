@@ -351,7 +351,7 @@ private struct MouseSettingsTab: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Click — mouse tap")
                     .font(.callout)
-                CaptionText("Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your palm.")
+                CaptionText("Hold your hand open and dip your index finger like tapping a mouse button — keep the others up. Measured against the middle finger, so tilting your whole hand can't click. The cursor rides your \(store.settings.gestures.pointerSource.inlineName).")
             }
 
             LabeledSlider(
@@ -401,6 +401,32 @@ private struct MouseSettingsTab: View {
 
             Divider()
 
+            SettingToggle(
+                title: "Dwell click",
+                caption: "Clicking without the finger dip: park the cursor on a target, hold it still, and after the dwell time a left click fires on its own (the ring around the claw tightens as it counts down). Move the cursor away to arm the next one. It never fires while a button is held, while scrolling, or while the cursor is parked.",
+                isOn: $store.settings.gestures.dwellClickEnabled)
+
+            LabeledSlider(
+                label: "Dwell time",
+                caption: "\(String(format: "%.1f", store.settings.gestures.dwellSeconds)) s of holding still before the click fires. Shorter clicks sooner but fires more easily while you rest; longer is calmer but slower.",
+                value: $store.settings.gestures.dwellSeconds,
+                range: 0.5...3.0)
+                .disabled(!store.settings.gestures.dwellClickEnabled)
+
+            SettingRow(
+                title: "The cursor rides",
+                caption: "The palm barely moves while a finger dips, which is what keeps clicks from smearing into drags. The fingertip sources point more directly but wobble during finger clicks; they pair best with dwell click, where clicking moves no fingers."
+            ) {
+                Picker("", selection: $store.settings.gestures.pointerSource) {
+                    ForEach(PointerSource.allCases, id: \.self) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                .frame(maxWidth: 320)
+            }
+
+            Divider()
+
             SettingToggle(title: "Fingertip dots", isOn: $store.settings.overlay.showFingertipDots)
             SettingToggle(title: "Closing ring around the cursor", isOn: $store.settings.overlay.showPinchRing)
             SettingToggle(title: "Claw cursor", isOn: $store.settings.overlay.showCursorHalo)
@@ -419,7 +445,7 @@ private struct MouseSettingsTab: View {
                 Button("Reset gestures to defaults") {
                     store.settings.gestures = .default
                 }
-                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
+                CaptionText("Restores the control trigger, sensitivity, right-click, scrolling, dwell click, the pointer source, the tracking-off wave, smoothing, reach, and timing to the tuned defaults.")
             }
         }
     }

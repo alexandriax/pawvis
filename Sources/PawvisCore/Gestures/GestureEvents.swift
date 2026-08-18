@@ -66,6 +66,10 @@ public struct OverlayState: Equatable, Sendable {
     /// closing-ring feedback around the cursor. Pinned at 1 while *either*
     /// button is down — the ring says "you are pressing", not which finger.
     public var closingProgress: Double = 0
+    /// Dwell-click ramp: 0 while no dwell is running, 1 as the stillness
+    /// timer reaches its click. Drives the same tightening ring as
+    /// `closingProgress`, so a forming dwell looks like a forming click.
+    public var dwellProgress: Double = 0
 
     public init() {}
 }

@@ -390,6 +390,42 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertTrue(moves(e).isEmpty, "identical frame must not emit a move")
     }
 
+    // MARK: - Pointer source
+
+    func testCursorFollowsTheIndexTipWhenConfigured() {
+        var config = Self.testConfig()
+        config.pointerSource = .indexTip
+        engine = GestureEngine(config: config)
+        let hand = SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))
+        let events = feed([hand], at: 0).events
+        XCTAssertEqual(moves(events).count, 1)
+        XCTAssertEqual(moves(events)[0].distance(to: hand[.indexTip]!), 0, accuracy: 1e-6,
+                       "the configured source, not the palm, drives the cursor")
+    }
+
+    func testCursorFollowsThePinchMidpointWhenConfigured() {
+        var config = Self.testConfig()
+        config.pointerSource = .pinchMidpoint
+        engine = GestureEngine(config: config)
+        let hand = SyntheticHand.openRelaxed(wrist: Vec2(0.5, 0.7))
+        let events = feed([hand], at: 0).events
+        let expected = hand[.thumbTip]!.midpoint(with: hand[.indexTip]!)
+        XCTAssertEqual(moves(events).count, 1)
+        XCTAssertEqual(moves(events)[0].distance(to: expected), 0, accuracy: 1e-6)
+    }
+
+    func testChangingThePointerSourceMidPressReleases() {
+        feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3)
+        XCTAssertEqual(downs(feedFrames([SyntheticHand.mouseTap(indexDown: true)],
+                                        from: 0.1, count: 3)).count, 1)
+
+        engine.config.pointerSource = .indexTip
+
+        let next = feed([SyntheticHand.mouseTap(indexDown: true)], at: 0.25).events
+        XCTAssertEqual(ups(next).count, 1,
+                       "the cursor anchor moved out from under the press — it must not smear into a drag")
+    }
+
     // MARK: - Overlay
 
     func testOverlayStateForOpenHand() {
