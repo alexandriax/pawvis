@@ -66,7 +66,10 @@ final class PawvisController: ObservableObject {
             // glitch-free lever (the AVCaptureSession itself is never
             // touched). A skipped frame never reaches the engine, whose only
             // clock is the timestamps of the frames it is given, so the gap
-            // reads as nothing at all.
+            // reads as nothing at all. The call also stamps the stall
+            // watchdog's liveness clock, before its own verdict: the
+            // watchdog asks whether the camera is delivering, and a frame
+            // the throttle skips is still proof that it is.
             guard self.throttle.shouldRunInference(at: CACurrentMediaTime()) else { return }
             // Camera queue: run Vision synchronously, then hop to main.
             // DispatchQueue.main (not Task) — the main queue is FIFO, so
@@ -91,6 +94,16 @@ final class PawvisController: ObservableObject {
             MainActor.assumeIsolated {
                 guard let self, running else { return }
                 self.armStallClock(grace: Self.startupGraceSeconds)
+            }
+        }
+        // A device swap on a running session (settings switch, disconnect
+        // fallback, the chosen camera returning) reconfigures in place:
+        // frames pause and the new device warms up, but `isRunning` never
+        // flips, so the re-arm above stays silent. Give the swap the same
+        // warm-up leash a fresh session gets.
+        camera.onWillReconfigure = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.armStallClock(grace: Self.startupGraceSeconds)
             }
         }
         camera.onFailure = { [weak self] reason in
@@ -362,6 +375,13 @@ final class PawvisController: ObservableObject {
         engine.reset()
         throttle.reset()
         overlay.show()
+        // Arm the stall clock HERE, not only from `onRunningChanged`: that
+        // callback hops the camera queue and a slow `startRunning`, and the
+        // 0.5 s watchdog tick — live again the moment `pausedForLock`
+        // flipped — would otherwise convict on the last frame before the
+        // lock, minutes old. One false failure per unlock, cleared by the
+        // first frame: the flap this comment is the tombstone of.
+        armStallClock(grace: Self.startupGraceSeconds)
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         Log.app.info("Tracking resumed: screen unlocked")
     }
@@ -461,28 +481,24 @@ final class PawvisController: ObservableObject {
     /// stall window it force-releases every button, parks the overlay, and
     /// says why — and the moment frames return, everything comes back.
 
-    /// No frames for this long while tracking means the camera is gone.
-    /// Comfortably above any real inter-frame gap at the locked 30 fps, and
-    /// short enough that a stuck drag doesn't wander far.
-    private static let frameStallSeconds: TimeInterval = 2
     /// Cold cameras (and cameras waking from sleep) take a while to deliver
     /// the first frame; the stall verdict waits this long after a (re)start.
     private static let startupGraceSeconds: TimeInterval = 5
 
     private var watchdogTimer: Timer?
-    /// When the last frame reached `processFrame` (media time).
-    private var lastFrameAt: TimeInterval = 0
-    /// No stall verdict before this deadline — warm-up isn't failure.
-    private var stallGraceUntil: TimeInterval = 0
     /// Between willSleep and didWake the watchdog stays quiet: the whole
     /// machine has stopped, which is nobody's failure.
     private var asleep = false
 
-    /// Restart the no-frames countdown, optionally with a warm-up grace.
+    /// Restart the no-frames countdown with a warm-up grace. The clock
+    /// itself lives in the throttle box (`CameraStallClock`), stamped at the
+    /// camera tap for every captured frame — including the ones the idle
+    /// throttle skips, which are evidence of a live camera all the same.
+    /// Call this synchronously from every path that starts, restarts, or
+    /// resumes the camera: the asynchronous `onRunningChanged` re-arm is the
+    /// second belt, not the first, because a watchdog tick can beat it.
     private func armStallClock(grace: TimeInterval) {
-        let now = CACurrentMediaTime()
-        lastFrameAt = now
-        stallGraceUntil = now + grace
+        throttle.armStallClock(at: CACurrentMediaTime(), grace: grace)
     }
 
     private func startWatchdog() {
@@ -501,7 +517,7 @@ final class PawvisController: ObservableObject {
             // still times it out and honors the ✕, exactly like the
             // Accessibility warning; the menu line is the copy that stays.
             overlay.parkForFailure(failure, now: now)
-        } else if now >= stallGraceUntil, now - lastFrameAt >= Self.frameStallSeconds {
+        } else if throttle.cameraStalled(at: now) {
             enterCameraFailure("Camera stopped sending frames — check it's connected and free")
         }
     }
@@ -563,7 +579,10 @@ final class PawvisController: ObservableObject {
     // MARK: - Frame pipeline
 
     private func processFrame(hands: [Hand], at time: TimeInterval) {
-        lastFrameAt = time // any frame at all feeds the stall watchdog
+        // The stall watchdog is fed at the camera tap, not here: while the
+        // idle throttle is engaged most captured frames never reach this
+        // method, and a watchdog that only counted processed frames once
+        // convicted a live camera for the throttle's own skipping.
         if trainingActive {
             // The trainer owns the stream; nothing reaches the engine or
             // the mouse while its window is open.

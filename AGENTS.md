@@ -185,6 +185,17 @@ to shutdown, so the app owns two rest states (`PawvisController`):
   an active scroll, or the open trainer exempts every frame explicitly:
   throttling mid-press must be impossible by construction, even though the
   no-hands clock could not be running then anyway.
+- **Skipped frames DO feed the frame-stall watchdog** (`CameraStallClock`,
+  pure PawvisCore, hosted in `FrameThrottleBox` and stamped at the tap
+  *before* the throttle's verdict). The watchdog's question is "is the
+  camera delivering", not "did inference run" — stamping downstream in
+  `processFrame` once let the throttled cadence eat the 2 s stall budget on
+  slow-delivering cameras, and the watchdog flapped failure/recovery
+  forever. Every path that starts, restarts, or resumes the camera
+  (activate, unlock, wake, training hand-back, `onWillReconfigure` device
+  swaps) arms the clock *synchronously* with the warm-up grace; the
+  asynchronous `onRunningChanged` re-arm is the second belt, because a
+  watchdog tick can beat it after an unlock.
 
 ## Gesture engine
 

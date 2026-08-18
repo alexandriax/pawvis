@@ -14,6 +14,13 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     var onFrame: ((CMSampleBuffer) -> Void)?
     /// Called on the main queue when the running state changes.
     var onRunningChanged: ((Bool) -> Void)?
+    /// Called on the main queue when a *running* session is about to be
+    /// reconfigured in place — a settings device switch, the disconnect
+    /// fallback, the chosen camera returning. Frames pause for the swap and
+    /// the new device warms up, but `isRunning` never flips, so
+    /// `onRunningChanged` stays silent: any frame-stall clock must re-arm
+    /// from this hook instead.
+    var onWillReconfigure: (() -> Void)?
     /// Called on the main queue when capture dies underneath us — a session
     /// runtime error, or the active device unplugged — with a human-readable
     /// reason. Frames may never arrive again; the caller owns saying so.
@@ -96,6 +103,7 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                 session.commitConfiguration()
                 return
             }
+            DispatchQueue.main.async { self.onWillReconfigure?() }
             configureIfNeeded(deviceID: deviceID, force: true)
         }
     }
@@ -176,6 +184,9 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         frameQueue.async { [self] in
             guard activeInputDeviceID() == goneID else { return }
             Log.camera.error("Camera disconnected: \(goneName, privacy: .public)")
+            if isRunning {
+                DispatchQueue.main.async { self.onWillReconfigure?() }
+            }
             // Reconfigure even while stopped: AVFoundation leaves the dead
             // device's input attached, and a later start would ride it into
             // a session that can never produce a frame.
@@ -209,6 +220,7 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             let chosenReturned = currentDeviceID == newID && active != newID
             guard cameraless || chosenReturned else { return }
             Log.camera.info("Camera connected, reconfiguring")
+            DispatchQueue.main.async { self.onWillReconfigure?() }
             configureIfNeeded(deviceID: currentDeviceID, force: true)
         }
     }
