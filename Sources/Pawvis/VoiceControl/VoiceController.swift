@@ -108,6 +108,14 @@ final class VoiceController: ObservableObject {
     }
 
     func setConfig(_ config: VoiceControlConfig) {
+        var config = config
+        // Strict wake acceptance whenever the agent hand-off is live: there
+        // an accepted utterance is arbitrary execution, so the ladder drops
+        // its loosest tiers — no glued-speech stitching, and the capture
+        // window stops taking the next final verbatim (handleFinal threads
+        // the same flag into the gate). This is app policy, decided here;
+        // PawvisCore just takes the flag, and it is never persisted.
+        config.strictWake = !config.agentExecutor.isEmpty
         self.config = config
         parser.config = config
         executor.aiAppNameRescueEnabled = config.visualContextEnabled
@@ -298,7 +306,15 @@ final class VoiceController: ObservableObject {
             Log.voice.log("Wake heard live; final revised it — accepting near remainder")
             remainder = near
         }
-        let decision = gate.decide(remainder: remainder, transcript: transcript, now: now)
+        // Strict wake (agent mode): the armed window's capture must itself
+        // parse deterministically — a wake-carrying final never consults the
+        // bar, so "Pawvis quit chrome" (and wake-led free-form speech for
+        // the agent) works exactly as before.
+        let decision = gate.decide(
+            remainder: remainder, transcript: transcript, now: now,
+            strictCommandBar: config.strictWake
+                ? { [parser] in parser.remainderIsDeterministicCommand($0) }
+                : nil)
         gateWindowTimer?.invalidate()
         gateWindowTimer = nil
 
