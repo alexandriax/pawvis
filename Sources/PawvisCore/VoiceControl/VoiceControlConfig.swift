@@ -12,8 +12,10 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     public var wakeWord: String = "Pawvis"
     /// Alternate spellings the recognizer may produce for the wake word.
     /// Matching is also fuzzy (edit distance 1), so this list only needs the
-    /// truly different mishearings.
-    public var wakeWordAliases: [String] = ["pawviz", "pavis", "purvis", "pervis", "jarvis"]
+    /// truly different mishearings. Deliberately absent: "jarvis" — a stock
+    /// movie wake word shipped here once, which made any TV audio saying
+    /// "Jarvis, …" a full-trust accept. Users who want it can add it back.
+    public var wakeWordAliases: [String] = ["pawviz", "pavis", "purvis", "pervis"]
     /// Map commands the grammar doesn't recognize to intents with the
     /// on-device Apple Intelligence model, and ground screen-referencing
     /// commands ("click sign in") against what's around the pointer.
@@ -36,6 +38,14 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     /// Quiet time (legacy SFSpeechRecognizer path only) before an utterance is
     /// considered done.
     public var vadSilenceMs: Int = 500
+    /// Tightened wake acceptance for high-stakes handlers. The app layer sets
+    /// this whenever the agent hand-off is active (an accepted utterance there
+    /// is arbitrary execution); the core just takes the flag. With it on, the
+    /// glued-speech tier is disabled outright, and the utterance gate's
+    /// capture window stops taking the next final verbatim (the app threads
+    /// the same flag into `UtteranceGate.decide`). Transient by design —
+    /// never encoded, and ignored by the decoder.
+    public var strictWake: Bool = false
 
     public init() {}
 

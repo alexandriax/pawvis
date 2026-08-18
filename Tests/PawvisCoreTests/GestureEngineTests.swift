@@ -1468,6 +1468,157 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertTrue(lastOverlay.hands[1].isPrimary, "the open hand (slot 1) is primary now")
     }
 
+    // MARK: - Control trigger: primary handoff
+
+    /// Arm hand A at x 0.3, with a resting half-curled bystander at x 0.75 —
+    /// the neutral band: it neither shows the trigger nor the three-finger
+    /// disarm. Returns the time of the next frame to feed.
+    private func armWithBystander(aHand: (Vec2) -> Hand = { SyntheticHand.openRelaxed(wrist: $0) })
+        -> TimeInterval {
+        feedFrames([aHand(Vec2(0.3, 0.7))], from: 0, count: 4)
+        feedFrames([aHand(Vec2(0.3, 0.7)),
+                    SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))], from: 0.15, count: 5)
+        return 0.35
+    }
+
+    func testArmedHandoffToAnUntriggeredHandDisarms() {
+        useOpenHandTrigger()
+        let t = armWithBystander()
+
+        // A leaves for good. The resting hand inherits the slot — and
+        // nothing else: it never opted in, and being neutral it would
+        // never disarm either.
+        var events: [GestureEvent] = []
+        var lastOverlay = OverlayState()
+        for i in 0..<45 {
+            let wrist = Vec2(0.75 - Double(i) * 0.004, 0.7 - Double(i) * 0.003)
+            let r = feed([SyntheticHand.halfClosed(wrist: wrist)], at: t + Double(i) / 30)
+            events += r.events
+            lastOverlay = r.overlay
+        }
+        XCTAssertTrue(moves(events).isEmpty,
+                      "a hand that never showed the trigger must not drive the cursor")
+        XCTAssertTrue(events.isEmpty, "…or click, or scroll")
+        XCTAssertFalse(lastOverlay.armed, "inheriting the slot is not opting in")
+        XCTAssertNotNil(lastOverlay.cursor, "the claw parks where control was lost")
+    }
+
+    func testArmedHandoffToAHandShowingTheTriggerStaysSeamless() {
+        useOpenHandTrigger()
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.3, 0.7))], from: 0, count: 4)
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.3, 0.7)),
+                    SyntheticHand.openRelaxed(wrist: Vec2(0.75, 0.5))], from: 0.15, count: 5)
+
+        // A leaves; the second hand is showing the trigger when the grace
+        // expires, so control passes without the arming ceremony.
+        var armedEveryFrame = true
+        var events: [GestureEvent] = []
+        for i in 0..<15 {
+            let r = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.75, 0.5))],
+                         at: 0.35 + Double(i) / 30)
+            events += r.events
+            armedEveryFrame = armedEveryFrame && r.overlay.armed
+        }
+        XCTAssertTrue(armedEveryFrame, "control never drops on a handoff to an open hand")
+        XCTAssertFalse(moves(events).isEmpty, "the open hand inherits the cursor")
+        XCTAssertGreaterThan(moves(events).last!.x, 0.6,
+                             "…which now rides the surviving hand's palm")
+    }
+
+    func testReturningOpenHandReclaimsPrimaryFromTheInheritingHand() {
+        useOpenHandTrigger()
+        let t = armWithBystander()
+        // A is gone long past the grace: the resting hand inherits, disarmed.
+        feedFrames([SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))], from: t, count: 15)
+
+        // A returns open, somewhere else: the deliberately shown hand takes
+        // primary (and control) back from the resting one.
+        var events: [GestureEvent] = []
+        var lastOverlay = OverlayState()
+        for i in 0..<5 {
+            let r = feed([SyntheticHand.openRelaxed(wrist: Vec2(0.4, 0.45)),
+                          SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                         at: 0.9 + Double(i) / 30)
+            events += r.events
+            lastOverlay = r.overlay
+        }
+        XCTAssertTrue(lastOverlay.armed, "the returning open hand re-arms")
+        XCTAssertEqual(moves(events).count, 1, "…and the cursor jumps to it once")
+        XCTAssertLessThan(moves(events)[0].x, 0.5, "…near the open hand, not the resting one")
+        XCTAssertTrue(lastOverlay.hands[0].isPrimary,
+                      "primary is back on the hand showing the trigger")
+    }
+
+    func testPrimaryDropoutWithABystanderHoldsTheDrag() {
+        useOpenHandTrigger()
+        _ = armWithBystander(aHand: { SyntheticHand.mouseTap(indexDown: false, wrist: $0) })
+        // Press, then a deliberate flick to start dragging.
+        let pressed = feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.3, 0.7)),
+                                  SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                                 from: 0.35, count: 3)
+        XCTAssertEqual(downs(pressed).count, 1)
+        feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.34, 0.7)),
+                    SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))], from: 0.45, count: 2)
+
+        // Vision drops the dragging hand for two frames; the bystander stays.
+        let dropped = feedFrames([SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                                 from: 0.52, count: 2)
+        XCTAssertTrue(ups(dropped).isEmpty,
+                      "a dropout inside the grace must not release the drag")
+        XCTAssertTrue(moves(dropped).isEmpty && drags(dropped).isEmpty,
+                      "…and the bystander does not move it")
+
+        // The hand returns, still dipped: the same drag continues.
+        let resumed = feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.42, 0.7)),
+                                  SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                                 from: 0.59, count: 3)
+        XCTAssertTrue(ups(resumed).isEmpty)
+        XCTAssertFalse(drags(resumed).isEmpty, "the same hand's drag survives the dropout")
+        let lifted = feedFrames([SyntheticHand.mouseTap(indexDown: false, wrist: Vec2(0.42, 0.7)),
+                                 SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                                from: 0.7, count: 3)
+        XCTAssertEqual(ups(lifted).count, 1)
+    }
+
+    func testDepartedHandsPressLandsOnceWhenTheBystanderInherits() {
+        useOpenHandTrigger()
+        _ = armWithBystander(aHand: { SyntheticHand.mouseTap(indexDown: false, wrist: $0) })
+        let pressed = feedFrames([SyntheticHand.mouseTap(indexDown: true, wrist: Vec2(0.3, 0.7)),
+                                  SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                                 from: 0.35, count: 3)
+        XCTAssertEqual(downs(pressed).count, 1)
+        let pressPoint = downs(pressed)[0].0
+
+        // The pressing hand leaves for good; only the bystander remains, so
+        // the all-hands-gone path never runs — the handoff owns the release.
+        var events: [GestureEvent] = []
+        var lastOverlay = OverlayState()
+        for i in 0..<30 {
+            let r = feed([SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
+                         at: 0.5 + Double(i) / 30)
+            events += r.events
+            lastOverlay = r.overlay
+        }
+        XCTAssertEqual(ups(events).count, 1,
+                       "the grace expiring releases the press exactly once")
+        XCTAssertEqual(ups(events)[0].0, pressPoint,
+                       "…where it was held, not at the bystander")
+        XCTAssertFalse(lastOverlay.armed, "the bystander inherits the slot, not control")
+        XCTAssertTrue(moves(events).isEmpty && drags(events).isEmpty)
+    }
+
+    func testAnyHandHandoffIsImmediate() {
+        // `.anyHand` keeps the legacy behavior: no trigger, no grace hold —
+        // the surviving hand takes the cursor on the very next frame.
+        feedFrames([SyntheticHand.openRelaxed(wrist: Vec2(0.3, 0.7))], from: 0, count: 3)
+        feed([SyntheticHand.openRelaxed(wrist: Vec2(0.3, 0.7)),
+              SyntheticHand.halfClosed(wrist: Vec2(0.7, 0.5))], at: 0.15)
+        let (events, overlay) = feed([SyntheticHand.halfClosed(wrist: Vec2(0.7, 0.5))], at: 0.183)
+        XCTAssertEqual(moves(events).count, 1, "any tracked hand may drive in .anyHand")
+        XCTAssertGreaterThan(moves(events)[0].x, 0.6)
+        XCTAssertTrue(overlay.armed)
+    }
+
     func testSwitchingToOpenHandTriggerMidPressReleases() {
         feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0, count: 3) // .anyHand test config
         XCTAssertEqual(downs(feedFrames([SyntheticHand.mouseTap(indexDown: true)],
@@ -1579,6 +1730,65 @@ final class GestureEngineTests: XCTestCase {
         // Released, the drift picks up again.
         feedFrames([SyntheticHand.openRelaxed(wrist: wrist, scale: 0.28)], from: 2.8, count: 10)
         XCTAssertGreaterThan(engine.effectiveInteractionBox.yMin, pressed.yMin)
+    }
+
+    /// A wrist position whose synthetic scroll-pose hand keeps its pointer
+    /// landmark — `HandFeatures.pointerPoint(.palmCenter)`, the wrist↔middle-
+    /// knuckle midpoint that `GestureEngine.pointerPoint` reads and scroll
+    /// deltas are measured from — pinned at `target`, at the given `scale`.
+    /// `SyntheticHand.build` offsets every knuckle from the wrist by `scale`,
+    /// so simply holding the wrist itself still while ramping scale would
+    /// drag that midpoint along with it: a real effect (a hand pitching
+    /// toward the camera does move its palm a little), but a different one
+    /// from the box re-fitting under it, and not what this test is after.
+    /// The midpoint is an exact affine function of the wrist with unit
+    /// slope, so one probe at `target` gives the fixed offset to cancel.
+    private func wristPinningPalm(to target: Vec2, scale: Double) -> Vec2 {
+        let probe = SyntheticHand.scrollPose(wrist: target, scale: scale)
+        let measured = HandFeatures(hand: probe)!.pointerPoint(.palmCenter)!
+        return target + (target - measured)
+    }
+
+    func testAutoReachNeverMovesTheBoxMidScroll() {
+        useAutoReach()
+        let palm = Vec2(0.5, 0.5)
+        let baseScale = 0.15
+
+        // Engage the scroll pose, palm pinned so the setup itself contributes
+        // no drift.
+        let engageWrist = wristPinningPalm(to: palm, scale: baseScale)
+        feedFrames([SyntheticHand.scrollPose(wrist: engageWrist, scale: baseScale)], from: 0, count: 3)
+        let engagedOverlay = feed([SyntheticHand.scrollPose(wrist: engageWrist, scale: baseScale)],
+                                  at: 0.1).overlay
+        XCTAssertTrue(engagedOverlay.isScrolling, "setup check: engaged before the ramp begins")
+        let boxAtEngage = engine.effectiveInteractionBox
+
+        // Ramp the hand's apparent scale (leaning in, or a pitch change)
+        // while the palm — the landmark scroll deltas are measured from —
+        // stays perfectly still. This is the reviewer's exact repro:
+        // unfrozen, the box keeps re-fitting to the growing hand and remaps
+        // that still palm to a moving y, scrolling under a hand that never
+        // moved.
+        var deltas: [Double] = []
+        let steps = 60
+        for i in 1...steps {
+            let scale = baseScale + (0.30 - baseScale) * Double(i) / Double(steps)
+            let wrist = wristPinningPalm(to: palm, scale: scale)
+            let events = feed([SyntheticHand.scrollPose(wrist: wrist, scale: scale)],
+                              at: 0.1 + Double(i) / 30).events
+            deltas += scrolls(events)
+        }
+
+        XCTAssertTrue(deltas.isEmpty,
+                     "a palm that never moved must never scroll, however the hand's apparent scale changes")
+        XCTAssertEqual(engine.effectiveInteractionBox, boxAtEngage,
+                       "the box is a coordinate transform: an active scroll must freeze it, exactly like a held button")
+
+        // Released, the drift picks up again — the freeze isn't permanent.
+        feedFrames([SyntheticHand.openRelaxed(wrist: palm, scale: 0.30)],
+                   from: 0.1 + Double(steps + 1) / 30, count: 10)
+        XCTAssertNotEqual(engine.effectiveInteractionBox, boxAtEngage,
+                          "once the scroll ends the box is free to fit the hand again")
     }
 
     func testManualReachUsesTheConfiguredBoxVerbatim() {
