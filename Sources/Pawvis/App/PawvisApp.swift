@@ -201,10 +201,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // applicationWillTerminate alone can run too late for AVFoundation to
         // wind down cleanly, which left ghost state across relaunch cycles.
         controller.shutdown()
+        // And take the agent runs with us: they execute with permission
+        // prompts bypassed, so none may keep working headless after the app
+        // that launched them (and its cancel UI) is gone. Bounded — signals
+        // now, ≤0.5s grace, SIGKILL the groups, proceed.
+        AgentSessionManager.shared.shutdownOnAppQuit()
         return .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.shutdown()
+        AgentSessionManager.shared.shutdownOnAppQuit()
     }
 }

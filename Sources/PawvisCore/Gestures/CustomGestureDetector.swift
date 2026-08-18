@@ -535,8 +535,17 @@ public final class CustomGestureDetector {
         if holdStillHeld(current, loose) {
             hold.exitFrames = 0
             if !hold.fired, time - hold.start >= config.holdSeconds {
-                _ = fire(current, at: time, into: &fired)
-                hold.fired = true // one fire per dwell, however long it's held
+                // A dwell that completes inside the family refractory (e.g.
+                // fire, release, re-pose quickly) must not latch as fired —
+                // that would silently kill the gesture for the rest of the
+                // hold. Keep retrying on later frames, still held, until the
+                // refractory lets it through, then latch (the trained
+                // detector's retry idea: TrainedGestureDetector.process,
+                // where a blocked `bestFire` simply isn't cleared and is
+                // re-attempted next frame).
+                if fire(current, at: time, into: &fired) {
+                    hold.fired = true // one fire per dwell, however long it's held
+                }
             }
         } else {
             hold.exitFrames += 1

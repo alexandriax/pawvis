@@ -330,6 +330,81 @@ final class CustomGestureDetectorTests: XCTestCase {
         XCTAssertEqual(fired, [.thumbsUp, .thumbsUp])
     }
 
+    func testDwellBlockedByRefractoryRetriesUntilItFires() {
+        // Fire once, release just long enough to reset the hold, then
+        // re-pose immediately: the new dwell completes well inside the
+        // 0.8s hold-family refractory. Before the fix, the blocked fire()
+        // still latched `hold.fired = true`, so the pose could never fire
+        // again no matter how long it was then held — exactly what "thumbs
+        // up twice in a row" (testing a new binding) does.
+        enable(.thumbsUp)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+
+        // First dwell, held from rest: fires once (~0.37s in).
+        for _ in 0..<12 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp], "first dwell fires")
+
+        // Release for exactly the exit-debounce, so the hold state resets.
+        for _ in 0..<4 {
+            fired += feed([(0, SyntheticHand.openRelaxed())], at: t)
+            t += 1.0 / 30
+        }
+
+        // Re-pose immediately. The dwell is running again but not yet
+        // complete.
+        for _ in 0..<11 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp], "second dwell still running")
+
+        // One more frame completes the second dwell — inside the
+        // refractory (well under 0.8s since the first fire), so the fire
+        // is blocked and must NOT fire yet.
+        fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+        t += 1.0 / 30
+        XCTAssertEqual(fired, [.thumbsUp], "blocked by the refractory, not fired")
+
+        // The countdown pill must stay sensible while blocked: the dwell
+        // has completed (0s left), not gone dark and not restarted from
+        // the top.
+        guard let progress = detector.holdProgress else {
+            return XCTFail("a completed-but-blocked dwell must still be visible")
+        }
+        XCTAssertEqual(progress.gesture, .thumbsUp)
+        XCTAssertEqual(progress.remaining, 0, accuracy: 0.0001)
+
+        // Keep holding — no release — until the refractory clears. The
+        // gesture must retry and fire, not stay dead for the rest of the
+        // hold. (~0.8s after the first fire.)
+        for _ in 0..<15 {
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp, .thumbsUp],
+                       "a dwell blocked by the refractory retries and fires once it clears")
+    }
+
+    func testFiredLatchSurvivesRefractoryDuringOneContinuousHold() {
+        // The retry-until-it-lands fix must not turn an ordinary,
+        // uninterrupted hold into a repeat fire just because the family
+        // refractory that blocked it has, in general, long since cleared:
+        // the latch from a *successful* fire must still stand for as long
+        // as the pose is held without ever releasing.
+        enable(.thumbsUp)
+        var fired: [CustomGesture] = []
+        var t = 0.0
+        for _ in 0..<75 { // 2.5s continuous hold, well past the 0.8s refractory
+            fired += feed([(0, SyntheticHand.thumbSignal(.up))], at: t)
+            t += 1.0 / 30
+        }
+        XCTAssertEqual(fired, [.thumbsUp])
+    }
+
     func testShakaHoldFires() {
         enable(.shaka)
         XCTAssertEqual(holdPose(SyntheticHand.shaka(), frames: 20), [.shaka])
