@@ -107,8 +107,12 @@ Mouse**.
   animated badge that replays the learned motion, and they work like the
   built-ins: rename them, remove them, tune how strictly they match, and
   bind them to any action from the same catalog (or leave them unassigned).
-  Pawvis control pauses while the trainer is open, so recording never
-  fights the mouse. Training data never leaves this Mac, like all tracking.
+  Each one can also require a hold before it fires (the pill counts the
+  hold down), and a priority switch decides who wins when a gesture looks
+  like a click: by default trained gestures keep matching through clicks
+  and scrolls, and a match in progress blocks new clicks. Pawvis control
+  pauses while the trainer is open, so recording never fights the mouse.
+  Training data never leaves this Mac, like all tracking.
 - **Reach adapts to distance.** Auto mode sizes the tracking area from how big
   your hand looks, so the whole screen stays reachable up close *and* far away
   with your fingers staying inside the camera frame. Manual mode gives you a
