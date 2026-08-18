@@ -1023,9 +1023,16 @@ public final class GestureEngine {
             effectiveInteractionBox = config.interactionBox // manual: verbatim, at once
             return
         }
-        // Never mid-press: the box is a coordinate transform, so moving it
-        // under a held button would slide whatever is being dragged.
-        guard press == nil, let scale = smoothedHandScale else { return }
+        // Never mid-press, and never mid-scroll: the box is a coordinate
+        // transform, so moving it under a held button would slide whatever
+        // is being dragged — and scroll deltas are measured from the very
+        // pointer this box maps (see `pointerPoint`), so a box drifting
+        // under an active scroll remaps a motionless palm to a moving y and
+        // scrolls on its own (measured: a hand-scale ramp of 0.15→0.30 under
+        // a fixed palm emitted ~0.19 screen-normalized units of phantom
+        // scroll before this guard existed). Released, either way, the
+        // drift picks back up.
+        guard press == nil, !scroll.active, let scale = smoothedHandScale else { return }
         let target = Self.targetBox(forHandScale: scale)
         func drift(_ edge: Double, toward goal: Double) -> Double {
             edge + (goal - edge) * Self.reachLerp
