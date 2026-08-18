@@ -45,8 +45,10 @@ final class VoiceController: ObservableObject {
     let transcriptOverlay = TranscriptOverlay()
     /// The bottom-right card streaming autopilot steps, with Cancel.
     let autopilotPanel = AutopilotPanel()
-    /// The running autopilot loop, if any — cancelled by "Pawvis stop", by
-    /// any new command, and by voice control stopping.
+    /// The running foreground command, if any — the autopilot loop, a
+    /// deterministic sequence, or a plain single command's executor round
+    /// (all of which honor task cancellation) — cancelled by "Pawvis stop",
+    /// by any new command, and by voice control stopping.
     private var autopilotTask: Task<Void, Never>?
     /// Guards the loop's completion handling against staleness: a cancelled
     /// run resumes from its await one MainActor job AFTER a successor run
@@ -222,8 +224,9 @@ final class VoiceController: ObservableObject {
         state = .off
     }
 
-    /// Cancels a running autopilot loop without touching the engine — voice
-    /// stays listening. The task's own outcome handling flashes "Stopped".
+    /// Cancels the running command — loop, sequence, or single executor
+    /// round — without touching the engine: voice stays listening. The
+    /// task's own outcome handling flashes "Stopped".
     func cancelAutopilot() {
         autopilotTask?.cancel()
     }
@@ -518,8 +521,10 @@ final class VoiceController: ObservableObject {
             return
         }
         if case .cancelActivity? = result.command {
-            // "Pawvis stop": brake whatever is running; with nothing in
-            // flight it keeps its original meaning and turns voice off.
+            // "Pawvis stop": brake whatever is running — the loop, a
+            // sequence, or a plain single command mid-round, all of which
+            // live in autopilotTask; with nothing in flight it keeps its
+            // original meaning and turns voice off.
             // Background agent runs never live in autopilotTask — they must
             // be braked through their manager, and voice must STAY ON while
             // they wind down: turning it off here would silence the user's
@@ -541,8 +546,9 @@ final class VoiceController: ObservableObject {
             }
             return
         }
-        // Any new command interrupts a running loop — "Pawvis click cancel"
-        // during a runaway autopilot means both things the user said.
+        // Any new command interrupts the running one — loop, sequence, or
+        // single round: "Pawvis click cancel" during a runaway autopilot
+        // means both things the user said.
         cancelAutopilot()
         if let tool {
             // Logged as a request, not a hand-off: in confirm mode the
@@ -576,10 +582,32 @@ final class VoiceController: ObservableObject {
         case .sequence(let commands):
             runSequence(commands)
         default:
+            // Tracked in the shared command slot (exactly like sequences)
+            // so "Pawvis stop" brakes a plain command mid-flight too: the
+            // executor honors task cancellation throughout a round, but an
+            // untracked Task left the brake nothing to cancel — a running
+            // navigation could only have its outcome disowned afterwards,
+            // never be stopped. Same supersede pattern as the other runs:
+            // bump the generation so a superseded round's completion can't
+            // clobber this task handle, and — because that bump suppresses
+            // the superseded run's own cleanup — clear its panel and its
+            // mid-run state here.
+            autopilotTask?.cancel()
+            autopilotGeneration += 1
+            let generation = autopilotGeneration
+            autopilotPanel.hide()
+            switch state {
+            case .resolving, .working: state = .listening
+            default: break
+            }
             let session = sessionGeneration
-            Task { [weak self] in
+            autopilotTask = Task { [weak self] in
                 guard let self else { return }
                 let outcome = await self.executor.execute(command)
+                // A superseded or shut-down round must vanish silently —
+                // its successor owns the task slot and the notice now.
+                guard self.autopilotGeneration == generation else { return }
+                self.autopilotTask = nil
                 // The executor round can outlast the session — a failing
                 // app launch waits out waitForFrontmost's timeout, plenty
                 // of room for the user to toggle voice off. Post-stop, the
@@ -588,6 +616,17 @@ final class VoiceController: ObservableObject {
                 // outcome notice belongs to a session that no longer
                 // exists — vanish silently, like superseded loop runs do.
                 guard self.sessionGeneration == session, self.state.isActive else { return }
+                if Task.isCancelled {
+                    // "Pawvis stop" braked this round: the executor's
+                    // cancellation checks kept it honest (a stopped
+                    // navigation reports "Stopped", it never presses on),
+                    // so record a stop — no outcome cue for an ending the
+                    // user caused — and never let a cancellation-shaped
+                    // failure cascade into the free-form rescue below.
+                    self.noteStopped()
+                    self.flashNotice("Stopped")
+                    return
+                }
                 // The grammar can mis-slice a garbled utterance ("open up
                 // safari please" → app "up safari please"). When an app
                 // command fails to resolve, hand the whole phrase back to
