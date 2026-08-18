@@ -34,6 +34,12 @@ struct PawvisApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+
+        Window("Welcome to Pawvis", id: WelcomeWindow.id) {
+            WelcomeView(controller: appDelegate.controller)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 
 }
@@ -75,6 +81,7 @@ private struct MenuBarIcon: View {
             SettingsWindow.opener = openSettings
             GuideWindow.opener = openWindow
             TrainerWindow.opener = openWindow
+            WelcomeWindow.opener = openWindow
         }
     }
 }
@@ -139,7 +146,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // item registered on the machine that ran them.
         let automated = ProcessInfo.processInfo.environment["PAWVIS_NO_AUTOSTART"] != nil
 
-        if controller.settingsStore.settings.general.startTrackingOnLaunch, !automated {
+        // First run: a genuinely new install gets the welcome window (opened
+        // below) instead of a cold camera dialog, and auto-start waits for
+        // the tour's own Start button. An install that already granted the
+        // camera predates onboarding — record completion and launch exactly
+        // as every build before the tour did. The rules are pure and tested
+        // (FirstRunPolicy); automated runs stay headless and leave the flag
+        // untouched, so a smoke test on a fresh machine can't suppress a
+        // later real onboarding.
+        let firstRun = FirstRunPolicy.verdict(
+            completed: FirstRun.completed,
+            cameraGranted: Permissions.camera() == .granted,
+            automated: automated)
+        if firstRun == .adoptCompleted {
+            FirstRun.markCompleted()
+        }
+
+        if controller.settingsStore.settings.general.startTrackingOnLaunch, !automated,
+           firstRun != .showWelcome {
             controller.startTracking()
         }
 
@@ -187,6 +211,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if ProcessInfo.processInfo.environment["PAWVIS_OPEN_TRAINER"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 TrainerWindow.show()
+            }
+        }
+
+        // The welcome tour: automatic for a genuinely new install (decided
+        // above), and on demand via PAWVIS_OPEN_WELCOME=1 — the same eyes-on
+        // hook as PAWVIS_OPEN_GUIDE, and the way to look at the tour again
+        // without wiping the first-run flag.
+        if firstRun == .showWelcome
+            || ProcessInfo.processInfo.environment["PAWVIS_OPEN_WELCOME"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WelcomeWindow.show()
             }
         }
 

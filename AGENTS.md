@@ -23,6 +23,11 @@ Extras:
   eyes-on hook as `PAWVIS_OPEN_SETTINGS` below. Its posed-hand art is
   bundle-only, so a bare `swift run` shows the SF Symbol fallbacks instead:
   look at the guide from `build/Pawvis.app`, not from the binary.
+- `PAWVIS_OPEN_WELCOME=1` — open the first-run welcome window at launch
+  regardless of the `Pawvis.firstRunCompleted` flag. A genuinely new install
+  (flag unset, camera not yet granted) gets it automatically instead of
+  auto-starting tracking; `PAWVIS_NO_AUTOSTART=1` suppresses that and leaves
+  the flag untouched, so automated runs stay headless.
 - `Pawvis --gesture-eval <video…> [--verbose]` — run the real Vision +
   engine pipeline over a webcam recording and print every custom gesture
   that fires (plus per-frame openness/splay/palm diagnostics with
