@@ -4,7 +4,7 @@
   <img src="icon.png" alt="Pawvis" width="200">
 </p>
 
-<p align="center"><em>macOS touch-free hand control</em></p>
+<p align="center"><em>Touch-free hand control for your Mac</em></p>
 
 ---
 
@@ -245,7 +245,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # the full unit suite, keep it green
 swift build         # debug build
 ```
 
