@@ -390,24 +390,45 @@ none of this:
   hardware always carries it. `TextTyper.press` adds the flag for fn-block
   keycodes and posts the modifiers as their own paced key events around the
   main key. F11 alone did nothing; F11+fn showed the desktop.
-- **Spaces switching refuses ALL synthetic input.** Every recipe was tried:
+- **Spaces switching refuses ALL synthetic input — and SkyLight's setter
+  is a phantom from outside Dock.** Every input recipe was tried:
   flags-only, real modifier events, flagsChanged-typed modifiers, fn/numpad
   flag combinations, held modifiers, System Events, posting to the Dock's
   pid, clicking Mission Control's spaces-bar thumbnails (whose AX frames are
   correct, whose window thumbnails DO respond to synthetic clicks, and whose
   AXPress is inert). Spotlight and Mission Control fire from the same
-  recipes that Spaces ignores. The one thing that switches a space is
-  SkyLight's own `SLSManagedDisplaySetCurrentSpace` — private API, resolved
-  at runtime with dlsym in `SpaceSwitcher`, used for exactly this one
-  feature, every switch verified against `SLSGetActiveSpace`, and reporting
+  recipes that Spaces ignores. `SLSManagedDisplaySetCurrentSpace` looked
+  like the answer and shipped as one — wrongly: called from a normal
+  process it updates the window server's *bookkeeping*, so
+  `SLSGetActiveSpace` reports the new space, but the screen never moves;
+  the visible switch also needs state private to Dock (yabai injects code
+  into Dock to make that very call). Verifying the switch against
+  `SLSGetActiveSpace` was an echo chamber — it read our own phantom write
+  back, and `--action-eval` "passed" while no screen anywhere changed. The
+  lesson for evals generally: verify against something the write path
+  cannot touch — here, that meant human eyes on the screen at least once.
+  What actually switches, SIP on, no injection, is the WindowServer's own
+  gesture pipeline: a synthesized Dock-swipe CGEvent (undocumented gesture
+  fields; one Began/Ended phase pair per ring step; the technique
+  BetterTouchTool ships and yabai falls back to without its scripting
+  addition), measured live — the screen moves. The swipe lands on the
+  display under the pointer (the WindowServer's routing rule for space
+  gestures), so ring, step count, and verification are all computed for
+  that display — matched by UUID (`pointerDisplay`, selftest-covered),
+  with a refusal rather than a guess when the match fails. SkyLight
+  remains, read-only, in `SpaceSwitcher`: each display's ring and current
+  space via dlsym, reporting
   honestly ("Desktop switching isn't available on this macOS") if a future
-  macOS removes the symbols. Nothing else may grow a SkyLight dependency
-  casually. The ring `SLSCopyManagedDisplaySpaces` returns mixes user
-  desktops (type 0) with full-screen app spaces (type 4);
-  `neighborDesktop` steps across the full-screen ones — landing on
+  macOS removes the symbols; the read-back verification is meaningful again
+  precisely because nothing writes it anymore. Nothing else may grow a
+  SkyLight dependency casually. The ring `SLSCopyManagedDisplaySpaces`
+  returns mixes user desktops (type 0) with full-screen app spaces (type
+  4); `neighborDesktop` steps across the full-screen ones — landing on
   someone's full-screen window reads as window shuffling, not desktop
   switching (measured: the reported symptom) — and exits *from* a
-  full-screen space to the nearest desktop on that side.
+  full-screen space to the nearest desktop on that side. The swipe walks
+  every ring entry, so a skipped full-screen space costs an extra swipe
+  step (`swipeSteps`, selftest-covered).
 - **Window placement is AX geometry** (`WindowPlacer` applying
   `WindowPlacement`'s unit-tested rect math), the same Accessibility
   permission the mouse already needs. Fire-and-forget actions (the desktop

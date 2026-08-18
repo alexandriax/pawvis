@@ -6,7 +6,9 @@ import Foundation
 /// dumb; the categories below exist only to group the picker's menu.
 public struct GestureAction: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, CaseIterable, Sendable {
-        // Desktops & Mission Control — posted as the stock macOS shortcuts.
+        // Desktops & Mission Control — Mission Control's own as the stock
+        // shortcuts; the desktop switch as a synthesized Dock-swipe, the
+        // one thing Spaces answers to (see SpaceSwitcher).
         case desktopLeft, desktopRight, missionControl, appWindows, showDesktop
 
         // Window management — the focused window, moved and sized directly
@@ -79,8 +81,8 @@ public struct GestureAction: Codable, Equatable, Sendable {
     /// The chord this action presses, when it is a key action. Mission
     /// Control's own shortcuts and the near-universal app conventions. nil
     /// for everything performed another way — including the desktop switch,
-    /// which macOS refuses to perform for synthetic ⌃←/⌃→ (the app drives
-    /// Mission Control's spaces bar instead; see `SpaceSwitcher`).
+    /// which macOS refuses to perform for synthetic ⌃←/⌃→ (the app
+    /// synthesizes the trackpad's Dock-swipe instead; see `SpaceSwitcher`).
     public var keyChord: KeyChord? {
         switch kind {
         case .missionControl: return KeyChord(key: "up", modifiers: [.control])

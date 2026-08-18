@@ -253,6 +253,33 @@ func runSelfTest() -> Int32 {
           SpaceSwitcher.neighborDesktop(in: ring, active: 41, direction: .left) == 2)
     check("spaces.edgeReportsNoNeighbor",
           SpaceSwitcher.neighborDesktop(in: ring, active: 1, direction: .left) == nil)
+    // The Dock-swipe walks every ring entry, so a skipped full-screen
+    // space costs an extra swipe step; exiting a full-screen space to the
+    // adjacent desktop is a single step.
+    check("spaces.swipeCrossesFullscreenInTwoSteps",
+          SpaceSwitcher.swipeSteps(in: ring, from: 1, to: 2) == 2)
+    check("spaces.swipeExitsFullscreenInOneStep",
+          SpaceSwitcher.swipeSteps(in: ring, from: 41, to: 2) == 1)
+    check("spaces.swipeStepsNilOffRing",
+          SpaceSwitcher.swipeSteps(in: ring, from: 99, to: 2) == nil)
+    // The swipe lands on the display under the pointer, so that display is
+    // the one whose ring gets walked — matched by UUID, with nothing to
+    // choose in the single-display (or spanning "Main") arrangement, and a
+    // refusal rather than a guess when the match fails.
+    let uuidA = "AAAAAAAA-0000-0000-0000-000000000000"
+    let twoDisplays: [SpaceSwitcher.DisplayRing] = [
+        .init(identifier: uuidA, current: 1, spaces: ring),
+        .init(identifier: "BBBBBBBB-0000-0000-0000-000000000000", current: 7,
+              spaces: [.init(id: 7, isDesktop: true), .init(id: 8, isDesktop: true)]),
+    ]
+    check("spaces.singleDisplayNeedsNoPointerMatch",
+          SpaceSwitcher.pointerDisplay(
+              in: [.init(identifier: "Main", current: 1, spaces: ring)],
+              pointerUUID: nil)?.identifier == "Main")
+    check("spaces.pointerPicksItsDisplay",
+          SpaceSwitcher.pointerDisplay(in: twoDisplays, pointerUUID: uuidA)?.current == 1)
+    check("spaces.unmatchedPointerRefuses",
+          SpaceSwitcher.pointerDisplay(in: twoDisplays, pointerUUID: "CCCC") == nil)
 
     // Menu chips stay readable in both appearances. These sit on translucent
     // menu material where a too-light fill has washed out before, so the
