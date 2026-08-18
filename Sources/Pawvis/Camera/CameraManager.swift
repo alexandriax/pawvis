@@ -155,4 +155,18 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     ) {
         onFrame?(sampleBuffer)
     }
+
+    /// A live preview layer on the running session, for the trainer window.
+    /// Unmirrored and aspect-fit — the trainer flips its whole preview
+    /// stack (video and landmark dots together) into mirror view, so the
+    /// two can never disagree about handedness.
+    func makePreviewLayer() -> AVCaptureVideoPreviewLayer {
+        let layer = AVCaptureVideoPreviewLayer(session: session)
+        layer.videoGravity = .resizeAspect
+        if let connection = layer.connection {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = false
+        }
+        return layer
+    }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Combine
 import Foundation
 import PawvisCore
@@ -148,6 +149,69 @@ final class PawvisController: ObservableObject {
         trackingActive ? stopTracking() : startTracking()
     }
 
+    // MARK: - Gesture training
+
+    /// While the trainer window is open, camera frames bypass the engine
+    /// entirely — no cursor, no clicks, no gesture fires. Training must not
+    /// fight the very motions it is recording.
+    @Published private(set) var trainingActive = false
+    /// The trainer's frame feed, called on the main actor with camera-space
+    /// hands and the frame timestamp.
+    var trainingFrameTap: (([Hand], TimeInterval) -> Void)?
+    private var trainingHadTracking = false
+
+    func beginTraining() {
+        guard !trainingActive else { return }
+        trainingHadTracking = trackingActive
+        trainingActive = true
+        if trackingActive {
+            // Let go of anything in flight and hide the overlay; the camera
+            // keeps running, now feeding only the trainer.
+            mouse.apply(engine.forceRelease(at: CACurrentMediaTime()))
+            mouse.releaseAllButtons()
+            engine.reset()
+            overlay.hide()
+        } else {
+            // Camera only — same permission flow as tracking, no overlay,
+            // no engine.
+            switch Permissions.camera() {
+            case .granted:
+                camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
+            case .notDetermined:
+                Task { [weak self] in
+                    let granted = await Permissions.requestCamera()
+                    guard let self else { return }
+                    self.cameraPermission = Permissions.camera()
+                    if granted, self.trainingActive {
+                        self.camera.start(deviceID: self.settingsStore.settings.general.cameraDeviceID)
+                    }
+                }
+            case .denied:
+                cameraPermission = .denied
+                lastError = "Camera access denied — enable it in System Settings → Privacy"
+            }
+        }
+        Log.app.info("Gesture training started (tracking was \(self.trainingHadTracking))")
+    }
+
+    func endTraining() {
+        guard trainingActive else { return }
+        trainingActive = false
+        trainingFrameTap = nil
+        if trainingHadTracking {
+            engine.reset() // a fresh start, not the pre-training leftovers
+            overlay.show()
+        } else {
+            camera.stop()
+        }
+        Log.app.info("Gesture training ended")
+    }
+
+    /// The trainer window's camera view attaches here.
+    func makeTrainingPreviewLayer() -> AVCaptureVideoPreviewLayer {
+        camera.makePreviewLayer()
+    }
+
     /// Called when the app is quitting: never leave a button stuck down.
     func shutdown() {
         stopTracking()
@@ -162,6 +226,12 @@ final class PawvisController: ObservableObject {
     // MARK: - Frame pipeline
 
     private func processFrame(hands: [Hand], at time: TimeInterval) {
+        if trainingActive {
+            // The trainer owns the stream; nothing reaches the engine or
+            // the mouse while its window is open.
+            trainingFrameTap?(hands, time)
+            return
+        }
         guard trackingActive else { return }
         var (events, overlayState) = engine.process(HandFrame(time: time, hands: hands))
 
@@ -171,8 +241,16 @@ final class PawvisController: ObservableObject {
             if case .customGesture(let gesture) = event {
                 performCustomGesture(gesture, at: time)
             }
+            if case .trainedGesture(let id) = event {
+                performTrainedGesture(id, at: time)
+            }
         }
-        events.removeAll { if case .customGesture = $0 { return true } else { return false } }
+        events.removeAll {
+            switch $0 {
+            case .customGesture, .trainedGesture: return true
+            default: return false
+            }
+        }
 
         // A hold pose mid-dwell paints a live countdown into the pill: a
         // pose you must hold for a beat is invisible until it fires, and
@@ -223,6 +301,16 @@ final class PawvisController: ObservableObject {
         gestureNotice = (text: "🐾 \(feedback)", until: time + Self.gestureNoticeSeconds)
     }
 
+    private func performTrainedGesture(_ id: UUID, at time: TimeInterval) {
+        guard settingsStore.settings.customGestures.enabled,
+              let gesture = settingsStore.settings.trainedGestures.gesture(withID: id),
+              let action = gesture.action else { return }
+        let feedback = actionRunner.perform(action)
+        Log.app.info("Trained gesture \(gesture.name, privacy: .public): \(feedback)")
+        gestureNotice = (text: "🐾 \(gesture.name): \(feedback)",
+                         until: time + Self.gestureNoticeSeconds)
+    }
+
     /// Voice control owns the pill; a fired gesture borrows it only while
     /// voice has nothing to say.
     private func hudLine(at time: TimeInterval) -> VoiceHUD {
@@ -265,6 +353,9 @@ final class PawvisController: ObservableObject {
     private func apply(settings: PawvisSettings) {
         engine.config = settings.gestures
         engine.customConfig = settings.customGestures.detectorConfig()
+        // Trained gestures share the custom library's master switch.
+        engine.trainedConfig = settings.trainedGestures.detectorConfig(
+            enabled: settings.customGestures.enabled)
         overlay.setConfig(settings.overlay)
         voice.setConfig(settings.voiceControl)
         voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture

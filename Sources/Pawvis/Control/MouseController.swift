@@ -60,7 +60,7 @@ final class MouseController {
                      clickCount: clickCount)
             case .scroll(let deltaY):
                 postScroll(deltaY)
-            case .disableTracking, .customGesture:
+            case .disableTracking, .customGesture, .trainedGesture:
                 // Not mouse events — PawvisController intercepts them before
                 // apply. One that slips through is a no-op.
                 break

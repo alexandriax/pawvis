@@ -14,6 +14,19 @@ enum PawvisTheme {
 
     static let purpleUI = Color(nsColor: purple)
 
+    /// One color per finger — thumb, index, middle, ring, little — for the
+    /// trainer's live landmark dots and the trained-gesture badge. Thumb and
+    /// index keep the overlay's own pair; the rest extend the palette with
+    /// the same Tailwind 300-weight family so the set reads as one system.
+    static let fingerDots: [NSColor] = [
+        blueLight,                 // thumb — sky-300, as on the overlay
+        purpleLight,               // index — violet-300, as on the overlay
+        NSColor(hex: 0xF0ABFC),    // middle — fuchsia-300
+        NSColor(hex: 0x6EE7B7),    // ring — emerald-300
+        NSColor(hex: 0xFCD34D),    // little — amber-300
+    ]
+    static var fingerDotsUI: [Color] { fingerDots.map(Color.init(nsColor:)) }
+
     /// Menu accent, on save.page's own wordmark pair: violet-500 in light
     /// mode, violet-300 in dark. Violet-500 is only ~3.4:1 on the dark menu
     /// material, which is why the claw all but disappeared there; violet-300
