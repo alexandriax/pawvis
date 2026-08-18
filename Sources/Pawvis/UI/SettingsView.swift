@@ -446,7 +446,7 @@ private enum AgentRiskCopy {
         """
         \(tool.displayName) is launched with its own permission prompts turned off, so nothing pauses to confirm anything. It carries out what it was handed, as you, with your files, your logged-in sessions and your credentials: deleting or rewriting files, installing software, running shell commands, opening apps, sending things on your behalf.
 
-        Everything you say after “\(wake)” is sent to it, and speech recognition is not perfect, so a misheard command is still executed. This is also the only mode that sends what you say beyond this Mac. Only “\(wake), stop listening” stays local.
+        Everything you say after “\(wake)” is sent to it, and speech recognition is not perfect, so a misheard command is still executed. This is also the only mode that sends what you say beyond this Mac. Only “\(wake), stop listening” stays local. By default Pawvis reads each command back on screen and sends it only after you say “\(wake) yes”; switch that confirmation off in Settings → Voice and commands go the moment they are heard.
 
         Stay on Apple Intelligence (on-device) if you want a handler that can only do what Pawvis itself can do.
 
@@ -602,6 +602,11 @@ private struct VoiceControlSettingsTab: View {
                     }
                 }
 
+                SettingToggle(
+                    title: "Confirm before sending to the agent",
+                    caption: "The command is read back in the top-of-screen capsule and sent only after you say “\(wake) yes” (“\(wake) no” cancels, and so do ten seconds of silence). Off: everything after the wake word goes to \(tool.displayName) the moment it is heard.",
+                    isOn: $store.settings.voiceControl.agentConfirm)
+
                 LabeledSlider(
                     label: "Agent timeout",
                     caption: "Give up on a background run after \(Int(store.settings.voiceControl.agentTimeoutSeconds)) s.",
@@ -725,6 +730,10 @@ private struct AgentSessionsSection: View {
                             .fill(Color(nsColor: .quaternarySystemFill)))
                 }
             }
+
+            Button("Open agent log") { AgentAuditLog.shared.revealInFinder() }
+                .controlSize(.small)
+            CaptionText("Every hand-off is written to a local log only you can read: when, which agent, the exact instruction sent, and how the run ended.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

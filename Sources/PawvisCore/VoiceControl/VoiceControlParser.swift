@@ -115,6 +115,88 @@ public final class VoiceControlParser {
         return VoiceParseResult(command: .resolve(transcript: cleaned))
     }
 
+    // MARK: - Agent confirmation
+
+    /// How an utterance answers a pending agent hand-off read-back.
+    public enum ConfirmResponse: Equatable, Sendable {
+        case confirm
+        case deny
+    }
+
+    /// Deterministic classification of a wake-stripped utterance while an
+    /// agent hand-off is waiting for confirmation. Only the pending-
+    /// confirmation state machine consults this, which is what keeps "yes"
+    /// spoken outside that state an ordinary free-form utterance: the
+    /// regular grammar never produces these responses, and this entry never
+    /// runs the regular grammar. Returns nil when the utterance is neither a
+    /// confirmation nor a denial — the caller treats it as a new command.
+    ///
+    /// Matching is exact-phrase over normalized tokens, tolerant of the same
+    /// politeness padding as the stop phrases ("yes please", "okay send it"),
+    /// plus a leading yes/no glued to another phrase of the same family
+    /// ("yes, do it", "no, cancel that"). Anything looser would let ordinary
+    /// speech answer a question it never heard.
+    public func confirmResponse(_ remainder: String) -> ConfirmResponse? {
+        let tokens = Self.normalize(remainder).split(separator: " ").map(String.init)
+        guard !tokens.isEmpty else { return nil }
+        if let response = Self.confirmMatch(tokens.joined(separator: " ")) {
+            return response
+        }
+        // Politeness padding never changes an answer's meaning ("yes
+        // please", "please cancel", "ok go ahead") — same rule as the stop
+        // phrases. Stripping can leave nothing ("please"), which is no
+        // answer at all.
+        let depolited = tokens.filter { !Self.politenessTokens.contains($0) }
+        guard !depolited.isEmpty else { return nil }
+        if let response = Self.confirmMatch(depolited.joined(separator: " ")) {
+            return response
+        }
+        // "yes, send it" / "no, cancel that": a leading yes/no plus a phrase
+        // from the SAME family is still that answer. Mixed families ("yes
+        // cancel") stay nil — a contradiction is not an answer.
+        if depolited.count >= 2 {
+            let rest = depolited.dropFirst().joined(separator: " ")
+            if Self.confirmLeads.contains(depolited[0]),
+               Self.confirmMatch(rest) == .confirm {
+                return .confirm
+            }
+            if Self.denyLeads.contains(depolited[0]),
+               Self.confirmMatch(rest) == .deny {
+                return .deny
+            }
+        }
+        return nil
+    }
+
+    private static func confirmMatch(_ phrase: String) -> ConfirmResponse? {
+        if confirmPhrases.contains(phrase) { return .confirm }
+        if denyPhrases.contains(phrase) { return .deny }
+        return nil
+    }
+
+    /// Whole-utterance phrases that send a pending agent command. "ok" and
+    /// "okay" belong here even though they double as politeness padding: as
+    /// the entire answer to "send it?", they mean yes.
+    private static let confirmPhrases: Set<String> = [
+        "yes", "yeah", "yep", "yup", "sure", "ok", "okay",
+        "confirm", "confirmed", "proceed", "affirmative",
+        "go ahead", "go for it", "do it", "send", "send it",
+    ]
+
+    /// Whole-utterance phrases that cancel a pending agent command. The
+    /// stop/cancel family is deliberately included: "stop" while a read-back
+    /// waits must cancel the send, never fall through to the general brake.
+    private static let denyPhrases: Set<String> = [
+        "no", "nope", "nah", "negative",
+        "cancel", "cancel that", "cancel it",
+        "stop", "stop it", "never mind", "nevermind",
+        "dont", "do not", "dont send", "dont send it", "dont do it",
+        "no thanks", "no thank you",
+    ]
+
+    private static let confirmLeads: Set<String> = ["yes", "yeah", "yep", "yup", "sure"]
+    private static let denyLeads: Set<String> = ["no", "nope", "nah"]
+
     // MARK: - Clause sequences
 
     /// Splits a multi-clause utterance at standalone "and"/"then" tokens and

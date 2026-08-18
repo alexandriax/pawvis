@@ -292,6 +292,8 @@
         with computer use, running headless in the background.
       </p>
       <ul class="agent-points">
+        <li>By default the command is read back on screen first and sent only after you say <span class="mono say">&ldquo;Pawvis, yes&rdquo;</span>; &ldquo;no&rdquo;, silence, or a newer command cancels it.</li>
+        <li>Runs go one at a time, and every hand-off lands in a local log only you can read, instruction and outcome both.</li>
         <li>A panel streams the agent's output live while it works, with a <strong>Cancel</strong> button.</li>
         <li>Running sessions stay listed, and cancellable, under Settings&nbsp;→&nbsp;Voice.</li>
         <li>The outcome, success or failure, always flashes in the on-screen capsule.</li>
@@ -307,8 +309,9 @@
         not perfect, and a misheard command is still executed. This is also the
         one mode that sends what you say beyond your Mac. It ships off by
         default, and Pawvis makes you accept a warning dialog before it will
-        turn on. If you want a confirmation step before actions run, stay on
-        the on-device handler. Turning it on is your call and your
+        turn on. The spoken read-back is the one check standing in front of a
+        send, you can switch it off, and once a command is sent nothing asks
+        again. Turning it on is your call and your
         responsibility: no liability is accepted for what an agent does with
         your machine, however it was asked.
       </p>

@@ -640,6 +640,68 @@ final class VoiceControlParserTests: XCTestCase {
         XCTAssertFalse(transcript.lowercased().contains("pawvis"))
     }
 
+    // MARK: - Agent confirm phrases
+
+    func testConfirmPhrasesConfirm() {
+        for phrase in ["yes", "Yes.", "yeah", "yep", "yup", "sure", "okay", "ok",
+                       "go ahead", "go for it", "do it", "send it", "send",
+                       "confirm", "confirmed", "proceed", "affirmative"] {
+            XCTAssertEqual(parser.confirmResponse(phrase), .confirm,
+                           "'\(phrase)' must confirm")
+        }
+    }
+
+    func testDenyPhrasesDeny() {
+        for phrase in ["no", "No.", "nope", "nah", "negative", "cancel",
+                       "cancel that", "cancel it", "never mind", "nevermind",
+                       "stop", "stop it", "don't", "do not", "don't send it",
+                       "no thanks", "no thank you"] {
+            XCTAssertEqual(parser.confirmResponse(phrase), .deny,
+                           "'\(phrase)' must deny")
+        }
+    }
+
+    func testConfirmAnswersTogglePoliteness() {
+        // The same politeness padding the stop phrases tolerate.
+        XCTAssertEqual(parser.confirmResponse("yes please"), .confirm)
+        XCTAssertEqual(parser.confirmResponse("okay, send it"), .confirm)
+        XCTAssertEqual(parser.confirmResponse("please cancel"), .deny)
+        XCTAssertEqual(parser.confirmResponse("no, stop now"), .deny)
+        // A leading yes/no glued to a same-family phrase still answers.
+        XCTAssertEqual(parser.confirmResponse("yes, do it"), .confirm)
+        XCTAssertEqual(parser.confirmResponse("yeah go ahead"), .confirm)
+        XCTAssertEqual(parser.confirmResponse("no, cancel that"), .deny)
+    }
+
+    func testCommandsAreNotConfirmAnswers() {
+        // A real command while a read-back waits is a NEW command (the
+        // controller replaces the pending one) — never a yes or a no.
+        for phrase in ["open safari", "go to github dot com", "type yes",
+                       "click", "make it bigger", "stop listening",
+                       "go ahead and open safari", "yes open safari",
+                       "please", "", "   "] {
+            XCTAssertNil(parser.confirmResponse(phrase),
+                         "'\(phrase)' must not read as an answer")
+        }
+        // A contradiction is not an answer either.
+        XCTAssertNil(parser.confirmResponse("yes cancel"))
+    }
+
+    func testConfirmPhrasesAreNotGeneralCommands() {
+        // Outside a pending read-back the same words are ordinary speech:
+        // yes/no fall through to free-form resolve, and nothing new fires.
+        XCTAssertEqual(parse("Pawvis yes").command, .resolve(transcript: "yes"))
+        XCTAssertEqual(parse("Pawvis go ahead").command,
+                       .resolve(transcript: "go ahead"))
+        XCTAssertEqual(parse("Pawvis send it").command,
+                       .resolve(transcript: "send it"))
+        XCTAssertEqual(parse("Pawvis no").command, .resolve(transcript: "no"))
+        // The stop/cancel family keeps its existing general meanings.
+        XCTAssertEqual(parse("Pawvis stop").command, .cancelActivity)
+        XCTAssertEqual(parse("Pawvis cancel that").command, .cancelActivity)
+        XCTAssertEqual(parse("Pawvis stop listening").command, .stopVoiceControl)
+    }
+
     // MARK: - Statelessness
 
     func testCommandsDoNotAffectLaterUtterances() {

@@ -183,6 +183,15 @@ always shut it off instantly. Pausing after the wake word is fine: a bare
 mangles the wake word ("Paw this…"), the on-device model confirms it was
 meant for Pawvis and recovers the command before the hand-off.
 
+By default the hand-off **confirms first**: the command is read back in the
+capsule ("Send to Claude Code: …?") and sent only after you say "Pawvis
+yes". "Pawvis no" cancels it, ten seconds of silence cancels it, and a new
+command replaces it; the read-back can be switched off in **Settings →
+Voice**. Agent runs also go **one at a time** (a second command while one is
+running is refused with a notice, not queued behind your back), and every
+hand-off is recorded with its outcome in a **local log** only your account
+can read (**Settings → Voice → Open agent log**).
+
 > [!WARNING]
 > **The agent relays are the sharpest thing in Pawvis. They do not ask.**
 > Claude Code and Codex are launched with their own permission prompts turned
@@ -195,8 +204,9 @@ meant for Pawvis and recovers the command before the hand-off.
 > recognition is not perfect, and a misheard command is still executed. It is
 > also the one mode that sends what you say beyond your Mac, to the agent CLI
 > you picked. It is off by default, and Pawvis makes you accept this warning
-> in a dialog before it will turn on. If you want a confirmation step before
-> actions run, stay on the on-device handler. Turning it on is your call and
+> in a dialog before it will turn on. The spoken read-back above is the one
+> check standing in front of a send, it can be switched off, and once a
+> command is sent nothing asks again. Turning it on is your call and
 > your responsibility: no liability is accepted for what an agent does with
 > your machine, however it was asked.
 
@@ -305,6 +315,9 @@ and tracking-loss recovery are covered by unit tests rather than by hand.
   leaves your Mac: enable it and everything you say after the wake word is
   sent to the agent CLI you chose (Claude Code or Codex) and runs there with
   permission checks bypassed. "Pawvis, stop listening" always stays local.
+  Each hand-off and its outcome is also recorded in a local audit log
+  (`~/Library/Application Support/Pawvis/agent-log.jsonl`, readable only by
+  your account), so you can always see exactly what was sent.
 
 ## License
 

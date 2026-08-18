@@ -96,6 +96,9 @@ final class AgentSessionManager: ObservableObject {
         runs[run.id] = run
         sessions.append(AgentSessionSnapshot(
             id: run.id, tool: tool, instruction: instruction, startedAt: Date()))
+        // The hand-off is happening: this is the moment the instruction
+        // leaves the Mac, so it is the moment the audit log records it.
+        AgentAuditLog.shared.recordSent(id: run.id, tool: tool, instruction: instruction)
 
         let process = run.process
         process.executableURL = URL(fileURLWithPath: binary)
@@ -131,6 +134,9 @@ final class AgentSessionManager: ObservableObject {
         } catch {
             Log.voice.error("Agent launch failed (\(tool.rawValue, privacy: .public)): \(error.localizedDescription, privacy: .public)")
             clear(runId, outcome: nil)
+            AgentAuditLog.shared.recordOutcome(
+                id: runId, tool: tool, success: false,
+                outcome: "Couldn't launch \(tool.displayName)")
             return .failed("Couldn't launch \(tool.displayName)")
         }
         Log.voice.log("Agent run started: \(tool.rawValue, privacy: .public) pid \(process.processIdentifier) timeout \(run.timeoutSeconds)s")
@@ -303,6 +309,14 @@ final class AgentSessionManager: ObservableObject {
         run.killItem?.cancel()
 
         if let outcome {
+            switch outcome {
+            case .done(let notice):
+                AgentAuditLog.shared.recordOutcome(
+                    id: runId, tool: run.tool, success: true, outcome: notice ?? "Done")
+            case .failed(let message):
+                AgentAuditLog.shared.recordOutcome(
+                    id: runId, tool: run.tool, success: false, outcome: message)
+            }
             update(runId) { snapshot in
                 switch outcome {
                 case .done(let notice):

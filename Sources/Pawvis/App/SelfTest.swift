@@ -185,6 +185,18 @@ func runSelfTest() -> Int32 {
     check("voice.fillerBeforeWakeStillWakes",
           parser.parse("Um, Pawvis, open Safari").command == .open(app: "Safari"))
 
+    // Agent confirm answers live in their own parse entry: "yes" answers a
+    // pending read-back and is never a general command, stop still denies,
+    // and a real command is a replacement, not an answer. The read-back
+    // itself defaults ON.
+    check("voice.confirmYesAnswersOnlyTheReadBack",
+          parser.confirmResponse("yes") == .confirm
+          && parser.parse("Pawvis yes").command == .resolve(transcript: "yes"))
+    check("voice.confirmStopDenies", parser.confirmResponse("please stop") == .deny)
+    check("voice.confirmCommandIsNotAnAnswer",
+          parser.confirmResponse("open safari") == nil)
+    check("voice.agentConfirmDefaultsOn", VoiceControlConfig().agentConfirm)
+
     // Voice routing: the simple-operations class must resolve in the
     // deterministic grammar and NEVER reach the GUI loop. This table is the
     // completion criterion for "open discord dot com in Chrome"-class
