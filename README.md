@@ -30,6 +30,8 @@ your Mac; the one exception is the opt-in agent hand-off below.
   <sub>Signed and notarized · macOS 14+ · unzip and drag to Applications</sub>
 </p>
 
+[![Watch the Pawvis demo](docs/assets/demo-poster.jpg)](https://pawvis.app/#demoVideo)
+
 > [!IMPORTANT]
 > **Pawvis really does control your Mac.** It moves the cursor and posts real
 > clicks, drags and scrolls, so an accidental finger dip is an accidental
@@ -101,30 +103,19 @@ Mouse**.
   virtual desktops, open Mission Control or App Exposé, show the desktop,
   snap the focused window (halves, thirds, two-thirds, quarters, center,
   maximize, minimize, next display), press Return or Escape, go back or
-<<<<<<< HEAD
-  forward, switch tabs, play/pause, stop tracking, toggle voice control,
-  open any app, press any keyboard shortcut, or run a shell command you
-  provide (it runs exactly as typed, as you). Every gesture row carries its
-  own collapsed **Tuning** section (hold time, wiggle vigor, grab tightness,
-  fling distance), so a gesture that won't trigger, or triggers too easily,
-  can be dialed in on the spot. Every binding can also carry **per-app
-  actions**: add apps to a gesture's row and give each its own action, and
-  whichever app is frontmost when the gesture fires decides which action
-  runs (a thumbs up can advance slides in Keynote and press your merge
-  shortcut in the browser). Leave the main action unassigned and the
-  gesture fires only in the apps you listed. The pill at the top of the
-  screen confirms every fire, and the Gesture Guide illustrates every
-  gesture in full, with what it is currently set to do.
-=======
   forward, switch tabs, play/pause, adjust volume or brightness, stop
   tracking, toggle voice control, open any app, press any keyboard shortcut,
   or run a shell command you provide (it runs exactly as typed, as you).
   Every gesture row carries its own collapsed **Tuning** section (hold time,
   wiggle vigor, grab tightness, fling distance), so a gesture that won't
-  trigger, or triggers too easily, can be dialed in on the spot. The pill at
-  the top of the screen confirms every fire, and the Gesture Guide
+  trigger, or triggers too easily, can be dialed in on the spot. Every
+  binding can also carry **per-app actions**: add apps to a gesture's row
+  and give each its own action, and whichever app is frontmost when the
+  gesture fires decides which action runs (a thumbs up can advance slides
+  in Keynote and press your merge shortcut in the browser). Leave the main
+  action unassigned and the gesture fires only in the apps you listed. The
+  pill at the top of the screen confirms every fire, and the Gesture Guide
   illustrates every gesture in full, with what it is currently set to do.
->>>>>>> origin/main
 - **Train your own gestures**: **Settings → Gestures → Train New Gesture**
   opens a camera window with your hand's tracking drawn live, a color per
   fingertip and a ring on the palm. Pick one hand or two, perform your

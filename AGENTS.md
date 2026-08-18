@@ -682,6 +682,20 @@ see. Its constraints, each of which broke something real:
   plain Swift, model-free, and unit-tested; the app layer
   (`Sources/Pawvis/VoiceControl`) only owns the FoundationModels sessions and
   the side effects: opening apps, posting keys, driving the screen.
+- **The Settings → Voice activity pane is memory-only, and gate-failed
+  speech is counted, never quoted.** `VoiceActivityLog` (app layer) records
+  the pipeline's decisions — wake verdicts with their tier, parsed commands,
+  routing, steps, outcomes with dispatch → outcome latency — capped at 200
+  entries and never written to disk, because voice transcripts are
+  sensitive. An utterance that failed the wake gate appears only as the
+  aggregate ignored counter; its words must never reach an entry
+  (rescue-*refused* finals included — only an AI-*confirmed* rescue has
+  passed the gate and may be quoted). Quoting accepted transcripts is what
+  makes the pane's Copy → `--wake-eval` replay workflow real; keep both
+  halves. The optional audible cues (`voiceControl.audibleCues`, off by
+  default) are NSSound system sounds played from the same dispatch/outcome
+  taps: Tink on accept and on success, Bottle on failure — conventional
+  picks, since a headless build can't listen to itself.
 - **The browser-word list is vocabulary, not app resolution.** The static
   list in `VoiceControlParser` only recognizes that "Chrome" or "in Safari"
   names a browser; resolution stays in the executor (`AppCatalog`, in

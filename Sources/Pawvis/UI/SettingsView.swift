@@ -601,6 +601,11 @@ private struct VoiceControlSettingsTab: View {
                 .disabled(store.settings.voiceControl.transcriptOverlayManualDismiss)
             }
 
+            SettingToggle(
+                title: "Play a sound when a command is heard and when it finishes",
+                caption: "Two subtle system sounds: Tink acknowledges a command (when it is heard, and again when it succeeds), Bottle marks a failure. Off by default.",
+                isOn: $store.settings.voiceControl.audibleCues)
+
             Divider()
 
             SettingRow(
@@ -683,6 +688,10 @@ private struct VoiceControlSettingsTab: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 220)
             }
+
+            Divider()
+
+            VoiceActivitySection()
         }
         .onAppear { screenRecording = Permissions.screenRecording() }
         .alert(
@@ -730,6 +739,77 @@ private struct VoiceControlSettingsTab: View {
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
             })
+    }
+}
+
+/// The in-memory voice pipeline log: wake verdicts, parsed commands, routing,
+/// steps and outcomes, newest at the bottom like a terminal. Deliberately not
+/// part of the settings tree — it is diagnostic state, never persisted (voice
+/// transcripts are sensitive), and speech that failed the wake gate appears
+/// only as an aggregate count, never as words (see `VoiceActivityLog`).
+private struct VoiceActivitySection: View {
+    @ObservedObject private var log = VoiceActivityLog.shared
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                CaptionText("The last \(VoiceActivityLog.cap) voice events, kept in memory only: nothing is written to disk, and the list clears when Pawvis quits. Speech without the wake word is counted, never recorded. Copy puts the log on the clipboard for a bug report, and a quoted transcript can be pasted into Pawvis --wake-eval to debug a missed wake.")
+
+                if log.ignoredCount > 0 {
+                    Text(log.ignoredSummary)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if log.entries.isEmpty {
+                    CaptionText("Nothing yet. Start voice control and speak a command; every pipeline decision lands here.")
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 3) {
+                            ForEach(log.entries) { entry in
+                                Text("\(VoiceActivityLog.timestamp.string(from: entry.time))  \(entry.kind.tag) \(entry.text)")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(color(for: entry.kind))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .defaultScrollAnchor(.bottom)
+                    .frame(height: 180)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .quaternarySystemFill)))
+                }
+
+                HStack(spacing: 10) {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(log.plainText, forType: .string)
+                    }
+                    Button("Clear") { log.clear() }
+                }
+                .disabled(log.entries.isEmpty && log.ignoredCount == 0)
+            }
+            .padding(.top, 6)
+        } label: {
+            Text("Recent activity")
+                .font(.callout)
+        }
+    }
+
+    private func color(for kind: VoiceActivityLog.Entry.Kind) -> Color {
+        switch kind {
+        case .failure: return .red
+        case .info: return .secondary
+        default: return .primary
+        }
     }
 }
 
