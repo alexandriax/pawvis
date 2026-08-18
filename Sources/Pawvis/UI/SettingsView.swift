@@ -242,7 +242,7 @@ private struct GeneralSettingsTab: View {
 
             SettingToggle(
                 title: "Show tracking diagnostics",
-                caption: "Live fps, pinch ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
+                caption: "Live fps, click-dip ratio, and fingertip confidence in the on-screen pill — useful when detection feels off.",
                 isOn: $store.settings.general.showDiagnostics)
         }
         .onAppear {
@@ -759,7 +759,7 @@ private struct AboutTab: View {
                     Image(systemName: "pawprint.fill").font(.system(size: 64))
                 }
                 Text("Pawvis").font(.title2.bold())
-                Text("macOS visual gesture & voice control")
+                Text("Touch-free hand control for your Mac")
                     .italic()
                     .foregroundStyle(.secondary)
                 Text("Version \(AppVersion.current)")
