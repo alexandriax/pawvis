@@ -26,6 +26,9 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
     public var transcriptOverlaySeconds: Double = 3.0
     /// Keep the capsule up until it's clicked instead of auto-hiding.
     public var transcriptOverlayManualDismiss: Bool = false
+    /// Play a short system sound when a command is accepted and another when
+    /// it finishes (success and failure sound different). Off by default.
+    public var audibleCues: Bool = false
     /// Hand free-form commands to an installed agent CLI instead of the
     /// on-device intent mapper: "" (off), "claude" (Claude Code), or
     /// "codex" (Codex CLI). The agent runs headless with permission checks
@@ -43,6 +46,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         case enabled, language, wakeWord, wakeWordAliases
         case visualContextEnabled, vadSilenceMs
         case transcriptOverlayEnabled, transcriptOverlaySeconds, transcriptOverlayManualDismiss
+        case audibleCues
         case agentExecutor, agentTimeoutSeconds
     }
 
@@ -61,6 +65,7 @@ public struct VoiceControlConfig: Codable, Equatable, Sendable {
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayEnabled) { transcriptOverlayEnabled = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .transcriptOverlaySeconds) { transcriptOverlaySeconds = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .transcriptOverlayManualDismiss) { transcriptOverlayManualDismiss = v }
+        if let v = try? c.decodeIfPresent(Bool.self, forKey: .audibleCues) { audibleCues = v }
         if let v = try? c.decodeIfPresent(String.self, forKey: .agentExecutor) { agentExecutor = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .agentTimeoutSeconds) { agentTimeoutSeconds = v }
     }

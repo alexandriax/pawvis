@@ -30,6 +30,8 @@ your Mac; the one exception is the opt-in agent hand-off below.
   <sub>Signed and notarized · macOS 14+ · unzip and drag to Applications</sub>
 </p>
 
+[![Watch the Pawvis demo](docs/assets/demo-poster.jpg)](https://pawvis.app/#demoVideo)
+
 > [!IMPORTANT]
 > **Pawvis really does control your Mac.** It moves the cursor and posts real
 > clicks, drags and scrolls, so an accidental finger dip is an accidental
@@ -245,7 +247,7 @@ open build/Pawvis.app
 ```
 
 ```bash
-swift test          # 453 unit tests
+swift test          # 493 unit tests
 swift build         # debug build
 ```
 

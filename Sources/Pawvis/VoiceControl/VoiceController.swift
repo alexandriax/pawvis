@@ -34,6 +34,13 @@ final class VoiceController: ObservableObject {
     private let typer = TextTyper()
     private let executor = CommandExecutor()
     private let agentSessions = AgentSessionManager.shared
+    /// The Settings → Voice "Recent activity" pane. In memory only; speech
+    /// that failed the wake gate is counted there, never quoted (see
+    /// `VoiceActivityLog`).
+    private let activity = VoiceActivityLog.shared
+    /// When the current command was dispatched — outcome log lines carry the
+    /// dispatch → outcome latency computed from it.
+    private var dispatchedAt: Date?
     /// The top-of-screen capsule showing what's being heard.
     let transcriptOverlay = TranscriptOverlay()
     /// The bottom-right card streaming autopilot steps, with Cancel.
@@ -142,6 +149,7 @@ final class VoiceController: ObservableObject {
     }
 
     func stop() {
+        if state.isActive { activity.append(.info, "Stopped listening") }
         autopilotGeneration += 1
         autopilotTask?.cancel()
         autopilotTask = nil
@@ -192,7 +200,12 @@ final class VoiceController: ObservableObject {
     private func handle(_ event: SpeechEvent) {
         switch event {
         case .ready:
-            if state.isActive { state = .listening }
+            if state.isActive {
+                if case .connecting = state {
+                    activity.append(.info, "Listening (wake word “\(config.wakeWord)”)")
+                }
+                state = .listening
+            }
 
         case .hypothesis(let itemId, let text):
             if itemId != liveItemId {
@@ -230,6 +243,7 @@ final class VoiceController: ObservableObject {
             handleFinal(transcript, showedLive: showedLive, wakeHeardLive: wakeHeardLive)
 
         case .failed(let message):
+            activity.append(.failure, "Speech engine failed: \(message)")
             engine?.stop()
             engine = nil
             state = .error(message)
@@ -241,6 +255,7 @@ final class VoiceController: ObservableObject {
     private func handleFinal(_ transcript: String, showedLive: Bool, wakeHeardLive: Bool) {
         let tool = AgentCLIExecutor.Tool(rawValue: config.agentExecutor)
         var remainder = parser.wakeRemainder(transcript)
+        var tier = "wake word matched"
         // The live hypotheses matched the wake word but the final revised it
         // away ("Pawvis" → "Paw this"): the user addressed us — take the
         // near tier's remainder directly, no AI round needed.
@@ -248,6 +263,7 @@ final class VoiceController: ObservableObject {
            let near = parser.nearWakeRemainder(transcript) {
             Log.voice.log("Wake heard live; final revised it — accepting near remainder")
             remainder = near
+            tier = "wake heard live, final revised it"
         }
         let decision = gate.decide(remainder: remainder, transcript: transcript, now: now)
         gateWindowTimer?.invalidate()
@@ -256,6 +272,10 @@ final class VoiceController: ObservableObject {
         switch decision {
         case .command(let command):
             Log.voice.log("Final accepted (wake \(remainder == nil ? "stitched" : "matched", privacy: .public)): \(command, privacy: .private)")
+            // A command decision without a remainder means this final was
+            // stitched to the bare wake word that opened the window.
+            if remainder == nil { tier = "stitched to the bare wake word" }
+            activity.append(.wake, "Accepted (\(tier)): “\(transcript)”")
             transcriptOverlay.complete(transcript)
             dispatch(command, tool: tool)
 
@@ -263,6 +283,7 @@ final class VoiceController: ObservableObject {
             // Bare wake word: hold the capsule open and wait for the command
             // (the engine loves to finalize on that pause).
             Log.voice.log("Bare wake word — capture window open")
+            activity.append(.wake, "Bare wake word, capture window open")
             transcriptOverlay.showLive("\(config.wakeWord) — listening for your command…")
             gateWindowTimer = Timer.scheduledTimer(
                 withTimeInterval: gate.windowSeconds + 0.1, repeats: false
@@ -300,12 +321,26 @@ final class VoiceController: ObservableObject {
            !nearRemainder.isEmpty {
             Task { [weak self] in
                 guard let self else { return }
+                let rescueStarted = Date()
                 let confirmed = (try? await WakeRescuer.confirmsInstruction(nearRemainder)) ?? false
+                let seconds = Date().timeIntervalSince(rescueStarted)
                 Log.voice.log("Near-wake rescue \(confirmed ? "confirmed" : "declined", privacy: .public)")
                 if confirmed {
+                    // Rescue confirmed means the utterance passed the wake
+                    // gate after all, so quoting it here is allowed — and
+                    // it is exactly the transcript worth replaying in
+                    // --wake-eval to see why the deterministic tiers missed.
+                    self.activity.append(
+                        .wake,
+                        String(format: "Near-miss rescued in %.1f s: “%@”", seconds, transcript))
                     self.transcriptOverlay.complete(transcript)
                     self.dispatch(nearRemainder, tool: tool)
                 } else {
+                    // Refused means it stayed ambient speech: the event is
+                    // logged, the words are not (the log's privacy rule).
+                    self.activity.append(
+                        .wake,
+                        String(format: "Near-miss refused after a %.1f s check", seconds))
                     self.dropFinal(transcript, showedLive: showedLive)
                 }
             }
@@ -316,6 +351,9 @@ final class VoiceController: ObservableObject {
 
     private func dropFinal(_ transcript: String, showedLive: Bool) {
         Log.voice.log("Final dropped (no wake word; shown live: \(showedLive)): \(transcript, privacy: .private)")
+        // Counted, never quoted: ambient speech must not reach the activity
+        // pane. The aggregate counter is all the log keeps of this final.
+        activity.countIgnored()
         if showedLive {
             // A partial hypothesis matched the wake word but the final lost
             // it — the user watched the capsule accept their words.
@@ -329,8 +367,11 @@ final class VoiceController: ObservableObject {
     /// locally and instantly; agent mode pipes everything else to the chosen
     /// CLI; the on-device path runs the grammar, then the autopilot loop.
     private func dispatch(_ command: String, tool: AgentCLIExecutor.Tool?) {
+        dispatchedAt = Date()
+        if config.audibleCues { VoiceCues.commandHeard() }
         let result = parser.parseRemainder(command)
         if case .stopVoiceControl? = result.command {
+            activity.append(.command, "stop listening")
             stop()
             return
         }
@@ -338,8 +379,10 @@ final class VoiceController: ObservableObject {
             // "Pawvis stop": brake whatever is running; with nothing in
             // flight it keeps its original meaning and turns voice off.
             if autopilotTask != nil {
+                activity.append(.command, "stop (cancelling the running command)")
                 cancelAutopilot()
             } else {
+                activity.append(.command, "stop (voice control off)")
                 stop()
             }
             return
@@ -348,11 +391,19 @@ final class VoiceController: ObservableObject {
         // during a runaway autopilot means both things the user said.
         cancelAutopilot()
         if let tool {
+            activity.append(.route, "Handed to \(tool.displayName): “\(command)”")
             runAgent(command, tool: tool)
             return
         }
+        if !result.typing.isEmpty {
+            let typed = result.typing
+                .compactMap { if case .type(let text) = $0 { return text } else { return nil } }
+                .joined()
+            activity.append(.command, typed.isEmpty ? "typing actions" : "type: “\(typed)”")
+        }
         typer.perform(result.typing)
         if let parsed = result.command {
+            activity.append(.command, "Parsed: \(VoiceActivityLog.describe(parsed))")
             execute(parsed, fallbackTranscript: command)
         }
     }
@@ -412,10 +463,12 @@ final class VoiceController: ObservableObject {
     /// executor and would only add flailing to the same dead end.
     private func resolveFreeForm(_ goal: String) {
         guard config.visualContextEnabled else {
+            noteOutcome(success: false, "Didn't recognize a command: “\(goal)”")
             flashNotice("Didn't recognize a command: “\(goal)”")
             return
         }
         guard #available(macOS 26.0, *), AutopilotEngine.isSupported else {
+            noteOutcome(success: false, "“\(goal)” needs Apple Intelligence (macOS 26)")
             flashNotice("“\(goal)” needs Apple Intelligence (macOS 26)")
             return
         }
@@ -429,10 +482,12 @@ final class VoiceController: ObservableObject {
         autopilotTask = Task { [weak self] in
             guard let self else { return }
             if !AutopilotPolicy.goesStraightToLoop(goal: goal) {
+                self.activity.append(.route, "Routed to translation: “\(goal)”")
                 let translation = await self.autopilot.translate(goal: goal)
                 guard self.autopilotGeneration == generation else { return }
                 if Task.isCancelled {
                     self.autopilotTask = nil
+                    self.noteStopped()
                     self.flashNotice("Stopped")
                     if case .resolving = self.state { self.state = .listening }
                     return
@@ -440,6 +495,7 @@ final class VoiceController: ObservableObject {
                 if let translation,
                    let command = TranslationPolicy.command(from: translation) {
                     Log.voice.log("Translated free-form command: \(String(describing: command), privacy: .private)")
+                    self.activity.append(.command, "Translated: \(VoiceActivityLog.describe(command))")
                     let outcome = await self.executor.execute(command)
                     guard self.autopilotGeneration == generation else { return }
                     self.autopilotTask = nil
@@ -464,6 +520,7 @@ final class VoiceController: ObservableObject {
         let generation = autopilotGeneration
         autopilotPanel.hide()
         state = .resolving
+        activity.append(.route, "Deterministic sequence: \(commands.count) steps")
         autopilotTask = Task { [weak self] in
             guard let self else { return }
             var lastNotice: String?
@@ -475,31 +532,38 @@ final class VoiceController: ObservableObject {
                 if Task.isCancelled { break }
                 switch outcome {
                 case .done(let notice):
+                    self.activity.append(.step, "Step \(index + 1): \(notice ?? "done")")
                     if let notice {
                         lastNotice = notice
                         self.state = .working(notice)
                     }
                     if let unmet = await self.executor.sequenceSettle(after: command) {
-                        self.finishSequence(generation, "⚠️ Step \(index + 1) didn't take: \(unmet)")
+                        self.finishSequence(generation, "⚠️ Step \(index + 1) didn't take: \(unmet)", success: false)
                         return
                     }
                 case .failed(let message):
-                    self.finishSequence(generation, "⚠️ Step \(index + 1) failed: \(message)")
+                    self.finishSequence(generation, "⚠️ Step \(index + 1) failed: \(message)", success: false)
                     return
                 }
             }
             if Task.isCancelled {
-                self.finishSequence(generation, "Stopped")
+                self.finishSequence(generation, "Stopped", success: nil)
                 return
             }
             self.finishSequence(
-                generation, lastNotice.map { "✓ \($0)" } ?? "✓ Done")
+                generation, lastNotice.map { "✓ \($0)" } ?? "✓ Done", success: true)
         }
     }
 
-    private func finishSequence(_ generation: Int, _ notice: String) {
+    /// `success` nil means the user stopped the run (no outcome cue).
+    private func finishSequence(_ generation: Int, _ notice: String, success: Bool?) {
         guard autopilotGeneration == generation else { return }
         autopilotTask = nil
+        if let success {
+            noteOutcome(success: success, notice)
+        } else {
+            noteStopped()
+        }
         flashNotice(notice)
         switch state {
         case .resolving, .working:
@@ -514,6 +578,7 @@ final class VoiceController: ObservableObject {
     @available(macOS 26.0, *)
     private func runAutopilotLoop(goal: String, generation: Int) async {
         guard autopilotGeneration == generation, !Task.isCancelled else { return }
+        activity.append(.route, "Autopilot loop: “\(goal)”")
         autopilotPanel.begin(goal: goal) { [weak self] in
             self?.cancelAutopilot()
         }
@@ -524,6 +589,7 @@ final class VoiceController: ObservableObject {
                   self.state.isActive else { return }
             self.state = .working(line)
             self.autopilotPanel.append(line: line)
+            self.activity.append(.step, line)
         }
         // A superseded or shut-down run must vanish silently — its
         // successor owns the panel, the notice, and the state now.
@@ -531,12 +597,15 @@ final class VoiceController: ObservableObject {
         autopilotTask = nil
         switch outcome {
         case .finished(let notice):
+            noteOutcome(success: true, notice ?? "Done")
             autopilotPanel.finish(success: true)
             if let notice { flashNotice(notice) }
         case .failed(let message):
+            noteOutcome(success: false, message)
             autopilotPanel.finish(success: false)
             flashNotice("⚠️ \(message)")
         case .cancelled:
+            noteStopped()
             autopilotPanel.hide()
             flashNotice("Stopped")
         }
@@ -571,8 +640,10 @@ final class VoiceController: ObservableObject {
     private func showAgentOutcome(_ outcome: ExecutionOutcome, tool: AgentCLIExecutor.Tool) {
         switch outcome {
         case .done(let notice):
+            noteOutcome(success: true, notice ?? "Done (\(tool.displayName))")
             flashNotice(notice ?? "✅ Done (\(tool.displayName))")
         case .failed(let message):
+            noteOutcome(success: false, message)
             flashNotice("⚠️ \(message)")
         }
     }
@@ -580,10 +651,33 @@ final class VoiceController: ObservableObject {
     private func show(_ outcome: ExecutionOutcome) {
         switch outcome {
         case .done(let notice):
+            noteOutcome(success: true, notice ?? "Done")
             if let notice { flashNotice(notice) }
         case .failed(let message):
+            noteOutcome(success: false, message)
             flashNotice("⚠️ \(message)")
         }
+    }
+
+    // MARK: - Outcome instrumentation
+
+    /// Every finished command passes through here: the activity log gets the
+    /// outcome with its dispatch → outcome latency, and the audible cue plays
+    /// (success and failure differentiated) when the toggle is on. User
+    /// cancellation goes through `noteStopped` instead — no cue for an ending
+    /// the user caused.
+    private func noteOutcome(success: Bool, _ text: String) {
+        let latency = dispatchedAt.map {
+            String(format: " (%.1f s)", Date().timeIntervalSince($0))
+        } ?? ""
+        activity.append(success ? .outcome : .failure, text + latency)
+        if config.audibleCues {
+            if success { VoiceCues.succeeded() } else { VoiceCues.failed() }
+        }
+    }
+
+    private func noteStopped() {
+        activity.append(.outcome, "Stopped")
     }
 
     // MARK: - Notices
