@@ -340,6 +340,24 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   color: var(--blue-light);
   margin: 0 0 1.4rem;
 }
+
+/* Eyebrow on the left, the Product Hunt badge parked at the top right of the
+   hero. It scrolls away with the page: only the nav is pinned. */
+.hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin-bottom: 1.4rem;
+}
+.hero-top .eyebrow { margin: 0; }
+.ph-badge { display: block; line-height: 0; }
+.ph-badge img { display: block; width: 250px; height: 54px; }
+
+@media (max-width: 620px) {
+  .ph-badge img { width: 210px; height: 45px; }
+}
 .hero-sub {
   font-size: clamp(1.08rem, 1.8vw, 1.28rem);
   max-width: 40em;
