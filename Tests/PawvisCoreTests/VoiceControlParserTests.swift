@@ -875,3 +875,27 @@ final class SpokenKeyParserTests: XCTestCase {
         XCTAssertNil(chord("command"), "modifier with no key is not a chord")
     }
 }
+
+/// `VoiceControlConfig`'s field-tolerant decoding — most of its numeric
+/// fields are app-layer UI timers that already fail safe at their point of
+/// use, so they're deliberately left unclamped (the "benign cosmetic
+/// numbers" this repo's tolerant decoders leave alone). `agentTimeoutSeconds`
+/// is the one exception: it reaches `AgentSessionManager.run`, which does
+/// `Int(max(30, timeout))` — a decoded value large enough overflows that
+/// conversion and traps.
+final class VoiceControlConfigTests: XCTestCase {
+    func testAgentTimeoutSecondsClampsToSliderRangeOnDecode() throws {
+        let bogus = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":1e20}"#.utf8))
+        XCTAssertEqual(bogus.agentTimeoutSeconds, 300,
+                       "unclamped, Int(max(30, 1e20)) traps in AgentSessionManager")
+
+        let negative = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":-50}"#.utf8))
+        XCTAssertEqual(negative.agentTimeoutSeconds, 30, "Agent timeout slider min")
+
+        let inRange = try JSONDecoder().decode(
+            VoiceControlConfig.self, from: Data(#"{"agentTimeoutSeconds":90}"#.utf8))
+        XCTAssertEqual(inRange.agentTimeoutSeconds, 90, accuracy: 1e-9, "in-range values decode untouched")
+    }
+}
