@@ -1570,6 +1570,65 @@ final class GestureEngineTests: XCTestCase {
         XCTAssertGreaterThan(engine.effectiveInteractionBox.yMin, pressed.yMin)
     }
 
+    /// A wrist position whose synthetic scroll-pose hand keeps its pointer
+    /// landmark — `HandFeatures.pointerPoint(.palmCenter)`, the wrist↔middle-
+    /// knuckle midpoint that `GestureEngine.pointerPoint` reads and scroll
+    /// deltas are measured from — pinned at `target`, at the given `scale`.
+    /// `SyntheticHand.build` offsets every knuckle from the wrist by `scale`,
+    /// so simply holding the wrist itself still while ramping scale would
+    /// drag that midpoint along with it: a real effect (a hand pitching
+    /// toward the camera does move its palm a little), but a different one
+    /// from the box re-fitting under it, and not what this test is after.
+    /// The midpoint is an exact affine function of the wrist with unit
+    /// slope, so one probe at `target` gives the fixed offset to cancel.
+    private func wristPinningPalm(to target: Vec2, scale: Double) -> Vec2 {
+        let probe = SyntheticHand.scrollPose(wrist: target, scale: scale)
+        let measured = HandFeatures(hand: probe)!.pointerPoint(.palmCenter)!
+        return target + (target - measured)
+    }
+
+    func testAutoReachNeverMovesTheBoxMidScroll() {
+        useAutoReach()
+        let palm = Vec2(0.5, 0.5)
+        let baseScale = 0.15
+
+        // Engage the scroll pose, palm pinned so the setup itself contributes
+        // no drift.
+        let engageWrist = wristPinningPalm(to: palm, scale: baseScale)
+        feedFrames([SyntheticHand.scrollPose(wrist: engageWrist, scale: baseScale)], from: 0, count: 3)
+        let engagedOverlay = feed([SyntheticHand.scrollPose(wrist: engageWrist, scale: baseScale)],
+                                  at: 0.1).overlay
+        XCTAssertTrue(engagedOverlay.isScrolling, "setup check: engaged before the ramp begins")
+        let boxAtEngage = engine.effectiveInteractionBox
+
+        // Ramp the hand's apparent scale (leaning in, or a pitch change)
+        // while the palm — the landmark scroll deltas are measured from —
+        // stays perfectly still. This is the reviewer's exact repro:
+        // unfrozen, the box keeps re-fitting to the growing hand and remaps
+        // that still palm to a moving y, scrolling under a hand that never
+        // moved.
+        var deltas: [Double] = []
+        let steps = 60
+        for i in 1...steps {
+            let scale = baseScale + (0.30 - baseScale) * Double(i) / Double(steps)
+            let wrist = wristPinningPalm(to: palm, scale: scale)
+            let events = feed([SyntheticHand.scrollPose(wrist: wrist, scale: scale)],
+                              at: 0.1 + Double(i) / 30).events
+            deltas += scrolls(events)
+        }
+
+        XCTAssertTrue(deltas.isEmpty,
+                     "a palm that never moved must never scroll, however the hand's apparent scale changes")
+        XCTAssertEqual(engine.effectiveInteractionBox, boxAtEngage,
+                       "the box is a coordinate transform: an active scroll must freeze it, exactly like a held button")
+
+        // Released, the drift picks up again — the freeze isn't permanent.
+        feedFrames([SyntheticHand.openRelaxed(wrist: palm, scale: 0.30)],
+                   from: 0.1 + Double(steps + 1) / 30, count: 10)
+        XCTAssertNotEqual(engine.effectiveInteractionBox, boxAtEngage,
+                          "once the scroll ends the box is free to fit the hand again")
+    }
+
     func testManualReachUsesTheConfiguredBoxVerbatim() {
         var config = Self.testConfig()
         config.interactionBox = InteractionBox(xMin: 0.2, xMax: 0.8, yMin: 0.25, yMax: 0.75)
