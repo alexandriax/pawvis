@@ -151,6 +151,19 @@ func runSelfTest() -> Int32 {
     check("launchAtLogin.respectsSystemSettingsRemoval", LaunchAtLoginPolicy.reconcile(
         desired: true, status: .notRegistered, defaultApplied: true) == .adoptDisabled)
 
+    // First run: the welcome tour shows only for a genuinely new install.
+    // An install that already granted the camera predates onboarding and
+    // adopts completion instead; automated (PAWVIS_NO_AUTOSTART) runs stay
+    // headless and leave the flag alone.
+    check("firstRun.newInstallSeesWelcome", FirstRunPolicy.verdict(
+        completed: false, cameraGranted: false, automated: false) == .showWelcome)
+    check("firstRun.grantedCameraAdoptsCompleted", FirstRunPolicy.verdict(
+        completed: false, cameraGranted: true, automated: false) == .adoptCompleted)
+    check("firstRun.completedLaunchesNormally", FirstRunPolicy.verdict(
+        completed: true, cameraGranted: false, automated: false) == .proceedNormally)
+    check("firstRun.automatedRunsStayHeadless", FirstRunPolicy.verdict(
+        completed: false, cameraGranted: false, automated: true) == .proceedNormally)
+
     // Voice parser: one-shot commands, wake word required for each.
     let parser = VoiceControlParser()
     let typed = parser.parse("Pawvis type hello world")

@@ -183,19 +183,31 @@ struct MenuContentView: View {
 
     /// Sky for Settings, violet for the guide, and Quit on the quiet chip:
     /// leaving is mundane, not dangerous, so it gets the least ink in the
-    /// row rather than a red slab.
+    /// row rather than a red slab. The welcome tour sits on the quiet chip
+    /// too, tucked under the navigation cluster: a one-time helper worth
+    /// finding again, not a daily destination, so it takes the least ink —
+    /// and a fourth chip in the main row wouldn't fit the menu's width
+    /// without truncating.
     private var footer: some View {
-        HStack {
-            Button("Settings…") { openSettingsInFront() }
-                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
-            Button("Gesture Guide") {
-                dismiss() // close the menu bar popover — it floats above windows
-                openWindow(id: GuideWindow.id)
-                NSApp.activate(ignoringOtherApps: true)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button("Settings…") { openSettingsInFront() }
+                    .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipBlue))
+                Button("Gesture Guide") {
+                    dismiss() // close the menu bar popover — it floats above windows
+                    openWindow(id: GuideWindow.id)
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                Spacer()
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipQuiet))
             }
-            Spacer()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+            Button("Welcome tour") {
+                dismiss() // close the menu bar popover — it floats above windows
+                openWindow(id: WelcomeWindow.id)
+                NSApp.activate(ignoringOtherApps: true)
             }
             .buttonStyle(PawvisButtonStyle(chip: PawvisTheme.chipQuiet))
         }
