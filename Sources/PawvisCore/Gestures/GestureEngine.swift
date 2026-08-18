@@ -94,6 +94,12 @@ public final class GestureEngine {
         set { trainedDetector.config = newValue }
     }
 
+    /// The trained gesture currently dwelling toward its fire, for the
+    /// countdown pill. Valid after `process`.
+    public var trainedHoldProgress: (id: UUID, remaining: TimeInterval)? {
+        trainedDetector.holdProgress
+    }
+
     private let trainedDetector = TrainedGestureDetector()
 
     private let customDetector = CustomGestureDetector()
@@ -439,6 +445,11 @@ public final class GestureEngine {
         // Engage only — blocked never releases a held press, and a press
         // already down drags at any speed.
         let sweeping = palmSweeping(features, at: frame.time)
+        // A trained gesture matching mid-dwell blocks new clicks when the
+        // user gave trained gestures priority — the finger curl that IS the
+        // gesture must not also be a click. Engage-only, as always.
+        let trainedDwellBlock = trainedDetector.config.overridesMouse
+            && trainedDetector.candidateActive
         let ratio = armed ? clickRatio(features) : nil
         if armed {
             let rightHeld = isHeld(.right)
@@ -446,7 +457,7 @@ public final class GestureEngine {
                          engage: config.engageRatio, release: config.releaseRatio,
                          confident: engageConfident(primary.hand),
                          blocked: rightHeld || scroll.active || crissCross.engaged
-                             || sweeping || pointedParked,
+                             || sweeping || pointedParked || trainedDwellBlock,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
             updateButton(.right, state: &rightButton, ratio: rightRatio(features),
@@ -454,7 +465,7 @@ public final class GestureEngine {
                          confident: rightEngageConfident(primary.hand),
                          blocked: leftHeld || scroll.active || crissCross.engaged
                              || scrollPoseBlocksRightClick(features) || sweeping
-                             || pointedParked,
+                             || pointedParked || trainedDwellBlock,
                          at: frame.time, events: &events)
         }
 
@@ -807,9 +818,13 @@ public final class GestureEngine {
         }
         var events: [GestureEvent] = customDetector.process(hands: inputs, context: context)
             .map { .customGesture($0) }
-        // The trained gestures ride the same stream and the same guards.
+        // The trained gestures match against the RAW camera-space hands —
+        // the space their templates were recorded in. The screen-space
+        // stream is mirrored and stretched through the interaction box,
+        // where a camera-space template can never match (measured: trained
+        // gestures fired in the trainer and never in use).
         events += trainedDetector.process(
-            hands: tracked.map { TrainedGestureDetector.HandInput(slot: $0.slotID, hand: $0.hand) },
+            hands: tracked.map { TrainedGestureDetector.HandInput(slot: $0.slotID, hand: $0.raw) },
             context: context)
             .map { .trainedGesture($0) }
         return events
