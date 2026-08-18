@@ -106,4 +106,41 @@ final class AppNameMatchTests: XCTestCase {
         XCTAssertFalse(
             AppNameMatch.matches(spoken: "discord dot com in chrome", appName: "Discord"))
     }
+
+    // MARK: - Generic web qualifiers
+
+    func testResolvedAppQualifierNilsEveryGenericPhrase() {
+        // The regression: "open discord dot com in the browser" must not
+        // resolve "the browser" against an installed app (it used to
+        // prefix-match Brave/Tor Browser once the leading article was
+        // stripped). Every phrase the grammar or the model can produce for
+        // "no app in particular" must come back nil.
+        for spoken in AppNameMatch.genericWebQualifiers {
+            XCTAssertNil(AppNameMatch.resolvedAppQualifier(spoken),
+                         "'\(spoken)' should mean no app in particular")
+        }
+    }
+
+    func testResolvedAppQualifierNilsGenericPhrasesRegardlessOfCase() {
+        for spoken in ["The Browser", "My Browser", "Browser", "The Internet"] {
+            XCTAssertNil(AppNameMatch.resolvedAppQualifier(spoken),
+                         "'\(spoken)' should mean no app in particular")
+        }
+    }
+
+    func testResolvedAppQualifierKeepsRealAppNames() {
+        XCTAssertEqual(AppNameMatch.resolvedAppQualifier("chrome"), "chrome")
+        XCTAssertEqual(AppNameMatch.resolvedAppQualifier("safari"), "safari")
+        XCTAssertEqual(AppNameMatch.resolvedAppQualifier("Firefox"), "Firefox")
+    }
+
+    func testResolvedAppQualifierNilForNilOrBlank() {
+        XCTAssertNil(AppNameMatch.resolvedAppQualifier(nil))
+        XCTAssertNil(AppNameMatch.resolvedAppQualifier(""))
+        XCTAssertNil(AppNameMatch.resolvedAppQualifier("   "))
+    }
+
+    func testResolvedAppQualifierTrimsWhitespace() {
+        XCTAssertEqual(AppNameMatch.resolvedAppQualifier("  chrome  "), "chrome")
+    }
 }

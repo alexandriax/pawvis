@@ -87,8 +87,8 @@ struct MenuContentView: View {
     private var statusRows: some View {
         VStack(alignment: .leading, spacing: 6) {
             statusRow(
-                icon: "hand.raised.fill",
-                tint: controller.handsDetected > 0 ? .green : .secondary,
+                icon: controller.cameraFailure == nil ? "hand.raised.fill" : "video.slash.fill",
+                tint: trackingTint,
                 text: trackingStatusText)
 
             HStack(spacing: 8) {
@@ -116,11 +116,13 @@ struct MenuContentView: View {
     }
 
     private func statusRow(icon: String, tint: Color, text: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .foregroundStyle(tint)
                 .frame(width: 18)
-            Text(text).font(.callout)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true) // wrap, never truncate
             Spacer()
         }
     }
@@ -229,7 +231,17 @@ struct MenuContentView: View {
 
     // MARK: - Status text
 
+    /// Red only for genuine errors, where it means what it says — and a dead
+    /// camera is one: the menu must not claim tracking while no frames come.
+    private var trackingTint: Color {
+        if controller.cameraFailure != nil { return .red }
+        return controller.handsDetected > 0 ? .green : .secondary
+    }
+
     private var trackingStatusText: String {
+        // Camera trouble beats every happier status: this line is the copy
+        // that persists after the overlay pill times out.
+        if let failure = controller.cameraFailure { return failure }
         guard controller.trackingActive else { return "Tracking off" }
         switch controller.handsDetected {
         case 0: return "No hands in view"
@@ -242,7 +254,7 @@ struct MenuContentView: View {
         if controller.settingsStore.settings.gestures.controlTrigger == .gesturesOnly {
             return "Watching for gestures"
         }
-        if controller.grabbing { return "Clicking (pinched)" }
+        if controller.grabbing { return "Clicking" }
         return controller.controlArmed ? "Pointing" : "Show an open hand to control"
     }
 

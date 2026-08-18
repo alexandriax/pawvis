@@ -198,6 +198,38 @@ func runSelfTest() -> Int32 {
     check("voice.fillerBeforeWakeStillWakes",
           parser.parse("Um, Pawvis, open Safari").command == .open(app: "Safari"))
 
+    // Wake-acceptance hardening: "jarvis" left the default aliases (a stock
+    // movie wake word gave any TV audio a full-trust accept), and agent mode
+    // runs the ladder strict — no glued-speech tier, and the capture window
+    // takes only finals that parse deterministically or carry the wake word.
+    check("voice.defaultAliasesExcludeJarvis",
+          !VoiceControlConfig().wakeWordAliases.contains("jarvis")
+          && parser.parse("Jarvis open Safari") == VoiceParseResult())
+    check("voice.shortWakeWordsHaveNoFuzz",
+          !VoiceControlParser.supportsFuzzyMatching("rex")
+          && VoiceControlParser.supportsFuzzyMatching("Pawvis"))
+    let strictParser = VoiceControlParser()
+    strictParser.config.strictWake = true
+    check("voice.strictWakeRefusesGluedSpeech",
+          strictParser.parse("anyway whatever Pawvis open Safari") == VoiceParseResult()
+          && parser.parse("anyway whatever Pawvis open Safari").command == .open(app: "Safari"))
+    check("voice.strictWakeKeepsInitialAndFillerTiers",
+          strictParser.parse("Pawvis quit chrome").command == .quit(app: "chrome")
+          && strictParser.parse("Um, Pawvis, open Safari").command == .open(app: "Safari"))
+    var strictGate = UtteranceGate()
+    let strictBar: (String) -> Bool = { strictParser.remainderIsDeterministicCommand($0) }
+    check("voice.strictWindowArmsOnBareWake",
+          strictGate.decide(remainder: "", transcript: "Pawvis", now: 0,
+                            strictCommandBar: strictBar) == .armed)
+    check("voice.strictWindowRefusesAmbientFinal",
+          strictGate.decide(remainder: nil, transcript: "she went home yesterday", now: 1,
+                            strictCommandBar: strictBar) == .ignored)
+    var verbatimGate = UtteranceGate()
+    _ = verbatimGate.decide(remainder: "", transcript: "Pawvis", now: 0)
+    check("voice.defaultWindowStaysVerbatim",
+          verbatimGate.decide(remainder: nil, transcript: "she went home yesterday", now: 1)
+          == .command("she went home yesterday"))
+
     // Voice routing: the simple-operations class must resolve in the
     // deterministic grammar and NEVER reach the GUI loop. This table is the
     // completion criterion for "open discord dot com in Chrome"-class
