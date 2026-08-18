@@ -340,6 +340,11 @@ per-gesture sensitivity slider scales it (0.7×–1.6×). Live matching
 DTW-scores a rolling window at three tempo scales and fires under the
 threshold. Its constraints:
 
+- **Matching runs in camera space.** Templates are recorded from raw
+  camera hands, so the engine feeds the detector `TrackedHand.raw` — never
+  the screen-space stream, which is mirrored and stretched through the
+  interaction box, where a camera-space template can never match
+  (measured: trained gestures fired in the trainer and never in use).
 - **Training suspends control.** The trainer taps the camera stream ahead
   of the engine (`PawvisController.beginTraining`): nothing reaches the
   mouse or the other detectors while the window is open, because training
@@ -347,9 +352,19 @@ threshold. Its constraints:
 - **Firing latches until the match visibly breaks** (distance 1.3× over
   threshold), so a *held* trained pose fires once per performance, not
   once per refractory — the custom hold-pose lesson, applied here.
-- **Presses and the criss-cross wave stand matching down**, and a
-  two-hand gesture matches only the ordered left-to-right pair stream:
-  half the pair is not the gesture.
+- **Hold-to-confirm is per gesture** (`holdSeconds`, default 0): the match
+  must hold continuously that long before firing, with a small hysteresis
+  so a one-frame flicker doesn't reset the clock, and the pill counts the
+  dwell down. Raise it for pose-like gestures.
+- **The mouse-priority toggle decides who wins a finger curl**
+  (`mouseOverride`, default on): matching keeps running through presses —
+  a gesture that dips the index finger would otherwise click and cancel
+  its own match every time — and while a match is dwelling, both buttons'
+  *engage* is blocked. A dip that lands before recognition still clicks;
+  the hold time is what shrinks that window. Off restores "a press always
+  wins" in full. The criss-cross wave stands matching down either way,
+  and a two-hand gesture matches only the ordered left-to-right pair
+  stream: half the pair is not the gesture.
 - **The representation is translation- and distance-invariant, not
   rotation-invariant.** A swipe left and a swipe right are different
   gestures — which is what you want from a trained library.

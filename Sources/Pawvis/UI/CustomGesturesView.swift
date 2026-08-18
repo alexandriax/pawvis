@@ -51,6 +51,10 @@ struct CustomGesturesTab: View {
                 Button("Train New Gesture…") { TrainerWindow.show() }
                 CaptionText("Opens the camera. Pawvis control pauses while you train.")
             }
+            SettingToggle(
+                title: "Trained gestures take priority over clicks",
+                caption: "Matching keeps running through clicks and scrolls, and once a match is recognized and dwelling, finger dips can't click. A dip that lands before recognition can still click — give the gesture a hold time and the block covers the rest. Off: the mouse always wins, and a gesture that curls your index finger may click instead of firing.",
+                isOn: $store.settings.trainedGestures.mouseOverride)
             if store.settings.trainedGestures.gestures.isEmpty {
                 CaptionText("Nothing trained yet.")
             }
@@ -336,6 +340,11 @@ private struct TrainedGestureRow: View {
                                 caption: "Left: only a performance very close to your takes counts. Right: looser matching — move this right if the gesture won't trigger, left if it triggers by accident.",
                                 value: binding(\.sensitivity),
                                 range: 0...1)
+                            LabeledSlider(
+                                label: "Hold to confirm",
+                                caption: holdCaption,
+                                value: binding(\.holdSeconds),
+                                range: 0...1)
                         }
                         .padding(.top, 8)
                     } label: {
@@ -357,6 +366,13 @@ private struct TrainedGestureRow: View {
                 }
             }
         }
+    }
+
+    private var holdCaption: String {
+        let seconds = gesture?.holdSeconds ?? 0
+        return seconds > 0.05
+            ? String(format: "Keep matching for %.1f s before it fires — the pill counts it down.", seconds)
+            : "Fires the moment it matches. Raise this for pose-like gestures so a passing resemblance can't trigger."
     }
 
     /// A binding into the gesture's record in settings, by id — stable

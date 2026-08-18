@@ -25,19 +25,30 @@ public final class TrainedGestureDetector {
         public var template: [[Double]]
         public var duration: TimeInterval
         public var threshold: Double
+        /// The match must hold continuously this long before firing —
+        /// 0 fires the moment it matches. For pose-like gestures, so a
+        /// passing resemblance can't trigger.
+        public var holdSeconds: TimeInterval
 
         public init(id: UUID, handCount: Int, template: [[Double]],
-                    duration: TimeInterval, threshold: Double) {
+                    duration: TimeInterval, threshold: Double,
+                    holdSeconds: TimeInterval = 0) {
             self.id = id
             self.handCount = handCount
             self.template = template
             self.duration = duration
             self.threshold = threshold
+            self.holdSeconds = holdSeconds
         }
     }
 
     public struct Config: Equatable, Sendable {
         public var gestures: [Compiled] = []
+        /// Trained gestures keep matching through presses and scrolls, and
+        /// the engine blocks new clicks while a match is dwelling. Off, the
+        /// house rule stands: a press always wins — which also means a
+        /// gesture that dips a finger can click and cancel its own match.
+        public var overridesMouse: Bool = false
 
         public init() {}
     }
@@ -73,6 +84,9 @@ public final class TrainedGestureDetector {
     /// A fired gesture stays latched until its best distance rises this far
     /// above the threshold — a held pose fires once per performance.
     static let unlatchFactor = 1.3
+    /// Mid-dwell, the distance may flicker up to this far over the
+    /// threshold without resetting the hold-to-confirm clock.
+    static let dwellHysteresis = 1.15
     /// Buffer gaps larger than this break a stream (hand lost or pair
     /// dissolved); the buffer restarts.
     static let maxGap: TimeInterval = 0.30
@@ -115,16 +129,27 @@ public final class TrainedGestureDetector {
     private var lastFire: TimeInterval = -.infinity
     /// Gestures currently latched (matched and not yet visibly released).
     private var latched: Set<UUID> = []
+    /// When each gesture's current match streak began (the hold-to-confirm
+    /// dwell clock).
+    private var dwellStart: [UUID: TimeInterval] = [:]
     /// The best scores of the most recent frame, for the trainer's live
     /// feedback panel.
     public private(set) var lastScores: [Score] = []
+    /// A gesture is matching right now and dwelling toward its fire. The
+    /// engine blocks click engagement on this while `overridesMouse` is on.
+    public private(set) var candidateActive = false
+    /// The dwell furthest along, for the countdown pill.
+    public private(set) var holdProgress: (id: UUID, remaining: TimeInterval)?
 
     public func reset() {
         singleStreams = [:]
         pairStream = Stream()
         lastFire = -.infinity
         latched = []
+        dwellStart = [:]
         lastScores = []
+        candidateActive = false
+        holdProgress = nil
     }
 
     // MARK: - Per-frame entry
@@ -134,11 +159,18 @@ public final class TrainedGestureDetector {
             if !singleStreams.isEmpty || !pairStream.samples.isEmpty { reset() }
             return []
         }
-        if context.pressOrScrollActive || context.crissCrossEngaged {
-            // Presses (and the wave) always win: restart from silence.
+        // With mouse override on, presses no longer stand matching down — a
+        // gesture that dips a finger would otherwise click and cancel its
+        // own match every time. The wave still wins either way.
+        let standDown = (context.pressOrScrollActive && !config.overridesMouse)
+            || context.crissCrossEngaged
+        if standDown {
             singleStreams = [:]
             pairStream = Stream()
             lastScores = []
+            dwellStart = [:]
+            candidateActive = false
+            holdProgress = nil
             return []
         }
 
@@ -168,9 +200,11 @@ public final class TrainedGestureDetector {
             pairStream.append(pair, at: context.time, keeping: horizon)
         }
 
-        // Score every gesture on its stream(s); fire the best match.
+        // Score every gesture on its stream(s); fire the best match whose
+        // hold-to-confirm dwell has elapsed.
         var scores: [Score] = []
         var bestFire: (gesture: Compiled, distance: Double)?
+        var dwelling: (id: UUID, remaining: TimeInterval)?
         for gesture in config.gestures {
             let streams: [Stream] = gesture.handCount == 2
                 ? [pairStream] : Array(singleStreams.values)
@@ -180,6 +214,7 @@ public final class TrainedGestureDetector {
             }
             guard best < .infinity else {
                 latched.remove(gesture.id)
+                dwellStart.removeValue(forKey: gesture.id)
                 continue
             }
             scores.append(Score(id: gesture.id, distance: best, threshold: gesture.threshold))
@@ -188,18 +223,37 @@ public final class TrainedGestureDetector {
                 if best > gesture.threshold * Self.unlatchFactor {
                     latched.remove(gesture.id)
                 }
+                dwellStart.removeValue(forKey: gesture.id)
                 continue
             }
-            guard best <= gesture.threshold else { continue }
-            if bestFire == nil || best < bestFire!.distance {
-                bestFire = (gesture, best)
+            if best <= gesture.threshold {
+                let start = dwellStart[gesture.id] ?? context.time
+                dwellStart[gesture.id] = start
+                let elapsed = context.time - start
+                if elapsed >= gesture.holdSeconds {
+                    if bestFire == nil || best < bestFire!.distance {
+                        bestFire = (gesture, best)
+                    }
+                } else {
+                    let remaining = gesture.holdSeconds - elapsed
+                    if dwelling == nil || remaining < dwelling!.remaining {
+                        dwelling = (gesture.id, remaining)
+                    }
+                }
+            } else if best > gesture.threshold * Self.dwellHysteresis {
+                // A clear miss resets the hold; a flicker just over the
+                // line doesn't throw the dwell away.
+                dwellStart.removeValue(forKey: gesture.id)
             }
         }
         lastScores = scores
+        holdProgress = dwelling
+        candidateActive = dwelling != nil
 
         guard let fire = bestFire, context.time - lastFire >= Self.refractory else { return [] }
         lastFire = context.time
         latched.insert(fire.gesture.id)
+        dwellStart.removeValue(forKey: fire.gesture.id)
         return [fire.gesture.id]
     }
 

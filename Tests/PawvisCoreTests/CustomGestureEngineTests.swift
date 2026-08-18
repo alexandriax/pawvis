@@ -250,6 +250,127 @@ final class CustomGestureEngineTests: XCTestCase {
         XCTAssertEqual(fired, [id])
     }
 
+    func testTrainedGestureMatchesUnderMirroringAndReachMapping() {
+        // The real-world configuration: mirrored camera, an interaction box
+        // that stretches a sub-region of camera space onto the screen.
+        // Templates are recorded from raw camera hands, so matching must run
+        // on raw camera hands too — the regression was matching against the
+        // mirrored, box-mapped stream, where nothing ever matched.
+        var config = engine.config
+        config.mirrorCamera = true
+        config.interactionBox = InteractionBox(xMin: 0.15, xMax: 0.85, yMin: 0.2, yMax: 0.9)
+        engine.config = config
+
+        func swipe(_ progress: Double) -> Hand {
+            SyntheticHand.openRelaxed(wrist: Vec2(0.30 + 0.28 * progress, 0.60))
+        }
+        let recorder = TakeRecorder()
+        var takes: [GestureTake] = []
+        for _ in 0..<3 {
+            var t = 0.0
+            recorder.begin(handCount: 1, at: t)
+            for _ in 0..<8 {
+                _ = recorder.feed([GestureTrace.snapshot(of: swipe(0), minJointConfidence: 0.25)!], at: t)
+                t += 1.0 / 30
+            }
+            for i in 0..<15 {
+                if case .finished(let take)? = recorder.feed(
+                    [GestureTrace.snapshot(of: swipe(Double(i) / 14), minJointConfidence: 0.25)!], at: t) {
+                    takes.append(take)
+                }
+                t += 1.0 / 30
+            }
+            for _ in 0..<30 {
+                if case .finished(let take)? = recorder.feed(
+                    [GestureTrace.snapshot(of: swipe(1), minJointConfidence: 0.25)!], at: t) {
+                    takes.append(take)
+                }
+                t += 1.0 / 30
+            }
+        }
+        guard let build = TrainedGestureBuilder.build(takes: takes) else {
+            return XCTFail("no build from \(takes.count) takes")
+        }
+        let id = UUID()
+        var trained = TrainedGestureDetector.Config()
+        trained.gestures = [TrainedGestureDetector.Compiled(
+            id: id, handCount: 1, template: build.template,
+            duration: build.duration, threshold: build.baseThreshold * 1.15)]
+        engine.trainedConfig = trained
+
+        var events: [GestureEvent] = []
+        var t = 100.0
+        for _ in 0..<20 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(0)])).events
+            t += 1.0 / 30
+        }
+        for i in 0..<15 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(Double(i) / 14)])).events
+            t += 1.0 / 30
+        }
+        for _ in 0..<25 {
+            events += engine.process(HandFrame(time: t, hands: [swipe(1)])).events
+            t += 1.0 / 30
+        }
+        let fired = events.compactMap { event -> UUID? in
+            if case .trainedGesture(let id) = event { return id }
+            return nil
+        }
+        XCTAssertEqual(fired, [id], "a trained gesture must match however the mouse is mapped")
+    }
+
+    func testTrainedDipGestureFiresDespiteItsOwnClick() {
+        // The reported conflict: a trained gesture that folds the index
+        // finger IS the click gesture to the mouse machinery. With trained
+        // priority on, the click that slips in before recognition must not
+        // cancel the match — the trained gesture still fires.
+        func dip() -> Hand { SyntheticHand.mouseTap(indexDown: true) }
+        let recorder = TakeRecorder()
+        var takes: [GestureTake] = []
+        for _ in 0..<3 {
+            var t = 0.0
+            recorder.begin(handCount: 1, at: t)
+            var captured = false
+            for _ in 0..<70 { // the held pose becomes a static take
+                if case .finished(let take)? = recorder.feed(
+                    [GestureTrace.snapshot(of: dip(), minJointConfidence: 0.25)!], at: t) {
+                    takes.append(take)
+                    captured = true
+                    break
+                }
+                t += 1.0 / 30
+            }
+            XCTAssertTrue(captured, "the held fold must record as a take")
+        }
+        guard let build = TrainedGestureBuilder.build(takes: takes) else {
+            return XCTFail("no build")
+        }
+        let id = UUID()
+        var trained = TrainedGestureDetector.Config()
+        trained.overridesMouse = true
+        trained.gestures = [TrainedGestureDetector.Compiled(
+            id: id, handCount: 1, template: build.template,
+            duration: build.duration, threshold: build.baseThreshold * 1.15,
+            holdSeconds: 0.4)]
+        engine.trainedConfig = trained
+
+        var events: [GestureEvent] = []
+        var t = 0.0
+        for _ in 0..<10 { // armed and open
+            events += engine.process(HandFrame(time: t, hands: [SyntheticHand.openRelaxed()])).events
+            t += 1.0 / 30
+        }
+        for _ in 0..<50 { // the fold, held — it will click on its way in
+            events += engine.process(HandFrame(time: t, hands: [dip()])).events
+            t += 1.0 / 30
+        }
+        let fired = events.compactMap { event -> UUID? in
+            if case .trainedGesture(let id) = event { return id }
+            return nil
+        }
+        XCTAssertEqual(fired, [id], "the trained gesture fires even though its fold clicked")
+    }
+
     func testEngineResetClearsDetector() {
         enable(.thumbsUp)
         var t = 0.0
