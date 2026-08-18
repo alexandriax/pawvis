@@ -3,7 +3,7 @@ import XCTest
 
 /// Decode behavior of the agent-confirm setting: the safety default is ON,
 /// and the section stays field-tolerant like every other config.
-final class VoiceControlConfigTests: XCTestCase {
+final class AgentConfirmConfigTests: XCTestCase {
     private func decode(_ json: String) throws -> VoiceControlConfig {
         try JSONDecoder().decode(VoiceControlConfig.self, from: Data(json.utf8))
     }
