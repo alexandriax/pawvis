@@ -30,7 +30,7 @@ your Mac; the one exception is the opt-in agent hand-off below.
   <sub>Signed and notarized · macOS 14+ · unzip and drag to Applications</sub>
 </p>
 
-[![Watch the Pawvis demo](docs/assets/demo-poster.jpg)](https://pawvis.app/#demoVideo)
+[![Watch the Pawvis demo](https://img.youtube.com/vi/xDQwwXdeuUs/maxresdefault.jpg)](https://youtu.be/xDQwwXdeuUs)
 
 > [!IMPORTANT]
 > **Pawvis really does control your Mac.** It moves the cursor and posts real
