@@ -16,7 +16,7 @@ DerivedData/
 # Icon working files
 *.iconset/
 
-# Stale local working copies of demo footage (the committed site video is
-# docs/assets/demo.mp4)
+# Stale local working copies of demo footage (the film itself lives on
+# YouTube; nothing in the repo serves an mp4)
 /demo.mp4
 /demo-v2.mp4

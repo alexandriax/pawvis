@@ -921,11 +921,11 @@ Rules that keep the site honest:
   `docs/assets/app-*.png` (`app-gesture-guide.png`, `app-menu.png`,
   `app-settings-custom.png`, `app-settings-gestures.png`) are window captures
   of the running app, shot with alpha intact; retake them by hand after a UI
-  change, keeping the same filenames. `docs/assets/demo.mp4` and its poster
-  `demo-poster.jpg` are a generated demo film, made once with OpenAI's video
-  API using the git-ignored `.env` key. The site itself needs no key, ever;
-  the Secrets section above still holds. Regenerate only deliberately,
-  keeping the same filenames.
+  change, keeping the same filenames. The demo film itself lives on YouTube
+  now; only its hero still `docs/assets/demo-cover.jpg` is committed. The
+  film was generated once with OpenAI's video API using the git-ignored
+  `.env` key. The site itself needs no key, ever; the Secrets section above
+  still holds. Regenerate only deliberately, keeping the same filename.
 - **The download button points at the permanent asset URL**
   (`releases/latest/download/Pawvis.zip`), same rule as the README button:
   never version it, and it never needs editing per release.
