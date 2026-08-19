@@ -1,0 +1,7 @@
+node_modules/
+frames/
+probe/
+preview*/
+*.mp4
+ffmpeg2pass-*.log*
+audio/mix.wav

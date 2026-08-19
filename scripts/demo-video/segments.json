@@ -1,0 +1,11 @@
+[
+  {"id": "n1", "text": "Meet Maya. She's about to control her Mac — without touching it."},
+  {"id": "n2", "text": "This is Pawvis. It turns the webcam you already have into touch-free hand control — powered by Apple Intelligence, running entirely on your Mac. Nothing you do ever leaves it. And it's completely free, and open source."},
+  {"id": "n3", "text": "Raise an open hand, and the claw cursor rides her palm. Wherever her hand goes, the cursor follows."},
+  {"id": "n4", "text": "Dip an index finger to click — like tapping an invisible mouse. Keep it down, and she can grab a window and drag it anywhere."},
+  {"id": "n5", "text": "Custom gestures fire real actions. Her shaka? That opens her video calls."},
+  {"id": "n6", "text": "Fold two fingers in, and her hand becomes the scroll wheel — the page glides from across the room."},
+  {"id": "n7", "text": "And if Pawvis doesn't know your gesture… teach it. Show it your move a few times — it learns it live, right in the trainer — then bind it to any action you like."},
+  {"id": "n8", "text": "There's plenty more: flick between desktops, snap windows into place, or just talk to it — \"Pawvis, open Notes\" — understood on-device, step by step."},
+  {"id": "n9", "text": "Pawvis. Your hand is the mouse. Free and open source for macOS — download it at pawvis dot app."}
+]
