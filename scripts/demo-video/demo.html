@@ -1,0 +1,1268 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Bricolage Grotesque'; src: url('../../docs/assets/fonts/bricolage-grotesque-var-latin.woff2') format('woff2'); font-weight: 200 800; }
+  @font-face { font-family: 'Inter'; src: url('../../docs/assets/fonts/inter-var-latin.woff2') format('woff2'); font-weight: 100 900; }
+  @font-face { font-family: 'Instrument Serif'; src: url('../../docs/assets/fonts/instrument-serif-italic-latin.woff2') format('woff2'); font-style: italic; font-weight: 400; }
+  @font-face { font-family: 'JetBrains Mono'; src: url('../../docs/assets/fonts/jetbrains-mono-var-latin.woff2') format('woff2'); font-weight: 100 800; }
+  html, body { margin: 0; background: #0A0714; overflow: hidden; }
+  svg { display: block; } text { user-select: none; }
+</style>
+</head>
+<body>
+<svg id="stage" width="1920" height="1080" viewBox="0 0 1920 1080"></svg>
+<script>
+'use strict';
+// ================================================================ constants
+const W = 1920, H = 1080;
+const PURPLE = '#8B5CF6', PURPLE_L = '#C4B5FD', BLUE = '#0EA5E9', BLUE_L = '#7DD3FC';
+const BG = '#0A0714', PANEL = '#171129', PANEL_HI = '#1E1838', LINE = 'rgba(196,181,253,0.15)';
+const INK = '#EFECF8', INK2 = '#BCB4D2', DIM = '#8E86A8';
+const SKIN = '#C98A5E', SKIN_D = '#A96F45', HAIR = '#231831';
+const AMBER = '#FFB86B', PINK = '#F472B6', GREEN = '#34D399', RED = '#FB7185';
+const SWEATER = '#6244D9', SWEATER_D = '#4F33BE';
+const FD = 'Bricolage Grotesque', FB = 'Inter', FS = 'Instrument Serif', FM = 'JetBrains Mono';
+const TIP_COLORS = { t: AMBER, i: BLUE_L, m: PURPLE_L, r: PURPLE, p: PINK };
+const TL = { s1:[0,6], s2:[6,22.8], s3:[22.8,31.2], s4:[31.2,39.6], s5:[39.6,46.5],
+             s6:[46.5,55], s7:[55,66.3], s8:[66.3,78.4], s9:[78.4,87.5] };
+const DUR = 87.5;
+
+// ================================================================ helpers
+const NS = 'http://www.w3.org/2000/svg';
+function el(n, a, p) { const e = document.createElementNS(NS, n); if (a) for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
+function grp(p, a) { return el('g', a || {}, p); }
+function label(p, o, str) {
+  const e = el('text', {
+    x: o.x || 0, y: o.y || 0, 'font-family': `'${o.f || FB}'`, 'font-size': o.s || 30,
+    'font-weight': o.w || 600, fill: o.fill || INK, 'text-anchor': o.a || 'middle',
+    'letter-spacing': o.ls || 0, 'font-style': o.it ? 'italic' : 'normal', opacity: o.o == null ? 1 : o.o,
+  }, p);
+  e.textContent = str; return e;
+}
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lin = x=>x, eo = x=>1-Math.pow(1-x,3), ei = x=>x*x*x, eio = x=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const xo = x=>x>=1?1:1-Math.pow(2,-10*x);                          // expo out
+const back = x=>{const c=1.70158;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2);};
+const spring = x=>x>=1?1:1-Math.exp(-5.2*x)*Math.cos(9*x);        // damped pop
+function K(t, stops, ez) {
+  ez = ez || eio;
+  if (t <= stops[0][0]) return stops[0][1];
+  const n = stops.length;
+  if (t >= stops[n-1][0]) return stops[n-1][1];
+  for (let i = 0; i < n-1; i++) {
+    const a = stops[i][0], va = stops[i][1], b = stops[i+1][0], vb = stops[i+1][1];
+    if (t < b) { const u = (t-a)/(b-a); return va + (vb-va)*ez(u); }
+  }
+  return stops[n-1][1];
+}
+function setT(e, x, y, s, r) { e.setAttribute('transform', `translate(${x} ${y}) rotate(${r||0}) scale(${s==null?1:s})`); }
+function O(e, o) { e.setAttribute('opacity', clamp(o, 0, 1)); }
+function fadeIO(e, t, a, b, c, d) {
+  let o;
+  if (t < a) o = 0; else if (t < b) o = (t-a)/(b-a); else if (c == null || t < c) o = 1;
+  else if (t < d) o = 1-(t-c)/(d-c); else o = 0;
+  O(e, o); return o;
+}
+// camera punch: returns scale for a punch event at time p
+function punch(t, p) { const d = t - p; if (d < 0 || d > .5) return 0; return d < .1 ? xo(d/.1) : 1 - eio((d-.1)/.4); }
+let CLIPN = 0;
+function clipRect(x, y, w, h, rx) {
+  const id = 'c' + (++CLIPN);
+  const cp = el('clipPath', { id }, defs);
+  el('rect', { x, y, width: w, height: h, rx: rx || 0 }, cp);
+  return `url(#${id})`;
+}
+
+// ================================================================ defs
+const stage = document.getElementById('stage');
+const defs = el('defs', {}, stage);
+function gradStops(g, stops) { for (const [off, col, op] of stops) el('stop', { offset: off, 'stop-color': col, 'stop-opacity': op == null ? 1 : op }, g); }
+const bgR = el('radialGradient', { id:'bgR', cx:.5, cy:.42, r:.85 }, defs);
+gradStops(bgR, [['0%', '#161038'], ['55%', '#0E0A20'], ['100%', '#080511']]);
+const brand = el('linearGradient', { id:'brand', x1:0, y1:0, x2:1, y2:0 }, defs);
+gradStops(brand, [['0%', PURPLE_L], ['32%', PURPLE], ['78%', BLUE], ['100%', BLUE_L]]);
+const brandV = el('linearGradient', { id:'brandV', x1:0, y1:0, x2:0, y2:1 }, defs);
+gradStops(brandV, [['0%', PURPLE], ['100%', '#1D4ED8']]);
+const wall = el('linearGradient', { id:'wall', x1:0, y1:0, x2:1, y2:1 }, defs);
+gradStops(wall, [['0%', '#332766'], ['48%', '#28296B'], ['100%', '#153B69']]);
+const wall2 = el('linearGradient', { id:'wall2', x1:0, y1:0, x2:1, y2:1 }, defs);
+gradStops(wall2, [['0%', '#3A2B72'], ['100%', '#1D4470']]);
+const glowP = el('radialGradient', { id:'glowP' }, defs); gradStops(glowP, [['0%', PURPLE, .34], ['100%', PURPLE, 0]]);
+const glowB = el('radialGradient', { id:'glowB' }, defs); gradStops(glowB, [['0%', BLUE, .26], ['100%', BLUE, 0]]);
+const glowW = el('radialGradient', { id:'glowW' }, defs); gradStops(glowW, [['0%', AMBER, .22], ['100%', AMBER, 0]]);
+const cone = el('linearGradient', { id:'cone', x1:0, y1:0, x2:1, y2:0 }, defs);
+gradStops(cone, [['0%', BLUE_L, .32], ['100%', BLUE_L, 0]]);
+const vin = el('radialGradient', { id:'vin', cx:.5, cy:.45, r:.78 }, defs);
+gradStops(vin, [['0%', '#000', 0], ['70%', '#000', 0], ['100%', '#030109', .66]]);
+const leak = el('linearGradient', { id:'leak', x1:0, y1:0, x2:1, y2:1 }, defs);
+gradStops(leak, [['0%', PURPLE_L, .07], ['30%', PURPLE_L, 0], ['100%', PURPLE_L, 0]]);
+const skinG = el('linearGradient', { id:'skinG', x1:0, y1:0, x2:1, y2:0 }, defs);
+gradStops(skinG, [['0%', SKIN], ['78%', SKIN], ['100%', '#B97952']]);
+const shLg = el('filter', { id:'shLg', x:'-45%', y:'-45%', width:'190%', height:'190%' }, defs);
+el('feDropShadow', { dx:0, dy:22, stdDeviation:28, 'flood-color':'#030109', 'flood-opacity':.6 }, shLg);
+const shSm = el('filter', { id:'shSm', x:'-45%', y:'-45%', width:'190%', height:'190%' }, defs);
+el('feDropShadow', { dx:0, dy:8, stdDeviation:12, 'flood-color':'#030109', 'flood-opacity':.5 }, shSm);
+const shHand = el('filter', { id:'shHand', x:'-60%', y:'-60%', width:'220%', height:'220%' }, defs);
+el('feDropShadow', { dx:0, dy:16, stdDeviation:20, 'flood-color':'#030109', 'flood-opacity':.42 }, shHand);
+// animated film grain
+const grainF = el('filter', { id:'grain', x:'0%', y:'0%', width:'100%', height:'100%' }, defs);
+const turb = el('feTurbulence', { type:'fractalNoise', baseFrequency:'0.71', numOctaves:2, seed:7, stitchTiles:'stitch', result:'n' }, grainF);
+el('feColorMatrix', { in:'n', type:'matrix', values:'0 0 0 0 0.85  0 0 0 0 0.85  0 0 0 0 1  0 0 0 0.6 0' }, grainF);
+
+// ================================================================ background
+el('rect', { width: W, height: H, fill: 'url(#bgR)' }, stage);
+const bgG = grp(stage);
+const orbA = el('ellipse', { cx:380, cy:210, rx:700, ry:460, fill:'url(#glowP)' }, bgG);
+const orbB = el('ellipse', { cx:1600, cy:920, rx:760, ry:500, fill:'url(#glowB)' }, bgG);
+const orbC = el('ellipse', { cx:1250, cy:120, rx:420, ry:280, fill:'url(#glowP)', opacity:.5 }, bgG);
+const dotsG = grp(bgG, { opacity:.55 });
+for (let i = 0; i < 32; i++) for (let j = 0; j < 18; j++) {
+  if ((i*7 + j*13) % 6 < 4) continue;
+  el('circle', { cx: i*62+18, cy: j*62+14, r: 1.5, fill: PURPLE_L, opacity: .06 }, dotsG);
+}
+
+// ================================================================ claw cursor / glyph
+const PAD_D = 'M -40 6 C -40 -8 -33 -15 -25 -17 C -27 -30 -14 -36 -7 -27 C -4 -38 10 -38 13 -27 C 20 -35 32 -29 30 -17 C 37 -14 42 -7 42 5 C 42 27 24 40 1 40 C -22 40 -40 27 -40 6 Z';
+const TALON_D = 'M -6 -2 C -10 -22 -6 -40 0 -50 C 5 -40 8 -22 5 -2 C 2 3 -3 3 -6 -2 Z';
+function clawShape(p, fill, outline) {
+  const g = grp(p);
+  const talons = grp(g), pad = grp(g);
+  const oa = outline ? { stroke: 'rgba(8,5,17,0.45)', 'stroke-width': 3 } : {};
+  for (const [dx, dy, rot, sc] of [[-25,-14,-16,.92],[1,-20,0,1.06],[26,-14,16,.92]])
+    el('path', { d: TALON_D, fill, transform:`translate(${dx} ${dy}) rotate(${rot}) scale(${sc})`, ...oa }, talons);
+  el('path', { d: PAD_D, fill, ...oa }, pad);
+  return { g, talons, pad };
+}
+function makeClaw(p, scale) {
+  const g = grp(p);
+  const s = grp(g); s.setAttribute('transform', `scale(${scale})`);
+  const ring = el('circle', { r: 74, fill:'none', stroke: BLUE_L, 'stroke-width': 8, opacity: 0 }, s);
+  const body = clawShape(s, '#FFFFFF', true);
+  body.g.setAttribute('filter', 'url(#shSm)');
+  return { g, ring,
+    fill(c) { for (const n of [...body.talons.children, ...body.pad.children]) n.setAttribute('fill', c); },
+    retract(k) { body.talons.setAttribute('transform', `translate(0 ${k*17}) scale(1 ${1-k*.5})`); } };
+}
+function clawGlyph(p, scale, fill) { // brand mark for chips
+  const g = grp(p);
+  const s = grp(g); s.setAttribute('transform', `scale(${scale})`);
+  clawShape(s, fill, false);
+  return g;
+}
+
+// ================================================================ articulated hand v3 — unified silhouette
+// pose: per finger [baseAngle, len(0..1), hook(deg)]
+const POSES = {
+  open:   { t:[-52,1,0],    i:[-11,1,0],   m:[0,1,0],    r:[10,1,0],   p:[23,1,0]   },
+  dip:    { t:[-52,1,0],    i:[-8,.97,95], m:[0,1,0],    r:[10,1,0],   p:[23,1,0]   },
+  fist:   { t:[-26,.6,52],  i:[-5,.24,0],  m:[0,.24,0],  r:[8,.24,0],  p:[18,.26,0] },
+  shaka:  { t:[-80,1.08,-20],i:[-6,.24,0], m:[0,.23,0],  r:[8,.23,0],  p:[35,1.05,-12] },
+  scroll: { t:[-52,.9,0],   i:[-11,1,0],   m:[0,.26,0],  r:[8,.26,0],  p:[23,1,0]   },
+  peace:  { t:[-30,.62,50], i:[-16,1.03,0],m:[3,1.03,0], r:[10,.26,0], p:[22,.26,0] },
+  thumbR: { t:[-84,.96,0], i:[-5,.24,0],  m:[0,.24,0],  r:[8,.24,0],  p:[18,.26,0] },
+};
+const FDEF3 = {
+  t: { bx:-56, by:30,  hw:18.5, L:104 },
+  i: { bx:-51, by:-58, hw:17,   L:114 },
+  m: { bx:-17, by:-64, hw:17.5, L:126 },
+  r: { bx:17,  by:-60, hw:16.5, L:116 },
+  p: { bx:49,  by:-48, hw:14.5, L:90  },
+};
+const RAD = d => d*Math.PI/180;
+function fingerFrame(k, px) {
+  const f = FDEF3[k], a = RAD(px[k][0]);
+  return { f, a, len: px[k][1], hook: px[k][2],
+    dir: [Math.sin(a), -Math.cos(a)], nrm: [Math.cos(a), Math.sin(a)] };
+}
+function handTip(px, k) {
+  const { f, a, len, hook } = fingerFrame(k, px);
+  const Lp = f.L*.56, Ld = f.L*.44, h = RAD(hook);
+  const vx = (Ld*len)*Math.sin(h), vy = -(Ld*len)*Math.cos(h);
+  const lx = vx, ly = -Lp*len + vy;
+  return [f.bx + lx*Math.cos(a) - ly*Math.sin(a), f.by + lx*Math.sin(a) + ly*Math.cos(a)];
+}
+function mixPose(a, b, u) {
+  const out = {};
+  for (const k of ['t','i','m','r','p'])
+    out[k] = [0,1,2].map(j => a[k][j] + (b[k][j]-a[k][j])*u);
+  return out;
+}
+function makeHand(p, opt) {
+  opt = opt || {};
+  const scale = opt.scale || 1, skin = opt.skin || SKIN;
+  const g = grp(p);
+  const root = grp(g); root.setAttribute('transform', `scale(${scale})`);
+  if (!opt.noShadow) root.setAttribute('filter', 'url(#shHand)');
+  // forearm behind everything
+  el('rect', { x:-49, y:100, width:98, height:190, rx:30, fill: opt.sleeve || SWEATER }, root);
+  el('rect', { x:-49, y:100, width:26, height:190, rx:13, fill: SWEATER_D, opacity:.55 }, root);
+  // unified palm+finger silhouette
+  const sil = el('path', { fill: skin }, root);
+  const clipId = 'hclip' + (++CLIPN);
+  const hcp = el('clipPath', { id: clipId }, defs);
+  const clipSil = el('path', {}, hcp);
+  const clipThumb = el('path', {}, hcp);
+  const shadeG = grp(root, { 'clip-path': `url(#${clipId})` });
+  el('ellipse', { cx:30, cy:44, rx:84, ry:90, fill: SKIN_D, opacity:.15 }, shadeG);
+  el('ellipse', { cx:-4, cy:8, rx:44, ry:34, fill: SKIN_D, opacity:.07 }, shadeG);
+  const creases = grp(root);
+  el('path', { d:'M -34 2 Q 0 14 32 6', fill:'none', stroke:SKIN_D, 'stroke-width':3, 'stroke-linecap':'round', opacity:.17 }, creases);
+  el('path', { d:'M -30 30 Q 2 40 32 32', fill:'none', stroke:SKIN_D, 'stroke-width':3, 'stroke-linecap':'round', opacity:.13 }, creases);
+  el('path', { d:'M -42 22 Q -32 46 -14 60', fill:'none', stroke:SKIN_D, 'stroke-width':3, 'stroke-linecap':'round', opacity:.13 }, creases);
+  // wristbands over the wrist (echoing the icon)
+  el('rect', { x:-58, y:74, width:116, height:25, rx:12.5, fill: PURPLE }, root);
+  el('rect', { x:-58, y:102, width:116, height:24, rx:12, fill: BLUE }, root);
+  const thumbShadow = el('path', { fill:'#4A2E18', opacity:.10, transform:'translate(5 9)' }, root);
+  const thumb = el('path', { fill: skin }, root);
+  // articulated distal overlays + fold creases
+  const over = {}, folds = {};
+  for (const k of ['t','i','m','r','p']) {
+    const og = grp(root); og.style.display = 'none';
+    const f = FDEF3[k];
+    el('circle', { r: f.hw*.9, fill: skin }, og);
+    el('rect', { x:-f.hw*.86, y:-(f.L*.44)-2, width:f.hw*1.72, height:f.L*.44+12, rx:f.hw*.86, fill: skin }, og);
+    over[k] = og;
+    folds[k] = el('path', { fill:'none', stroke:SKIN_D, 'stroke-width':2.6, 'stroke-linecap':'round', opacity:0 }, root);
+  }
+  // landmarks
+  const lm = grp(root, { opacity: 0 });
+  const lmLines = {}, lmDots = {};
+  el('circle', { cx:0, cy:26, r:15, fill:'none', stroke:'#FFFFFF', 'stroke-width':3.4, opacity:.9 }, lm);
+  for (const k of ['t','i','m','r','p']) {
+    lmLines[k] = el('line', { x1:0, y1:26, x2:0, y2:-60, stroke:'#FFFFFF', 'stroke-width':2.4, opacity:.42 }, lm);
+    lmDots[k] = el('circle', { r:7.5, fill: TIP_COLORS[k], stroke:'#FFFFFF', 'stroke-width':2.4 }, lm);
+  }
+  const P = (x, y) => x.toFixed(1) + ' ' + y.toFixed(1);
+  const hand = {
+    g, lm, tips:{},
+    pose(px) {
+      const fg = {};
+      for (const k of ['i','m','r','p']) {
+        const ff = fingerFrame(k, px);
+        const { f, dir, nrm, len, hook } = ff;
+        const hooked = Math.abs(hook) > 6;
+        const sl = len * (hooked ? f.L*.56 : f.L);
+        const tw = .86;
+        fg[k] = {
+          bl: [f.bx - nrm[0]*f.hw - dir[0]*8,  f.by - nrm[1]*f.hw - dir[1]*8],
+          br: [f.bx + nrm[0]*f.hw - dir[0]*8,  f.by + nrm[1]*f.hw - dir[1]*8],
+          tl: [f.bx - nrm[0]*f.hw*tw + dir[0]*sl, f.by - nrm[1]*f.hw*tw + dir[1]*sl],
+          tr: [f.bx + nrm[0]*f.hw*tw + dir[0]*sl, f.by + nrm[1]*f.hw*tw + dir[1]*sl],
+          cap: f.hw*1.18, dir,
+        };
+      }
+      let d = `M ${P(fg.i.bl[0], fg.i.bl[1])} `;
+      for (const k of ['i','m','r','p']) {
+        const F2 = fg[k];
+        d += `L ${P(F2.tl[0], F2.tl[1])} C ${P(F2.tl[0]+F2.dir[0]*F2.cap, F2.tl[1]+F2.dir[1]*F2.cap)} ${P(F2.tr[0]+F2.dir[0]*F2.cap, F2.tr[1]+F2.dir[1]*F2.cap)} ${P(F2.tr[0], F2.tr[1])} L ${P(F2.br[0], F2.br[1])} `;
+        if (k !== 'p') {
+          const nk = { i:'m', m:'r', r:'p' }[k];
+          const vx = (F2.br[0] + fg[nk].bl[0]) / 2, vy = Math.max(F2.br[1], fg[nk].bl[1]) + 16;
+          d += `Q ${P(vx, vy)} ${P(fg[nk].bl[0], fg[nk].bl[1])} `;
+        }
+      }
+      d += `C 74 -8 66 54 46 88 L -50 88 C -88 42 -88 -14 ${P(fg.i.bl[0], fg.i.bl[1])} Z`;
+      sil.setAttribute('d', d); clipSil.setAttribute('d', d);
+      // thumb capsule
+      {
+        const ff = fingerFrame('t', px);
+        const { f, dir, nrm, len, hook } = ff;
+        const hooked = Math.abs(hook) > 16;
+        const sl = len * (hooked ? f.L*.56 : f.L);
+        const tw = .88, cap = f.hw*1.18;
+        const bl = [f.bx - nrm[0]*f.hw - dir[0]*16, f.by - nrm[1]*f.hw - dir[1]*16];
+        const br = [f.bx + nrm[0]*f.hw - dir[0]*16, f.by + nrm[1]*f.hw - dir[1]*16];
+        const tl = [f.bx - nrm[0]*f.hw*tw + dir[0]*sl, f.by - nrm[1]*f.hw*tw + dir[1]*sl];
+        const tr = [f.bx + nrm[0]*f.hw*tw + dir[0]*sl, f.by + nrm[1]*f.hw*tw + dir[1]*sl];
+        const td = `M ${P(bl[0], bl[1])} L ${P(tl[0], tl[1])} C ${P(tl[0]+dir[0]*cap, tl[1]+dir[1]*cap)} ${P(tr[0]+dir[0]*cap, tr[1]+dir[1]*cap)} ${P(tr[0], tr[1])} L ${P(br[0], br[1])} Q ${P(f.bx - dir[0]*30, f.by - dir[1]*30)} ${P(bl[0], bl[1])} Z`;
+        thumb.setAttribute('d', td); clipThumb.setAttribute('d', td);
+        thumbShadow.setAttribute('d', td);
+      }
+      for (const k of ['t','i','m','r','p']) {
+        const ff = fingerFrame(k, px);
+        const { f, a, len, hook } = ff;
+        const thr = k === 't' ? 16 : 6;
+        if (Math.abs(hook) > thr) {
+          const Lp = f.L*.56*len;
+          const ox = f.bx + Lp*Math.sin(a), oy = f.by - Lp*Math.cos(a);
+          over[k].style.display = '';
+          over[k].setAttribute('transform', `translate(${ox} ${oy}) rotate(${px[k][0] + hook}) scale(1 ${len})`);
+        } else over[k].style.display = 'none';
+        if (k !== 't' && len < .5) {
+          const tip = handTip(px, k);
+          const w2 = f.hw*.62;
+          folds[k].setAttribute('d', `M ${tip[0] - Math.cos(a)*w2} ${tip[1] + 7 - Math.sin(a)*w2} Q ${tip[0]} ${tip[1] + 11} ${tip[0] + Math.cos(a)*w2} ${tip[1] + 7 + Math.sin(a)*w2}`);
+          folds[k].setAttribute('opacity', clamp((1-len)*.5, 0, .4));
+        } else folds[k].setAttribute('opacity', 0);
+        const tip = handTip(px, k);
+        lmLines[k].setAttribute('x2', tip[0]); lmLines[k].setAttribute('y2', tip[1]);
+        lmDots[k].setAttribute('cx', tip[0]); lmDots[k].setAttribute('cy', tip[1]);
+        hand.tips[k] = tip;
+      }
+    },
+    at(x, y, r) { setT(g, x, y, 1, r || 0); },
+  };
+  hand.pose(POSES.open);
+  return hand;
+}
+
+// ================================================================ UI components
+function macWindow(p, o) {
+  const g = grp(p); setT(g, o.x, o.y);
+  const bar = o.bar || 42;
+  el('rect', { width:o.w, height:o.h, rx:14, fill: o.fill || PANEL, stroke: LINE, 'stroke-width':1.4,
+               filter: o.noShadow ? 'none' : 'url(#shSm)' }, g);
+  el('path', { d:`M 14 0 H ${o.w-14} A 14 14 0 0 1 ${o.w} 14 V ${bar} H 0 V 14 A 14 14 0 0 1 14 0 Z`, fill:'#201A3C' }, g);
+  el('line', { x1:0, y1:bar, x2:o.w, y2:bar, stroke:'rgba(8,5,17,0.5)', 'stroke-width':1.4 }, g);
+  for (const [c, cx] of [['#FF5F57',24],['#FEBC2E',45],['#28C840',66]]) el('circle', { cx, cy:bar/2, r:6.5, fill:c }, g);
+  if (o.title) label(g, { x:o.w/2, y:bar/2+7, s:19, w:600, fill:INK2 }, o.title);
+  const content = grp(g, { 'clip-path': clipRect(0, bar, o.w, o.h-bar, 2) });
+  return { g, content, bar };
+}
+function miniDockIcon(p, x, y, kind) {
+  const g = grp(p); setT(g, x, y);
+  const bgc = { finder:'#3B82F6', safari:'#0EA5E9', mail:'#8B5CF6', photos:'#F472B6', notes:'#FFB86B', music:'#FB7185' }[kind];
+  el('rect', { x:-19, y:-19, width:38, height:38, rx:11, fill:bgc }, g);
+  const w = { stroke:'#FFF', 'stroke-width':3, fill:'none', 'stroke-linecap':'round' };
+  if (kind === 'finder') { el('path', { d:'M -8 -6 v 5 M 8 -6 v 5 M -9 7 Q 0 13 9 7', ...w }, g); }
+  if (kind === 'safari') { el('circle', { r:11, ...w }, g); el('path', { d:'M 5 -5 L 2 2 L -5 5 L -2 -2 Z', fill:'#FFF' }, g); }
+  if (kind === 'mail') { el('rect', { x:-11, y:-8, width:22, height:16, rx:3, ...w }, g); el('path', { d:'M -11 -6 L 0 3 L 11 -6', ...w }, g); }
+  if (kind === 'photos') { for (let i = 0; i < 5; i++) el('ellipse', { cx:Math.cos(i*1.257)*6, cy:Math.sin(i*1.257)*6, rx:5.5, ry:5.5, fill:'#FFF', opacity:.85 }, g); }
+  if (kind === 'notes') { el('path', { d:'M -7 -6 h 14 M -7 0 h 14 M -7 6 h 9', ...w }, g); }
+  if (kind === 'music') { el('path', { d:'M -3 7 V -7 L 8 -9 V 5', ...w }, g); el('circle', { cx:-6, cy:7, r:3.4, fill:'#FFF' }, g); el('circle', { cx:5, cy:5, r:3.4, fill:'#FFF' }, g); }
+  return g;
+}
+function desktopScreen(p, o) { // display card with bezel, glare, menu bar, dock
+  const g = grp(p); setT(g, o.x, o.y);
+  el('ellipse', { cx:o.w/2, cy:o.h+26, rx:o.w*.46, ry:22, fill:'#030109', opacity:.5 }, g);
+  el('rect', { x:-16, y:-16, width:o.w+32, height:o.h+32, rx:26, fill:'#211B3E', stroke:LINE, 'stroke-width':2, filter:'url(#shLg)' }, g);
+  el('rect', { x:-8, y:-8, width:o.w+16, height:o.h+16, rx:20, fill:'#0A0714' }, g);
+  el('rect', { width:o.w, height:o.h, rx:12, fill:'url(#wall)' }, g);
+  const inner = grp(g, { 'clip-path': clipRect(0, 0, o.w, o.h, 12) });
+  // wallpaper hills
+  el('path', { d:`M 0 ${o.h*.78} Q ${o.w*.25} ${o.h*.62} ${o.w*.52} ${o.h*.74} T ${o.w} ${o.h*.66} V ${o.h} H 0 Z`, fill:'#1D1640', opacity:.6 }, inner);
+  el('path', { d:`M 0 ${o.h*.88} Q ${o.w*.3} ${o.h*.76} ${o.w*.6} ${o.h*.86} T ${o.w} ${o.h*.8} V ${o.h} H 0 Z`, fill:'#140F30', opacity:.7 }, inner);
+  el('circle', { cx:o.w*.8, cy:o.h*.22, r:46, fill:PURPLE_L, opacity:.14 }, inner);
+  // menu bar
+  el('rect', { width:o.w, height:32, fill:'rgba(8,5,17,0.66)' }, inner);
+  clawGlyph(inner, .14, PURPLE_L).setAttribute('transform', 'translate(24 19) scale(0.14)');
+  label(inner, { x:52, y:22, s:16, w:700, fill:INK, a:'start' }, 'Pawvis');
+  let mx = 122;
+  for (const m of ['File', 'Edit', 'View', 'Window']) { label(inner, { x:mx, y:22, s:15, w:500, fill:DIM, a:'start' }, m); mx += m.length*9 + 26; }
+  el('circle', { cx:o.w-206, cy:16, r:4, fill:GREEN }, inner);
+  { // wifi fan — arcs concentric about (wx, 22)
+    const wx = o.w - 168;
+    for (const [r, dx, dy] of [[6, 4.24, 17.76], [11, 7.78, 14.22], [16, 11.31, 10.69]])
+      el('path', { d:`M ${wx-dx} ${dy} A ${r} ${r} 0 0 1 ${wx+dx} ${dy}`, stroke:INK2, 'stroke-width':2.2, fill:'none', 'stroke-linecap':'round' }, inner);
+    el('circle', { cx:wx, cy:22, r:2.1, fill:INK2 }, inner);
+  }
+  el('rect', { x:o.w-148, y:10, width:22, height:12, rx:3.5, stroke:INK2, 'stroke-width':2, fill:'none' }, inner);
+  el('rect', { x:o.w-146, y:12, width:13, height:8, rx:2, fill:INK2 }, inner);
+  label(inner, { x:o.w-24, y:22, s:15, w:550, fill:INK2, a:'end', f:FM }, 'Mon 9:41');
+  // dock
+  const dw = Math.min(o.w*.5, 420), dx = (o.w-dw)/2, dy = o.h-62;
+  el('rect', { x:dx, y:dy, width:dw, height:52, rx:16, fill:'rgba(239,236,248,0.09)', stroke:'rgba(239,236,248,0.15)', 'stroke-width':1.2 }, inner);
+  const kinds = ['finder','safari','mail','photos','notes','music'];
+  for (let i = 0; i < 6; i++) miniDockIcon(inner, dx+30+i*(dw-60)/5, dy+26, kinds[i]);
+  // glare
+  el('path', { d:`M ${o.w*.52} 0 L ${o.w*.7} 0 L ${o.w*.3} ${o.h} L ${o.w*.16} ${o.h} Z`, fill:'#FFF', opacity:.03 }, inner);
+  el('path', { d:`M ${o.w*.76} 0 L ${o.w*.83} 0 L ${o.w*.47} ${o.h} L ${o.w*.42} ${o.h} Z`, fill:'#FFF', opacity:.022 }, inner);
+  return { g, inner, w:o.w, h:o.h };
+}
+function camPanel(p, o) { // webcam viewfinder framing the hand
+  const g = grp(p); setT(g, o.x, o.y);
+  el('rect', { x:-14, y:-14, width:o.w+28, height:o.h+28, rx:26, fill:'rgba(23,17,41,0.85)', stroke:LINE, 'stroke-width':2, filter:'url(#shLg)' }, g);
+  el('rect', { width:o.w, height:o.h, rx:14, fill:'#0B081A' }, g);
+  const inner = grp(g, { 'clip-path': clipRect(0, 0, o.w, o.h, 14) });
+  for (let i = 1; i < 3; i++) {
+    el('line', { x1:o.w*i/3, y1:0, x2:o.w*i/3, y2:o.h, stroke:PURPLE_L, opacity:.05, 'stroke-width':1.4 }, inner);
+    el('line', { x1:0, y1:o.h*i/3, x2:o.w, y2:o.h*i/3, stroke:PURPLE_L, opacity:.05, 'stroke-width':1.4 }, inner);
+  }
+  el('ellipse', { cx:o.w/2, cy:o.h*.55, rx:o.w*.55, ry:o.h*.5, fill:'url(#glowP)', opacity:.5 }, inner);
+  const over = grp(g);
+  for (const [bx, by, sx, sy] of [[22,22,1,1],[o.w-22,22,-1,1],[22,o.h-22,1,-1],[o.w-22,o.h-22,-1,-1]])
+    el('path', { d:`M ${bx} ${by+30*sy} L ${bx} ${by} L ${bx+30*sx} ${by}`, fill:'none', stroke:PURPLE_L, 'stroke-width':4.5, 'stroke-linecap':'round', opacity:.8 }, over);
+  const live = grp(over); setT(live, 46, 52);
+  const liveDot = el('circle', { cx:0, cy:-6, r:5.5, fill:GREEN }, live);
+  label(live, { x:14, y:0, s:17, w:650, fill:INK2, a:'start', f:FM }, 'LIVE · webcam');
+  label(over, { x:o.w-42, y:52, s:16, w:600, fill:DIM, a:'end', f:FM }, 'on-device');
+  return { g, inner, over, liveDot, w:o.w, h:o.h };
+}
+function lowerThird(p, num, title) {
+  const g = grp(p);
+  const chip = grp(g);
+  const chipRect = el('rect', { x:140, y:930, width:118, height:38, rx:10, fill:'rgba(139,92,246,0.16)', stroke:PURPLE, 'stroke-width':1.6 }, chip);
+  const numT = label(chip, { x:158, y:956, s:19, w:750, fill:PURPLE_L, a:'start', f:FM }, num);
+  const tagT = label(chip, { x:196, y:956, s:19, w:600, fill:INK2, a:'start', f:FM, ls:1.5 }, title.tag);
+  let laid = false;
+  function layoutChip() {           // size the pill to actually contain its text
+    const tagX = 158 + numT.getComputedTextLength() + 13;
+    tagT.setAttribute('x', tagX);
+    chipRect.setAttribute('width', (tagX + tagT.getComputedTextLength() + 17) - 140);
+    laid = true;
+  }
+  const hl = grp(g, { 'clip-path': clipRect(134, 976, 1100, 62) });
+  const line = label(hl, { x:140, y:1022, s:38, w:640, fill:INK, a:'start', f:FD }, title.text);
+  return { g, chip, line, reveal(u, a) {
+    if (!laid && document.fonts.status === 'loaded') layoutChip();
+    const v = K(u, [[a,0],[a+.55,1]], xo);
+    O(g, Math.min(1, v*2));
+    line.setAttribute('transform', `translate(0 ${(1-v)*54})`);
+    chip.setAttribute('transform', `translate(${(v-1)*30} 0)`);
+  }};
+}
+function person(p, o) { // head+shoulders avatar, premium
+  const g = grp(p);
+  el('path', { d:'M -62 96 L -62 62 Q -62 30 -30 26 L 30 26 Q 62 30 62 62 L 62 96 Z', fill:o.shirt }, g);
+  el('path', { d:'M -62 96 L -62 62 Q -62 30 -30 26 L -12 26 L -12 96 Z', fill:o.shirtD || o.shirt, opacity:.5 }, g);
+  el('rect', { x:-11, y:6, width:22, height:26, rx:8, fill:o.skin }, g);
+  el('circle', { cx:0, cy:-16, r:37, fill:o.skin }, g);
+  el('circle', { cx:-34, cy:-12, r:7, fill:o.skin }, g);
+  if (o.style === 'bun') {
+    el('path', { d:'M -37 -22 A 37 37 0 0 1 37 -22 L 37 -12 Q 18 -34 -14 -28 Q -34 -24 -37 -10 Z', fill:o.hair }, g);
+    el('circle', { cx:2, cy:-56, r:17, fill:o.hair }, g);
+    el('circle', { cx:-12, cy:-52, r:11, fill:o.hair }, g);
+    el('circle', { cx:14, cy:-50, r:11, fill:o.hair }, g);
+    el('rect', { x:-24, y:-22, width:20, height:15, rx:7, fill:'none', stroke:'#120D24', 'stroke-width':3.2 }, g);
+    el('rect', { x:4, y:-22, width:20, height:15, rx:7, fill:'none', stroke:'#120D24', 'stroke-width':3.2 }, g);
+    el('line', { x1:-4, y1:-16, x2:4, y2:-16, stroke:'#120D24', 'stroke-width':3.2 }, g);
+    el('circle', { cx:-14, cy:-15, r:2.6, fill:'#120D24' }, g);
+    el('circle', { cx:14, cy:-15, r:2.6, fill:'#120D24' }, g);
+  } else {
+    el('path', { d:'M -37 -18 A 37 37 0 0 1 37 -18 L 34 4 Q 22 -14 -2 -12 Q -28 -10 -34 6 Z', fill:o.hair }, g);
+    el('circle', { cx:-13, cy:-12, r:3, fill:'#120D24' }, g);
+    el('circle', { cx:13, cy:-12, r:3, fill:'#120D24' }, g);
+    el('path', { d:'M -19 -22 q 6 -4 12 -1 M 7 -23 q 6 -3 12 1', stroke:'#120D24', 'stroke-width':2.6, fill:'none', 'stroke-linecap':'round' }, g);
+  }
+  el('path', { d:'M -9 2 Q 0 9 9 2', fill:'none', stroke:'#7A4A2E', 'stroke-width':3.2, 'stroke-linecap':'round' }, g);
+  el('ellipse', { cx:-22, cy:-4, rx:5, ry:3, fill:PINK, opacity:.25 }, g);
+  el('ellipse', { cx:22, cy:-4, rx:5, ry:3, fill:PINK, opacity:.25 }, g);
+  return g;
+}
+function makeCat(p) {
+  const g = grp(p);
+  const C = '#4A3B78', C2 = '#3B2F63';
+  const tail = el('path', { d:'M 48 2 C 92 -8 100 -50 80 -74', fill:'none', stroke:C, 'stroke-width':15, 'stroke-linecap':'round' }, g);
+  el('ellipse', { cx:0, cy:8, rx:56, ry:34, fill:C }, g);
+  el('ellipse', { cx:-14, cy:16, rx:30, ry:20, fill:C2, opacity:.5 }, g);
+  const head = grp(g); setT(head, -50, -26);
+  el('path', { d:'M -20 -22 L -14 -44 L 2 -28 Z', fill:C }, head);
+  el('path', { d:'M 8 -26 L 18 -46 L 28 -24 Z', fill:C }, head);
+  el('path', { d:'M -16 -26 L -13 -37 L -5 -29 Z', fill:PINK, opacity:.5 }, head);
+  el('circle', { cx:2, cy:-6, r:27, fill:C }, head);
+  const eyeL = el('path', { d:'M -12 -8 Q -8 -3 -3 -8', fill:'none', stroke:PURPLE_L, 'stroke-width':2.8, 'stroke-linecap':'round' }, head);
+  const eyeR = el('path', { d:'M 7 -8 Q 11 -3 16 -8', fill:'none', stroke:PURPLE_L, 'stroke-width':2.8, 'stroke-linecap':'round' }, head);
+  el('path', { d:'M 0 1 l 3 3 l 3 -3', fill:'none', stroke:PINK, 'stroke-width':2.4, 'stroke-linecap':'round' }, head);
+  for (const [x2, y2] of [[-34,-2],[-36,4],[-33,10]]) el('line', { x1:-14, y1:4, x2, y2, stroke:INK2, 'stroke-width':1.4, opacity:.5 }, head);
+  for (const [x1, y1, x2, y2] of [[20,-2,40,-4],[22,4,42,8]]) el('line', { x1, y1, x2, y2, stroke:INK2, 'stroke-width':1.4, opacity:.5 }, head);
+  const paw = el('rect', { x:-66, y:6, width:15, height:26, rx:7.5, fill:C }, g);
+  return { g, tail, paw };
+}
+
+// ================================================================ scenes
+const SCENES = [];
+function scene(name, build) {
+  const g = grp(stage);
+  const [a, b] = TL[name];
+  const cam = grp(g);            // camera wrapper for push-ins
+  const fn = build(cam, g);      // 2nd arg = outer group: immune to camera drift
+  SCENES.push({ g, cam, a, b, fn });
+}
+function camMove(cam, t, base, drift, px) { // px = extra punch scale
+  const s = base + drift * t + (px || 0) * .02;
+  setT(cam, 960 - 960*s, 540 - 540*s, s);
+}
+
+// ---------------------------------------------------------------- S1 · hook
+scene('s1', (g, fixed) => {
+  const world = grp(g);
+  // window with night sky
+  const win = grp(world); setT(win, 320, 150);
+  el('rect', { x:-14, y:-14, width:428, height:428, rx:18, fill:'#241C48' }, win);
+  el('rect', { width:400, height:400, rx:10, fill:'#101033' }, win);
+  const winIn = grp(win, { 'clip-path': clipRect(0, 0, 400, 400, 10) });
+  el('circle', { cx:300, cy:90, r:38, fill:'#EFECF8', opacity:.9 }, winIn);
+  el('circle', { cx:284, cy:80, r:34, fill:'#101033' }, winIn);
+  for (const [sx, sy, sr] of [[60,70,2.5],[140,150,2],[220,60,1.8],[330,200,2.2],[80,260,1.8],[250,300,2],[180,220,1.5]])
+    el('circle', { cx:sx, cy:sy, r:sr, fill:PURPLE_L, opacity:.7 }, winIn);
+  el('path', { d:'M 0 330 Q 100 290 200 320 T 400 310 V 400 H 0 Z', fill:'#0B0A26' }, winIn);
+  el('line', { x1:200, y1:0, x2:200, y2:400, stroke:'#241C48', 'stroke-width':10 }, win);
+  el('line', { x1:0, y1:200, x2:400, y2:200, stroke:'#241C48', 'stroke-width':10 }, win);
+  // lamp
+  const lamp = grp(world); setT(lamp, 1560, 700);
+  el('ellipse', { cx:0, cy:-160, rx:230, ry:190, fill:'url(#glowW)' }, lamp);
+  el('rect', { x:-7, y:-170, width:14, height:170, rx:7, fill:'#33285F' }, lamp);
+  el('path', { d:'M -58 -164 Q 0 -220 58 -164 L 46 -132 L -46 -132 Z', fill:'#7C5CFF' }, lamp);
+  el('ellipse', { cx:0, cy:-138, rx:40, ry:10, fill:'#FFD9A0', opacity:.85 }, lamp);
+  el('rect', { x:-52, y:0, width:104, height:14, rx:7, fill:'#33285F' }, lamp);
+  // floor + desk
+  el('rect', { x:0, y:884, width:W, height:196, fill:'#0C081B' }, world);
+  el('rect', { x:250, y:700, width:1420, height:30, rx:15, fill:'#312559' }, world);
+  el('rect', { x:250, y:700, width:1420, height:9, rx:4.5, fill:'#3D2F6C' }, world);
+  for (const lx of [350, 1540]) {
+    el('rect', { x:lx, y:730, width:22, height:154, rx:9, fill:'#231A44' }, world);
+    el('rect', { x:lx-16, y:876, width:54, height:12, rx:6, fill:'#1A1335' }, world);
+  }
+  // plant
+  const plant = grp(world); setT(plant, 420, 700);
+  el('path', { d:'M 28 0 l 12 -58 q 2 -10 -9 -10 l -62 0 q -11 0 -9 10 l 12 58 Z', fill:'#33285F' }, plant);
+  for (const [rot, len, dx] of [[-30, 95, -12], [-6, 120, 0], [24, 90, 12]])
+    el('path', { d:`M 0 0 C ${-14+dx} ${-len*.5} ${-4+dx} ${-len*.9} ${dx+6} ${-len} C ${dx+16} ${-len*.7} ${14+dx} ${-len*.3} 4 0 Z`,
+      fill:'#3FA98E', transform:`translate(0 -66) rotate(${rot})`, opacity:.95 }, plant);
+  el('path', { d:'M 0 -66 C -10 -120 -6 -150 2 -166', stroke:'#2F7D6A', 'stroke-width':4, fill:'none' }, plant);
+  // mug + steam
+  el('rect', { x:872, y:658, width:54, height:46, rx:11, fill:PURPLE }, world);
+  el('rect', { x:872, y:658, width:54, height:12, rx:6, fill:'#A180F8' }, world);
+  el('path', { d:'M 926 670 q 24 5 0 24', fill:'none', stroke:PURPLE, 'stroke-width':9 }, world);
+  const steam = el('path', { d:'M 898 644 q 9 -13 0 -24 q -9 -11 2 -22', fill:'none', stroke:INK2, 'stroke-width':4, 'stroke-linecap':'round', opacity:.45 }, world);
+  // laptop (three-quarter, content visible)
+  const lap = grp(world); setT(lap, 1200, 700);
+  el('ellipse', { cx:0, cy:14, rx:216, ry:15, fill:'#030109', opacity:.5 }, lap);
+  // keyboard deck, widening toward the viewer so it reads as a laptop seen head-on
+  el('path', { d:'M -188 -6 L 188 -6 L 208 16 L -208 16 Z', fill:'#2E2554' }, lap);
+  el('path', { d:'M -188 -6 L 188 -6 L 192 1 L -192 1 Z', fill:'#3F3372' }, lap);
+  el('rect', { x:-34, y:5, width:68, height:8, rx:4, fill:'#241D45' }, lap);
+  const scr = grp(lap);   // screen upright, facing her
+  el('rect', { x:-176, y:-244, width:352, height:238, rx:16, fill:'#0A0714', stroke:'#332A5E', 'stroke-width':3 }, scr);
+  el('rect', { x:-163, y:-231, width:326, height:212, rx:9, fill:'url(#wall)' }, scr);
+  const scrIn = grp(scr, { 'clip-path': clipRect(-163, -231, 326, 212, 9) });
+  el('path', { d:'M -163 -60 Q -80 -100 0 -70 T 163 -80 V -19 H -163 Z', fill:'#1D1640', opacity:.7 }, scrIn);
+  el('rect', { x:-163, y:-231, width:326, height:20, fill:'rgba(8,5,17,0.6)' }, scrIn);
+  el('rect', { x:-140, y:-192, width:140, height:92, rx:8, fill:PANEL, stroke:LINE }, scrIn);
+  el('rect', { x:-20, y:-156, width:158, height:104, rx:8, fill:PANEL_HI, stroke:LINE }, scrIn);
+  el('rect', { x:-52, y:-40, width:104, height:15, rx:7.5, fill:'rgba(239,236,248,0.1)' }, scrIn);
+  const camDot = el('circle', { cx:0, cy:-237, r:4.5, fill:BLUE_L }, scr);
+  const camRing = el('circle', { cx:0, cy:-237, r:10, fill:'none', stroke:BLUE_L, 'stroke-width':3 }, scr);
+  const miniCur = clawShape(scrIn, '#FFFFFF', true);
+  // Maya
+  const maya = grp(world); setT(maya, 660, 520);
+  el('ellipse', { cx:10, cy:246, rx:120, ry:14, fill:'#030109', opacity:.4 }, maya);
+  el('rect', { x:-92, y:150, width:36, height:110, rx:14, fill:'#231A44' }, maya);      // chair back post
+  el('rect', { x:-104, y:32, width:52, height:150, rx:22, fill:'#33285F' }, maya);      // chair back
+  el('rect', { x:-60, y:216, width:190, height:30, rx:15, fill:'#231A44' }, maya);      // seat
+  const torso = grp(maya);
+  el('path', { d:'M -58 236 L -64 120 Q -68 32 -8 26 L 34 26 Q 88 34 90 110 L 96 236 Z', fill:SWEATER }, torso);
+  el('path', { d:'M -58 236 L -64 120 Q -68 32 -8 26 L 6 26 L 6 236 Z', fill:SWEATER_D, opacity:.55 }, torso);
+  el('path', { d:'M -8 26 L 34 26 L 30 44 L -6 44 Z', fill:'#553BC9' }, torso);          // collar
+  // resting left arm to mug
+  el('path', { d:'M 60 90 Q 130 120 196 138 L 190 166 Q 120 152 52 128 Z', fill:SWEATER }, torso);
+  el('circle', { cx:206, cy:152, r:20, fill:SKIN }, torso);
+  // head
+  const head = grp(maya); setT(head, 16, -38);
+  el('rect', { x:-14, y:30, width:30, height:32, rx:10, fill:SKIN }, head);
+  el('circle', { cx:0, cy:0, r:58, fill:SKIN }, head);
+  el('circle', { cx:-52, cy:6, r:9, fill:SKIN }, head);
+  el('circle', { cx:-46, cy:6, r:3.4, fill:SKIN_D, opacity:.5 }, head);
+  el('path', { d:'M -58 -8 A 58 58 0 0 1 56 -16 L 52 4 Q 40 -34 -6 -30 Q -46 -26 -54 8 Z', fill:HAIR }, head);
+  el('circle', { cx:6, cy:-74, r:24, fill:HAIR }, head);
+  el('circle', { cx:-14, cy:-68, r:15, fill:HAIR }, head);
+  el('circle', { cx:24, cy:-66, r:15, fill:HAIR }, head);
+  el('circle', { cx:-40, cy:-34, r:6, fill:HAIR }, head);
+  const specs = grp(head); setT(specs, 6, -4);
+  el('rect', { x:2, y:-12, width:34, height:26, rx:10, fill:'rgba(16,13,36,0.12)', stroke:'#120D24', 'stroke-width':3.6 }, specs);
+  el('rect', { x:-44, y:-12, width:34, height:26, rx:10, fill:'rgba(16,13,36,0.12)', stroke:'#120D24', 'stroke-width':3.6 }, specs);
+  el('line', { x1:-10, y1:-4, x2:2, y2:-4, stroke:'#120D24', 'stroke-width':3.6 }, specs);
+  const eyeL = el('circle', { cx:-26, cy:2, r:3.6, fill:'#120D24' }, specs);
+  const eyeR = el('circle', { cx:20, cy:2, r:3.6, fill:'#120D24' }, specs);
+  el('path', { d:'M -32 -22 q 7 -5 14 -2 M 12 -24 q 7 -3 14 1', stroke:'#120D24', 'stroke-width':3, fill:'none', 'stroke-linecap':'round' }, head);
+  el('path', { d:'M 4 34 Q 14 42 26 34', fill:'none', stroke:'#7A4A2E', 'stroke-width':4.4, 'stroke-linecap':'round' }, head);
+  el('ellipse', { cx:-30, cy:22, rx:8, ry:4.6, fill:PINK, opacity:.3 }, head);
+  el('ellipse', { cx:36, cy:20, rx:8, ry:4.6, fill:PINK, opacity:.3 }, head);
+  el('path', { d:'M 42 -28 A 58 58 0 0 1 56 22', fill:'none', stroke:BLUE_L, 'stroke-width':4, 'stroke-linecap':'round', opacity:.35 }, head);
+  // raised right arm (two segments) + hand
+  const armU = grp(maya); setT(armU, 62, 66);
+  el('rect', { x:-23, y:-22, width:118, height:44, rx:22, fill:SWEATER }, armU);
+  const armF = grp(armU); setT(armF, 92, 0);
+  el('circle', { cx:0, cy:0, r:22, fill:SWEATER }, armF);
+  el('rect', { x:-22, y:-21, width:106, height:42, rx:21, fill:SWEATER }, armF);
+  el('rect', { x:-22, y:-21, width:106, height:15, rx:7.5, fill:'#553BC9', opacity:.6 }, armF);
+  const s1hand = makeHand(armF, { scale:.335, noShadow:true });
+  s1hand.at(94, -2, 86);
+  // cat
+  const cat = makeCat(world); setT(cat.g, 1560, 662);
+  // wordmark — parented to the fixed (non-camera) group so it never drifts
+  const chip = grp(fixed);
+  clawGlyph(chip, .44, INK).setAttribute('transform', 'translate(128 104) scale(0.44)');
+  label(chip, { x:186, y:112, s:40, w:750, f:FD, fill:INK, a:'start', ls:7 }, 'PAWVIS');
+  label(chip, { x:188, y:142, s:19, w:500, f:FM, fill:DIM, a:'start', ls:2 }, 'touch-free hand control for macOS');
+
+  return (u, t) => {
+    camMove(g, u, 1.0, .008);
+    const wave = Math.sin(u*3.6) * 10 * K(u, [[.6,0],[1.2,1],[4.6,1],[5.5,0]]);
+    setT(armU, 62, 66, 1, -34 + wave*.35);
+    setT(armF, 92, 0, 1, -58 + wave);
+    s1hand.pose(POSES.open);
+    miniCur.g.setAttribute('transform', `translate(${26 + wave*3} ${-116 - wave*1.4}) scale(0.16)`);
+    const pr = (u*.8 % 1) * 18;
+    camRing.setAttribute('r', 7 + pr); O(camRing, .85 - (pr/19)*.85);
+    O(camDot, .75 + .25*Math.sin(u*6));
+    cat.tail.setAttribute('transform', `rotate(${Math.sin(u*2.1)*13} 48 2)`);
+    O(steam, .3 + .18*Math.sin(u*2.4));
+    const breathe = 1 + .006*Math.sin(u*1.9);
+    torso.setAttribute('transform', `translate(0 ${(1-breathe)*140}) scale(1 ${breathe})`);
+    head.setAttribute('transform', `translate(16 ${-38 + 2.4*Math.sin(u*1.9 + .6)})`);
+    const bl = (() => { const ph = (t*1000 % 3400)/1000; return ph < .1 ? ph/.1 : ph < .2 ? 1-(ph-.1)/.1 : 0; })();
+    eyeL.setAttribute('transform', `translate(0 0) scale(1 ${1-bl*.85})`);
+    eyeR.setAttribute('transform', `translate(0 0) scale(1 ${1-bl*.85})`);
+    fadeIO(chip, u, .5, 1.1, 1e9, 1e9);
+  };
+});
+
+// ---------------------------------------------------------------- S2 · what it is
+scene('s2', (g) => {
+  // center laptop with desktop + PiP webcam view
+  const scr = desktopScreen(g, { x:240, y:210, w:840, h:540 });
+  el('path', { d:'M 226 768 L 1094 768 L 1044 812 L 276 812 Z', fill:'#2E2554' }, g);
+  el('path', { d:'M 226 768 L 1094 768 L 1086 782 L 234 782 Z', fill:'#3A2F68' }, g);
+  const camDot = el('circle', { cx:660, cy:198, r:6, fill:BLUE_L }, g);
+  const camRing = el('circle', { cx:660, cy:198, r:12, fill:'none', stroke:BLUE_L, 'stroke-width':3.5 }, g);
+  const coneP = el('path', { d:'M 672 208 L 1560 400 L 1400 930 Z', fill:'url(#cone)', opacity:0 }, g);
+  // PiP viewfinder on the desktop
+  const pip = grp(scr.inner); setT(pip, 556, 300);
+  el('rect', { x:-10, y:-10, width:280, height:200, rx:16, fill:'rgba(11,8,26,0.92)', stroke:PURPLE_L, 'stroke-width':2, opacity:.98 }, pip);
+  const pipIn = grp(pip, { 'clip-path': clipRect(0, 0, 260, 180, 10) });
+  el('rect', { width:260, height:180, fill:'#0B081A' }, pipIn);
+  const pipHand = makeHand(pipIn, { scale:.42, noShadow:true });
+  pipHand.at(130, 118, 0);
+  el('circle', { cx:22, cy:20, r:5, fill:RED }, pip);
+  label(pip, { x:36, y:26, s:14, w:700, fill:INK2, a:'start', f:FM }, 'what Pawvis sees');
+  // the real hand, floating right
+  const hand = makeHand(g, { scale:1.12 });
+  // stamps
+  const stampFree = grp(g); setT(stampFree, 1360, 190, 1, -9);
+  el('rect', { x:-150, y:-60, width:300, height:120, rx:20, fill:'rgba(139,92,246,0.12)', stroke:PURPLE_L, 'stroke-width':8 }, stampFree);
+  label(stampFree, { x:0, y:25, s:70, w:800, f:FD, fill:PURPLE_L, ls:4 }, 'FREE');
+  const stampOSS = grp(g); setT(stampOSS, 1520, 330, 1, 6);
+  const ossRect = el('rect', { x:-185, y:-50, width:370, height:100, rx:18, fill:'rgba(14,165,233,0.12)', stroke:BLUE_L, 'stroke-width':7 }, stampOSS);
+  const ossT = label(stampOSS, { x:0, y:15, s:45, w:800, f:FD, fill:BLUE_L, ls:2 }, 'OPEN SOURCE');
+  let ossLaid = false;
+  function layoutOSS() {            // box hugs the measured text with the original ~20px side padding
+    const wd = Math.round(ossT.getComputedTextLength() + 40);
+    ossRect.setAttribute('width', wd);
+    ossRect.setAttribute('x', -wd/2);
+    ossLaid = true;
+  }
+  // chips
+  const ai = grp(g); setT(ai, 620, 952);
+  el('rect', { x:-300, y:-56, width:600, height:112, rx:28, fill:'rgba(20,15,36,0.95)', stroke:LINE, 'stroke-width':1.6, filter:'url(#shSm)' }, ai);
+  el('rect', { x:-272, y:-38, width:76, height:76, rx:20, fill:'url(#brand)' }, ai);
+  const spark = el('path', { d:'M 0 -23 C 3 -8 8 -3 23 0 C 8 3 3 8 0 23 C -3 8 -8 3 -23 0 C -8 -3 -3 -8 0 -23 Z', fill:'#FFF', transform:'translate(-234 0)' }, ai);
+  const aiRing = el('circle', { cx:-234, cy:0, r:44, fill:'none', stroke:PURPLE_L, 'stroke-width':3, opacity:0 }, ai);
+  label(ai, { x:-172, y:-8, s:30, w:750, a:'start' }, 'Apple Intelligence');
+  label(ai, { x:-172, y:29, s:23, w:500, fill:DIM, a:'start' }, 'runs on your Mac — nothing leaves it');
+  const lock = grp(g); setT(lock, 1360, 952);
+  el('rect', { x:-250, y:-45, width:500, height:90, rx:45, fill:'rgba(20,15,36,0.95)', stroke:LINE, 'stroke-width':1.6, filter:'url(#shSm)' }, lock);
+  const lockIco = grp(lock); setT(lockIco, -192, 0);
+  el('rect', { x:-18, y:-4, width:36, height:29, rx:8, fill:PURPLE_L }, lockIco);
+  const shackle = el('path', { d:'M -10 -4 v -8 a 10 10 0 0 1 20 0 v 8', fill:'none', stroke:PURPLE_L, 'stroke-width':6, 'stroke-linecap':'round' }, lockIco);
+  label(lock, { x:34, y:10, s:27, w:650 }, 'private by default');
+  const camTag = grp(g); setT(camTag, 660, 148);
+  label(camTag, { x:0, y:0, s:25, w:600, fill:BLUE_L, f:FM }, 'the webcam you already have');
+  el('path', { d:'M 0 14 v 30', fill:'none', stroke:BLUE_L, 'stroke-width':3, 'stroke-dasharray':'2 8', 'stroke-linecap':'round' }, camTag);
+
+  return (u) => {
+    if (!ossLaid && document.fonts.status === 'loaded') layoutOSS();
+    camMove(g, u, 1.005, .004);
+    const pr = (u*.9 % 1) * 20;
+    camRing.setAttribute('r', 8 + pr); O(camRing, .9 - (pr/21)*.9);
+    O(camDot, .8 + .2*Math.sin(u*5));
+    O(coneP, clamp(K(u, [[4.1,0],[4.9,.9],[5.8,.6]]),0,1) * (0.8 + .2*Math.sin(u*2.4)));
+    hand.at(1470 + 26*Math.sin(u*1.1), 610 + 20*Math.sin(u*1.7+1), 4 + 3*Math.sin(u*.9));
+    hand.pose(POSES.open);
+    O(hand.lm, K(u, [[4.6,0],[5.6,1]]));
+    pipHand.pose(POSES.open);
+    pipHand.at(130 + 8*Math.sin(u*1.1), 118 + 6*Math.sin(u*1.7+1), -3*Math.sin(u*.9));
+    O(pipHand.lm, 1);
+    const pv = K(u, [[3.6,0],[4.2,1]], spring);
+    pip.setAttribute('transform', `translate(556 300) scale(${pv})`); O(pip, u > 3.6 ? 1 : 0);
+    const su = K(u, [[13.42,0],[13.77,1]], back); O(stampFree, u > 13.42 ? 1 : 0);
+    setT(stampFree, 1360, 190, u < 13.42 ? 2.4 : 2.4 - 1.4*su, -9);
+    const su2 = K(u, [[14.42,0],[14.77,1]], back); O(stampOSS, u > 14.42 ? 1 : 0);
+    setT(stampOSS, 1520, 330, u < 14.42 ? 2.4 : 2.4 - 1.4*su2, 6);
+    fadeIO(camTag, u, 4.4, 5.1, 1e9, 1e9);
+    const av = fadeIO(ai, u, 7.6, 8.3, 1e9, 1e9);
+    setT(ai, 620, 952 + (1-av)*70);
+    spark.setAttribute('transform', `translate(-234 0) rotate(${u*40}) scale(${1 + .12*Math.sin(u*4)})`);
+    const ar = ((u*.7) % 1); aiRing.setAttribute('r', 40 + ar*32); O(aiRing, u > 8.3 ? (.7 - ar*.7) : 0);
+    const lv = fadeIO(lock, u, 10.9, 11.6, 1e9, 1e9);
+    setT(lock, 1360, 952 + (1-lv)*70);
+    shackle.setAttribute('transform', `translate(0 ${K(u, [[11.6,-9],[11.85,0]], eo)})`);
+  };
+});
+
+// ---------------------------------------------------------------- split-scene chassis
+function splitScene(g, num, tag, headline) {
+  const scr = desktopScreen(g, { x:120, y:150, w:1040, h:700 });
+  const camp = camPanel(g, { x:1250, y:160, w:580, h:716 });
+  const hand = makeHand(camp.inner, { scale:1.18 });
+  const lt = lowerThird(g, num, { tag, text: headline });
+  return { scr, camp, hand, lt };
+}
+
+// ---------------------------------------------------------------- S3 · palm move
+scene('s3', (g) => {
+  const { scr, camp, hand, lt } = splitScene(g, '01', 'POINT', 'The claw cursor rides your palm');
+  const icons = [];
+  for (const [x, y, name] of [[190,150,'Projects'],[190,290,'Designs'],[860,150,'Pawvis.zip']]) {
+    const ig = grp(scr.inner); setT(ig, x, y);
+    const halo = el('circle', { r:62, fill:PURPLE_L, opacity:0 }, ig);
+    el('path', { d:'M -32 -16 h 20 l 8 -8 h 20 a 8 8 0 0 1 8 8 v 2 h -56 Z', fill:'#67B7F0' }, ig);
+    el('path', { d:'M -34 -10 h 68 a 8 8 0 0 1 8 9 l -7 26 a 10 10 0 0 1 -10 8 h -60 a 10 10 0 0 1 -10 -8 l -7 -26 a 8 8 0 0 1 8 -9 Z', fill:BLUE_L }, ig);
+    label(ig, { x:0, y:52, s:18, w:600, fill:INK }, name);
+    icons.push({ g:ig, halo, x, y });
+  }
+  const trail = el('polyline', { fill:'none', stroke:'url(#brand)', 'stroke-width':4.5, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:.45 }, scr.inner);
+  const claw = makeClaw(scr.inner, .5);
+  const beam = el('path', { fill:'none', stroke:PURPLE_L, 'stroke-width':3.6, 'stroke-dasharray':'3 13', 'stroke-linecap':'round', opacity:.5 }, g);
+  const pulseD = el('circle', { r:7, fill:BLUE_L, filter:'url(#shSm)' }, g);
+  return (u) => {
+    camMove(g, u, 1.01, .005);
+    const a = K(u, [[0.6,0],[8.4,5.6]], lin);
+    const hx = 290 + 130*Math.sin(a), hy = 470 + 105*Math.sin(2*a + .9);
+    hand.pose(POSES.open); hand.at(hx, hy, 5*Math.sin(a + 1));
+    O(hand.lm, K(u, [[.4,0],[1,.95]]));
+    const cxy = (aa) => [520 + 330*Math.sin(aa), 350 + 190*Math.sin(2*aa + .9)];
+    const [ccx, ccy] = cxy(a);
+    claw.g.setAttribute('transform', `translate(${ccx} ${ccy})`);
+    let pts = [];
+    for (let k = 2; k < 13; k++) { const [px, py] = cxy(a - k*.05); pts.push(px + ',' + py); }
+    trail.setAttribute('points', pts.join(' '));
+    O(trail, K(u, [[1,0],[1.8,.42]]));
+    const sxAbs = 120+ccx, syAbs = 150+ccy, hxAbs = 1250+hx, hyAbs = 160+hy;
+    beam.setAttribute('d', `M ${hxAbs-90} ${hyAbs-30} Q ${(hxAbs+sxAbs)/2} ${Math.min(hyAbs,syAbs)-190} ${sxAbs+26} ${syAbs-10}`);
+    const pu = (u*.55) % 1;
+    const qx = (1-pu)*(1-pu)*(hxAbs-90) + 2*(1-pu)*pu*((hxAbs+sxAbs)/2) + pu*pu*(sxAbs+26);
+    const qy = (1-pu)*(1-pu)*(hyAbs-30) + 2*(1-pu)*pu*(Math.min(hyAbs,syAbs)-190) + pu*pu*(syAbs-10);
+    pulseD.setAttribute('cx', qx); pulseD.setAttribute('cy', qy);
+    const bv = K(u, [[1.2,0],[1.8,1]]);
+    O(pulseD, .95*bv); O(beam, .5*bv);
+    for (const ic of icons) {
+      const d = Math.hypot(ccx-ic.x, ccy-ic.y);
+      const near = clamp(1 - d/150, 0, 1);
+      O(ic.halo, near*.3);
+      ic.g.setAttribute('transform', `translate(${ic.x} ${ic.y}) scale(${1 + near*.1})`);
+    }
+    lt.reveal(u, 1.0);
+  };
+});
+
+// ---------------------------------------------------------------- S4 · click + drag
+scene('s4', (g) => {
+  const { scr, camp, hand, lt } = splitScene(g, '02', 'CLICK & DRAG', 'Dip a finger to click — hold it to drag');
+  const mail = macWindow(scr.inner, { x:470, y:90, w:470, h:250, title:'Mail', noShadow:true });
+  el('rect', { x:24, y:64, width:280, height:16, rx:8, fill:INK2, opacity:.5 }, mail.content);
+  el('rect', { x:24, y:94, width:340, height:11, rx:5.5, fill:DIM, opacity:.35 }, mail.content);
+  el('rect', { x:24, y:116, width:300, height:11, rx:5.5, fill:DIM, opacity:.35 }, mail.content);
+  const btn = grp(mail.content); setT(btn, 330, 192);
+  const btnR = el('rect', { x:-102, y:-27, width:204, height:54, rx:27, fill:PURPLE }, btn);
+  el('rect', { x:-102, y:-27, width:204, height:24, rx:12, fill:'#A180F8', opacity:.35 }, btn);
+  label(btn, { x:0, y:8, s:23, w:700 }, 'New Message');
+  const photos = grp(scr.inner);
+  const pw = macWindow(photos, { x:0, y:0, w:430, h:300, title:'Photos', noShadow:true });
+  el('rect', { x:14, y:56, width:402, height:230, rx:10, fill:'#1C2B57' }, pw.content);
+  el('circle', { cx:352, cy:104, r:24, fill:AMBER }, pw.content);
+  el('path', { d:'M 14 286 L 150 152 L 240 240 L 300 182 L 416 286 Z', fill:'#3FA98E' }, pw.content);
+  el('path', { d:'M 14 286 L 120 192 L 208 286 Z', fill:'#2F7D6A' }, pw.content);
+  el('path', { d:'M 14 56 h 402 v 40 l -402 22 Z', fill:'#FFF', opacity:.05 }, pw.content);
+  const ripple = el('circle', { r:20, fill:'none', stroke:BLUE_L, 'stroke-width':6, opacity:0 }, scr.inner);
+  const claw = makeClaw(scr.inner, .5);
+  return (u) => {
+    const cx = K(u, [[0,760],[1.2,800],[3.4,800],[4.0,205],[7.0,585],[8.4,585]]);
+    const cy = K(u, [[0,560],[1.2,282],[3.4,282],[4.0,116],[5.6,66],[7.0,150],[8.4,150]]);
+    const wx = K(u, [[4.05,88],[7.05,468],[8.4,468]]);
+    const wy = K(u, [[4.05,94],[5.65,42],[7.05,128],[7.45,120],[7.75,128],[8.4,128]]);
+    const wrot = K(u, [[4.1,0],[4.7,-3.2],[6.2,2.8],[7.3,0]]);
+    setT(photos, wx, wy, 1, wrot);
+    const dragging = u > 4.05 && u < 7.05;
+    const ccx = dragging ? wx + 158 : cx, ccy = dragging ? wy + 24 : cy;
+    claw.g.setAttribute('transform', `translate(${ccx} ${ccy})`);
+    const clicking = (u > 1.55 && u < 2.1) || (u > 3.95 && u < 7.05);
+    claw.fill(clicking ? '#C9B2FF' : '#FFFFFF');
+    claw.retract(clicking ? 1 : 0);
+    const rp = K(u, [[1.62,0],[2.15,1]], eo);
+    ripple.setAttribute('cx', 800); ripple.setAttribute('cy', 284);
+    ripple.setAttribute('r', 16 + rp*66); O(ripple, rp > 0 && rp < 1 ? (1-rp)*.9 : 0);
+    setT(btn, 330, 192 + (u>1.58 && u<1.88 ? 3.5 : 0), u>1.58 && u<1.88 ? .97 : 1);
+    btnR.setAttribute('fill', u>1.58 && u<1.88 ? '#7C4AE8' : PURPLE);
+    const hx = 290 + (ccx-520)*.26, hy = 460 + (ccy-350)*.34;
+    const dip = K(u, [[1.35,0],[1.58,1],[2.05,1],[2.35,0],[3.75,0],[3.98,1],[7.0,1],[7.3,0]]);
+    hand.pose(mixPose(POSES.open, POSES.dip, dip));
+    hand.at(hx, hy, 4*Math.sin(u*.8));
+    O(hand.lm, .95);
+    camMove(g, u, 1.008, .004, punch(u, 1.62));
+    lt.reveal(u, 0.9);
+  };
+});
+
+// ---------------------------------------------------------------- S5 · shaka → video call
+scene('s5', (g) => {
+  const { scr, camp, hand, lt } = splitScene(g, '03', 'CUSTOM GESTURES', 'Any gesture can launch any action');
+  const pill = grp(scr.inner);
+  el('rect', { x:-235, y:-30, width:470, height:60, rx:30, fill:'rgba(8,5,17,0.94)', stroke:LINE, 'stroke-width':1.6, filter:'url(#shSm)' }, pill);
+  clawGlyph(pill, .24, PURPLE_L).setAttribute('transform', 'translate(-198 3) scale(0.24)');
+  label(pill, { x:-162, y:9, s:24, w:700, a:'start' }, 'Shaka');
+  el('path', { d:'M -70 0 h 34 m -10 -9 l 10 9 l -10 9', fill:'none', stroke:BLUE_L, 'stroke-width':4, 'stroke-linecap':'round', 'stroke-linejoin':'round' }, pill);
+  label(pill, { x:-16, y:9, s:24, w:700, fill:BLUE_L, a:'start' }, 'Open Video Call');
+  const call = grp(scr.inner);
+  const cw = macWindow(call, { x:0, y:0, w:640, h:430, title:'Video Call', noShadow:true });
+  const tileL = grp(cw.content);
+  el('rect', { x:16, y:58, width:296, height:276, rx:14, fill:'#2B2153' }, tileL);
+  el('ellipse', { cx:164, cy:150, rx:150, ry:110, fill:'#3A2B72', opacity:.8 }, tileL);
+  const meG = person(grp(tileL, { 'clip-path': clipRect(16, 58, 296, 276, 14) }), { skin:SKIN, hair:HAIR, shirt:SWEATER, shirtD:SWEATER_D, style:'bun' });
+  setT(meG, 164, 220, 1.35);
+  const tileR = grp(cw.content);
+  el('rect', { x:328, y:58, width:296, height:276, rx:14, fill:'#14324F' }, tileR);
+  el('ellipse', { cx:476, cy:150, rx:150, ry:110, fill:'#1D4470', opacity:.8 }, tileR);
+  const dialRing = el('circle', { cx:476, cy:180, r:44, fill:'none', stroke:BLUE_L, 'stroke-width':5, 'stroke-dasharray':'50 40', opacity:.9 }, tileR);
+  const samG = person(grp(tileR, { 'clip-path': clipRect(328, 58, 296, 276, 14) }), { skin:'#E8B98A', hair:'#5B4630', shirt:'#2563EB', shirtD:'#1D4FC9', style:'swoop' });
+  setT(samG, 476, 220, 1.35);
+  for (const [x, n] of [[36,'Maya'],[348,'Sam']]) {
+    const tag = grp(cw.content); setT(tag, x, 306);
+    el('rect', { width:96, height:30, rx:15, fill:'rgba(8,5,17,0.72)' }, tag);
+    el('rect', { x:10, y:9, width:8, height:12, rx:4, fill:GREEN }, tag);
+    label(tag, { x:56, y:21, s:16, w:650, fill:INK }, n);
+  }
+  const bbar = grp(cw.content); setT(bbar, 320, 384);
+  el('rect', { x:-124, y:-27, width:248, height:54, rx:27, fill:'rgba(239,236,248,0.08)', stroke:'rgba(239,236,248,0.12)' }, bbar);
+  for (const [dx, c] of [[-70, '#3A3358'], [0, '#3A3358'], [70, RED]]) el('circle', { cx:dx, r:21, fill:c }, bbar);
+  el('rect', { x:-75, y:-9, width:11, height:14, rx:5, fill:INK }, bbar);
+  el('path', { d:'M -78 -2 a 9 9 0 0 0 17 0 M -70 8 v 5', stroke:INK, 'stroke-width':2.6, fill:'none' }, bbar);
+  el('rect', { x:-10, y:-8, width:14, height:16, rx:4, fill:INK }, bbar);
+  el('path', { d:'M 6 -3 l 7 -5 v 16 l -7 -5 Z', fill:INK }, bbar);
+  el('rect', { x:61, y:-3.5, width:19, height:7, rx:3.5, fill:'#FFF' }, bbar);
+  const arcs = grp(camp.inner);
+  for (let i = 0; i < 3; i++) el('path', { d:`M ${430+i*24} ${210-i*10} a ${30+i*22} ${30+i*22} 0 0 1 ${10+i*8} ${52+i*20}`, fill:'none', stroke:BLUE_L, 'stroke-width':5, 'stroke-linecap':'round', opacity:0 }, arcs).setAttribute('data-i', i);
+  return (u) => {
+    const sh = K(u, [[0.7,0],[1.05,1]]);
+    const wig = Math.sin(u*9.5) * 10 * K(u, [[1.1,0],[1.4,1],[2.9,1],[3.4,0]]);
+    hand.pose(mixPose(POSES.open, POSES.shaka, sh));
+    hand.at(290 + 12*Math.sin(u*1.3), 470 + 9*Math.sin(u*1.9), wig);
+    O(hand.lm, .95);
+    [...arcs.children].forEach((a, i) => O(a, clamp(K(u, [[1.2+i*.12,0],[1.5+i*.12,.85],[3.2,.85],[3.5,0]]),0,1)));
+    const pv = K(u, [[1.5,0],[1.95,1]], spring);
+    pill.setAttribute('transform', `translate(520 ${-40 + pv*100})`); O(pill, pv > 0 ? 1 : 0);
+    const cv = K(u, [[3.25,0],[3.8,1]], spring);
+    call.setAttribute('transform', `translate(${200 + (1-cv)*50} ${140 + (1-cv)*30}) scale(${.6 + .4*cv})`);
+    O(call, u > 3.25 ? 1 : 0);
+    dialRing.setAttribute('transform', `rotate(${u*260} 476 180)`);
+    O(dialRing, u > 3.3 && u < 4.15 ? .9 : 0);
+    O(samG, K(u, [[4.05,0],[4.35,1]], spring));
+    samG.setAttribute('transform', `translate(476 ${K(u, [[4.05,250],[4.35,220]], spring)}) scale(1.35)`);
+    camMove(g, u, 1.008, .005, punch(u, 1.6) + punch(u, 3.35));
+    lt.reveal(u, 4.4);
+  };
+});
+
+// ---------------------------------------------------------------- S6 · scroll
+scene('s6', (g) => {
+  const { scr, camp, hand, lt } = splitScene(g, '04', 'SCROLL', 'Fold two fingers — the page glides');
+  const br = macWindow(scr.inner, { x:60, y:50, w:790, h:580, title:'', bar:62, noShadow:true });
+  el('rect', { x:104, y:14, width:582, height:36, rx:18, fill:'rgba(239,236,248,0.07)', stroke:LINE }, br.g);
+  el('circle', { cx:122, cy:32, r:7, fill:'none', stroke:DIM, 'stroke-width':2.2 }, br.g);
+  label(br.g, { x:395, y:39, s:18, w:550, f:FM, fill:INK2 }, 'pawvis.app/blog');
+  el('path', { d:'M 712 26 v 12 m -6 -6 h 12', stroke:DIM, 'stroke-width':2.4, 'stroke-linecap':'round' }, br.g);
+  const page = grp(br.content);
+  // nav
+  el('rect', { x:0, y:62, width:790, height:56, fill:'rgba(8,5,17,0.4)' }, page);
+  clawGlyph(page, .2, PURPLE_L).setAttribute('transform', 'translate(36 92) scale(0.2)');
+  label(page, { x:60, y:98, s:19, w:750, fill:INK, a:'start', f:FD }, 'Pawvis');
+  let nx = 560;
+  for (const m of ['Blog', 'Docs', 'GitHub']) { label(page, { x:nx, y:98, s:16, w:550, fill:DIM, a:'start' }, m); nx += 76; }
+  // hero
+  el('rect', { x:26, y:140, width:738, height:210, rx:16, fill:'url(#wall2)' }, page);
+  const heroClaw = clawGlyph(page, .9, 'rgba(255,255,255,0.16)');
+  heroClaw.setAttribute('transform', 'translate(640 260) scale(0.9)');
+  label(page, { x:56, y:216, s:38, w:700, fill:INK, a:'start', f:FD }, 'Hands-free by design');
+  label(page, { x:56, y:258, s:24, w:400, fill:PURPLE_L, a:'start', f:FS, it:true }, 'your hand is the mouse.');
+  el('rect', { x:56, y:288, width:150, height:38, rx:19, fill:'rgba(239,236,248,0.14)' }, page);
+  label(page, { x:131, y:313, s:17, w:650, fill:INK }, 'Read the docs');
+  for (let i = 0; i < 12; i++) {
+    const wds = [640, 700, 600, 690, 520, 680, 640, 600, 700, 560, 640, 430][i];
+    el('rect', { x:26, y:392 + i*36, width:wds*.93, height:13, rx:6.5, fill:INK2, opacity:.3 }, page);
+  }
+  el('rect', { x:26, y:850, width:738, height:180, rx:16, fill:'#1C2B57' }, page);
+  el('path', { d:'M 26 1030 L 210 900 L 340 1006 L 430 936 L 764 1030 Z', fill:'#3FA98E', opacity:.92 }, page);
+  el('circle', { cx:680, cy:906, r:22, fill:AMBER }, page);
+  for (let i = 0; i < 5; i++)
+    el('rect', { x:26, y:1070 + i*36, width:[620, 700, 580, 660, 380][i]*.93, height:13, rx:6.5, fill:INK2, opacity:.3 }, page);
+  const sbT = el('rect', { x:856, y:70, width:8, height:544, rx:4, fill:'rgba(239,236,248,0.06)' }, scr.inner);
+  const sbH = el('rect', { x:856, y:78, width:8, height:130, rx:4, fill:PURPLE_L, opacity:.7 }, scr.inner);
+  const claw = makeClaw(scr.inner, .5);
+  return (u) => {
+    const fold = K(u, [[0.7,0],[1.1,1]]);
+    hand.pose(mixPose(POSES.open, POSES.scroll, fold));
+    const hy = K(u, [[1.7,380],[2.9,600],[3.4,600],[4.1,390],[4.9,600],[5.4,600],[5.9,395],[6.6,590],[7.6,500]]);
+    hand.at(292 + 9*Math.sin(u), hy, 3*Math.sin(u*1.2));
+    O(hand.lm, .95);
+    const sc = K(u, [[1.75,0],[2.95,310],[4.15,310],[4.95,640],[5.95,640],[6.65,952],[7.3,940],[8.5,940]]);
+    page.setAttribute('transform', `translate(0 ${-sc})`);
+    sbH.setAttribute('y', 78 + (sc/952)*(544-146));
+    claw.g.setAttribute('transform', 'translate(920 160)');
+    const parked = u > 1.1 && u < 7.6;
+    O(claw.g, parked ? .95 : .8);
+    claw.ring && O(claw.ring, parked ? .85 + .15*Math.sin(u*6) : 0);
+    claw.fill(parked ? '#EAF6FF' : '#FFFFFF');
+    camMove(g, u, 1.008, .005);
+    lt.reveal(u, 0.9);
+  };
+});
+
+// ---------------------------------------------------------------- S7 · train your own
+scene('s7', (g) => {
+  const lt = lowerThird(g, '05', { tag:'TRAIN', text:'Teach it any move — it learns live' });
+  const tr = macWindow(g, { x:150, y:140, w:800, h:680, title:'Train New Gesture' });
+  el('rect', { x:640, y:10, width:120, height:24, rx:12, fill:'rgba(139,92,246,0.2)' }, tr.g);
+  label(tr.g, { x:700, y:27, s:14, w:650, fill:PURPLE_L }, 'One hand');
+  el('rect', { x:16, y:58, width:768, height:520, rx:14, fill:'#0B081A' }, tr.content);
+  const vf = grp(tr.content, { 'clip-path': clipRect(16, 58, 768, 520, 14) });
+  for (let i = 1; i < 3; i++) {
+    el('line', { x1:16+i*256, y1:58, x2:16+i*256, y2:578, stroke:PURPLE_L, opacity:.05, 'stroke-width':1.4 }, vf);
+    el('line', { x1:16, y1:58+i*173, x2:784, y2:58+i*173, stroke:PURPLE_L, opacity:.05, 'stroke-width':1.4 }, vf);
+  }
+  el('ellipse', { cx:400, cy:360, rx:360, ry:250, fill:'url(#glowP)', opacity:.5 }, vf);
+  const thand = makeHand(vf, { scale:.95 });
+  for (const [bx, by, sx, sy] of [[40,86,1,1],[760,86,-1,1],[40,554,1,-1],[760,554,-1,-1]])
+    el('path', { d:`M ${bx} ${by+30*sy} L ${bx} ${by} L ${bx+30*sx} ${by}`, fill:'none', stroke:PURPLE_L, 'stroke-width':4.5, 'stroke-linecap':'round' }, tr.content);
+  const recDot = el('circle', { cx:726, cy:96, r:7, fill:RED }, tr.content);
+  label(tr.content, { x:712, y:102, s:16, w:700, fill:RED, a:'end', f:FM }, 'REC');
+  const takes = grp(tr.content); setT(takes, 46, 96);
+  el('rect', { x:-8, y:-22, width:176, height:44, rx:12, fill:'rgba(8,5,17,0.72)' }, takes);
+  label(takes, { x:6, y:7, s:19, w:700, f:FM, fill:INK2, a:'start' }, 'takes');
+  const pips = [];
+  for (let i = 0; i < 3; i++) pips.push(el('circle', { cx:92 + i*32, cy:0, r:9, fill:'none', stroke:PURPLE_L, 'stroke-width':3 }, takes));
+  // fingertip ribbons
+  const rib1 = el('polyline', { fill:'none', stroke:BLUE_L, 'stroke-width':5, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:0 }, vf);
+  const rib2 = el('polyline', { fill:'none', stroke:PURPLE_L, 'stroke-width':5, 'stroke-linecap':'round', 'stroke-linejoin':'round', opacity:0 }, vf);
+  // confidence meter
+  const conf = grp(tr.content); setT(conf, 400, 610);
+  el('rect', { x:-330, y:-16, width:660, height:34, rx:17, fill:'rgba(239,236,248,0.06)' }, conf);
+  const confF = el('rect', { x:-330, y:-16, width:0, height:34, rx:17, fill:'url(#brand)' }, conf);
+  const confL = label(conf, { x:0, y:8, s:18, w:700, fill:INK, f:FM }, 'match confidence 0%');
+  const match = grp(tr.content); setT(match, 280, 290);
+  el('circle', { r:70, fill:'rgba(52,211,153,0.14)', stroke:GREEN, 'stroke-width':6 }, match);
+  el('path', { d:'M -28 2 L -8 22 L 32 -20', fill:'none', stroke:GREEN, 'stroke-width':11, 'stroke-linecap':'round', 'stroke-linejoin':'round' }, match);
+  const matchLbl = label(tr.content, { x:280, y:412, s:25, w:700, fill:GREEN }, 'Matched — try it live');
+  const bind = grp(g); setT(bind, 640, 920);
+  el('rect', { x:-330, y:-50, width:660, height:100, rx:26, fill:'rgba(20,15,36,0.95)', stroke:LINE, 'stroke-width':1.6, filter:'url(#shSm)' }, bind);
+  el('circle', { cx:-262, cy:0, r:32, fill:'rgba(139,92,246,0.18)', stroke:PURPLE_L, 'stroke-width':3 }, bind);
+  el('path', { d:'M -270 13 v -20 m 16 20 v -20', stroke:PURPLE_L, 'stroke-width':6.5, 'stroke-linecap':'round' }, bind);
+  label(bind, { x:-200, y:9, s:25, w:650, a:'start' }, 'peace sign');
+  el('path', { d:'M -32 0 h 42 m -12 -10 l 12 10 l -12 10', fill:'none', stroke:BLUE_L, 'stroke-width':4.2, 'stroke-linecap':'round', 'stroke-linejoin':'round' }, bind);
+  const actPill = grp(bind); setT(actPill, 180, 0);
+  el('rect', { x:-116, y:-29, width:232, height:58, rx:29, fill:PURPLE }, actPill);
+  el('rect', { x:-116, y:-29, width:232, height:26, rx:13, fill:'#A180F8', opacity:.3 }, actPill);
+  label(actPill, { x:-12, y:8, s:24, w:700 }, 'Play / Pause');
+  el('path', { d:'M 72 -5 l 8 9 l 8 -9', fill:'none', stroke:'#FFF', 'stroke-width':3.6, 'stroke-linecap':'round', 'stroke-linejoin':'round' }, actPill);
+  const shot = grp(g);
+  const sw = macWindow(shot, { x:0, y:0, w:660, h:600, title:'the real thing — Settings › Gestures' });
+  const img = el('image', { x:10, y:8, width:640, height:584, preserveAspectRatio:'xMidYMin slice' }, sw.content);
+  img.setAttribute('href', '../../docs/assets/app-settings-custom.png');
+  el('rect', { x:10, y:8, width:640, height:584, fill:'none', stroke:'rgba(8,5,17,0.4)', 'stroke-width':2 }, sw.content);
+  return (u, t) => {
+    let mix = 0, taken = 0;
+    for (const [idx, tk] of [[0,3.5],[1,4.6],[2,5.7]]) {
+      const d = Math.abs(u - tk);
+      mix = Math.max(mix, clamp(1 - d/.42, 0, 1)*1.35);
+      if (u > tk + .2) taken = idx + 1;
+    }
+    const m = clamp(mix, 0, 1);
+    thand.pose(mixPose(POSES.open, POSES.peace, m));
+    thand.at(560, 440, 6*Math.sin(u*1.4));
+    O(thand.lm, 1);
+    for (let i = 0; i < 3; i++) pips[i].setAttribute('fill', taken > i ? PURPLE_L : 'none');
+    O(recDot, u < 6.6 ? .6 + .4*Math.sin(u*7) : 0);
+    // ribbons trace index/middle tips during takes
+    const near = [[3.5],[4.6],[5.7]].some(([tk]) => Math.abs(u-tk) < .5);
+    if (near && thand.tips.i) {
+      let p1 = [], p2 = [];
+      for (let k = 0; k < 12; k++) {
+        const uu = u - k*.03;
+        let mm = 0;
+        for (const tk of [3.5,4.6,5.7]) mm = Math.max(mm, clamp(1-Math.abs(uu-tk)/.42,0,1)*1.35);
+        const pxq = mixPose(POSES.open, POSES.peace, clamp(mm,0,1));
+        for (const [arr, key] of [[p1,'i'],[p2,'m']]) {
+          const tip = handTip(pxq, key);
+          arr.push((560 + tip[0]*.95 + 6*Math.sin(uu*1.4)) + ',' + (440 + tip[1]*.95));
+        }
+      }
+      rib1.setAttribute('points', p1.join(' ')); rib2.setAttribute('points', p2.join(' '));
+      O(rib1, .7); O(rib2, .7);
+    } else { O(rib1, 0); O(rib2, 0); }
+    const confV = K(u, [[3.3,0],[3.7,31],[4.4,31],[4.8,64],[5.5,64],[6.0,92],[6.6,92]], eo);
+    confF.setAttribute('width', 660*confV/100);
+    confL.textContent = `match confidence ${Math.round(confV)}%`;
+    const mv = K(u, [[6.6,0],[7.05,1]], spring);
+    match.setAttribute('transform', `translate(280 290) scale(${mv})`); O(match, u > 6.6 ? 1 : 0);
+    O(matchLbl, K(u, [[6.9,0],[7.3,1]]));
+    const bv = fadeIO(bind, u, 7.6, 8.2, 1e9, 1e9);
+    setT(bind, 640, 920 + (1-bv)*70);
+    const sv = K(u, [[8.6,0],[9.3,1]], xo);
+    shot.setAttribute('transform', `translate(${1060 + (1-sv)*560} 190) rotate(${-2*sv})`);
+    O(shot, u > 8.6 ? 1 : 0);
+    camMove(g, u, 1.006, .004, punch(u, 6.65));
+    lt.reveal(u, 2.7);
+  };
+});
+
+// ---------------------------------------------------------------- S8 · carousel
+scene('s8', (g) => {
+  const lt = lowerThird(g, '06', { tag:'AND MORE', text:'Desktops · windows · your voice' });
+  const panels = [];
+  function panel(title, icon) {
+    const pg = grp(g);
+    el('rect', { x:-730, y:-330, width:1460, height:660, rx:30, fill:'rgba(21,16,38,0.94)', stroke:LINE, 'stroke-width':2, filter:'url(#shLg)' }, pg);
+    el('rect', { x:-730, y:-330, width:1460, height:110, rx:30, fill:'rgba(139,92,246,0.05)' }, pg);
+    const ic = grp(pg); setT(ic, -672, -274);
+    el('rect', { x:-26, y:-26, width:52, height:52, rx:15, fill:'url(#brand)' }, ic);
+    icon(ic);
+    label(pg, { x:-622, y:-262, s:34, w:700, f:FD, fill:INK, a:'start' }, title);
+    panels.push(pg); return pg;
+  }
+  // A · desktops
+  const pa = panel('Switch desktops', (ic) => {
+    el('rect', { x:-14, y:-10, width:12, height:20, rx:3, fill:'#FFF' }, ic);
+    el('rect', { x:2, y:-10, width:12, height:20, rx:3, fill:'#FFF', opacity:.6 }, ic);
+  });
+  const desks = [];
+  for (let i = 0; i < 3; i++) {
+    const d = grp(pa); setT(d, -420 + i*420, 40);
+    el('rect', { x:-182, y:-112, width:364, height:224, rx:16, fill:i===2?'url(#wall2)':'url(#wall)', stroke:LINE, 'stroke-width':1.5 }, d);
+    const dIn = grp(d, { 'clip-path': clipRect(-182, -112, 364, 224, 16) });
+    el('path', { d:'M -182 60 Q -80 20 20 52 T 182 40 V 112 H -182 Z', fill:'#161040', opacity:.6 }, dIn);
+    if (i === 0) { el('rect', { x:-140, y:-70, width:180, height:120, rx:10, fill:PANEL, stroke:LINE }, dIn); }
+    if (i === 1) { el('rect', { x:-150, y:-58, width:150, height:100, rx:10, fill:PANEL, stroke:LINE }, dIn);
+                   el('rect', { x:22, y:-78, width:118, height:140, rx:10, fill:PANEL_HI, stroke:LINE }, dIn); }
+    if (i === 2) { el('circle', { cx:0, cy:-12, r:54, fill:'rgba(125,211,252,0.16)', stroke:BLUE_L, 'stroke-width':2 }, dIn); }
+    label(d, { x:0, y:152, s:21, w:600, f:FM, fill:DIM }, `Desktop ${i+1}`);
+    desks.push(d);
+  }
+  const dRing = el('rect', { x:-190, y:-120, width:380, height:240, rx:20, fill:'none', stroke:PURPLE_L, 'stroke-width':6, filter:'url(#shSm)' }, pa);
+  const paHand = makeHand(pa, { scale:.68 });
+  const streakA = grp(pa);
+  for (let i = 0; i < 3; i++) el('line', { x1:0, y1:-14+i*14, x2:70, y2:-14+i*14, stroke:BLUE_L, 'stroke-width':5, 'stroke-linecap':'round', opacity:0 }, streakA);
+  // B · snapping
+  const pb = panel('Snap windows', (ic) => {
+    el('rect', { x:-14, y:-12, width:13, height:24, rx:3, fill:'#FFF' }, ic);
+    el('rect', { x:2, y:-12, width:13, height:24, rx:3, fill:'#FFF', opacity:.55 }, ic);
+  });
+  el('rect', { x:-560, y:-190, width:1120, height:430, rx:18, fill:'url(#wall)', stroke:LINE }, pb);
+  const gridL = el('rect', { x:-548, y:-178, width:548, height:406, rx:12, fill:'rgba(196,181,253,0.10)', stroke:PURPLE_L, 'stroke-dasharray':'10 10', 'stroke-width':3, opacity:0 }, pb);
+  const gridR = el('rect', { x:0, y:-178, width:548, height:406, rx:12, fill:'rgba(125,211,252,0.10)', stroke:BLUE_L, 'stroke-dasharray':'10 10', 'stroke-width':3, opacity:0 }, pb);
+  const wA = grp(pb); const wAw = macWindow(wA, { x:0, y:0, w:430, h:290, title:'Notes', noShadow:true });
+  el('rect', { x:0, y:42, width:430, height:8, fill:AMBER, opacity:.85 }, wAw.g);
+  for (let i = 0; i < 4; i++) el('rect', { x:22, y:72 + i*44, width:[330, 360, 300, 220][i], height:15, rx:7.5, fill:INK2, opacity:.35 }, wAw.content);
+  const wB = grp(pb); const wBw = macWindow(wB, { x:0, y:0, w:430, h:290, title:'Music', noShadow:true });
+  el('circle', { cx:88, cy:150, r:50, fill:PURPLE }, wBw.content);
+  el('circle', { cx:88, cy:150, r:50, fill:'url(#brandV)', opacity:.5 }, wBw.content);
+  el('path', { d:'M 80 130 v 42 l 30 -21 Z', fill:'#FFF' }, wBw.content);
+  for (let i = 0; i < 3; i++) el('rect', { x:168, y:104 + i*38, width:[218, 178, 198][i], height:13, rx:6.5, fill:INK2, opacity:.35 }, wBw.content);
+  const streakB = grp(pb);
+  for (let i = 0; i < 3; i++) el('line', { x1:0, y1:0, x2:90, y2:0, stroke:PURPLE_L, 'stroke-width':6, 'stroke-linecap':'round', opacity:0 }, streakB);
+  // C · voice
+  const pc = panel('Voice control (beta)', (ic) => {
+    el('rect', { x:-6, y:-14, width:12, height:18, rx:6, fill:'#FFF' }, ic);
+    el('path', { d:'M -12 -2 a 12 12 0 0 0 24 0 M 0 10 v 7', stroke:'#FFF', 'stroke-width':3, fill:'none', 'stroke-linecap':'round' }, ic);
+  });
+  const mic = grp(pc); setT(mic, -430, 30);
+  el('circle', { r:62, fill:'url(#brand)', filter:'url(#shSm)' }, mic);
+  el('rect', { x:-13, y:-32, width:26, height:42, rx:13, fill:'#FFF' }, mic);
+  el('path', { d:'M -24 -2 a 24 24 0 0 0 48 0 M 0 22 v 16', fill:'none', stroke:'#FFF', 'stroke-width':5.5, 'stroke-linecap':'round' }, mic);
+  const radBars = [];
+  for (let i = 0; i < 24; i++) {
+    const a = i*15*Math.PI/180;
+    radBars.push(el('line', { x1:Math.cos(a)*76, y1:Math.sin(a)*76, x2:Math.cos(a)*86, y2:Math.sin(a)*86,
+      stroke:BLUE_L, 'stroke-width':4.5, 'stroke-linecap':'round', opacity:.8 }, mic));
+  }
+  const bubble = grp(pc); setT(bubble, -130, -120);
+  el('rect', { x:-260, y:-46, width:570, height:92, rx:26, fill:PANEL_HI, stroke:LINE, 'stroke-width':2, filter:'url(#shSm)' }, bubble);
+  el('path', { d:'M -180 44 l -20 36 l 48 -34 Z', fill:PANEL_HI }, bubble);
+  const bubTxt = label(bubble, { x:-228, y:11, s:29, w:600, f:FM, fill:INK, a:'start' }, '');
+  const onDev = grp(pc); setT(onDev, 118, 160);
+  el('rect', { x:-118, y:-25, width:236, height:50, rx:25, fill:'rgba(52,211,153,0.12)', stroke:GREEN, 'stroke-width':2.4 }, onDev);
+  el('circle', { cx:-88, cy:0, r:8, fill:GREEN }, onDev);
+  label(onDev, { x:14, y:8, s:21, w:650, fill:GREEN }, 'on-device ✓');
+  const notes = grp(pc); setT(notes, 430, 40);
+  const nw = macWindow(notes, { x:-190, y:-150, w:380, h:290, title:'Notes', noShadow:true });
+  el('rect', { x:0, y:42, width:380, height:8, fill:AMBER, opacity:.85 }, nw.g);
+  label(nw.content, { x:22, y:88, s:21, w:700, fill:INK, a:'start' }, 'Ideas');
+  for (let i = 0; i < 4; i++) el('rect', { x:22, y:106 + i*38, width:[290, 320, 250, 170][i], height:13, rx:6.5, fill:INK2, opacity:.35 }, nw.content);
+  const menuShot = grp(pc);
+  el('rect', { x:-16, y:-16, width:452, height:272, rx:20, fill:'#0D0A1C', stroke:LINE, 'stroke-width':2, filter:'url(#shLg)' }, menuShot);
+  const mimg = el('image', { x:0, y:0, width:420, height:222, preserveAspectRatio:'xMidYMid meet' }, menuShot);
+  mimg.setAttribute('href', '../../docs/assets/app-menu.png');
+  label(menuShot, { x:210, y:246, s:18, w:600, f:FM, fill:DIM }, 'the real menu — voice lives here');
+  return (u) => {
+    const focus = K(u, [[0,0],[1.7,0],[3.1,1],[4.7,1],[5.7,2],[12.1,2]]);
+    for (let i = 0; i < 3; i++) panels[i].setAttribute('transform', `translate(${960 + (i - focus) * 1700} 560)`);
+    // A: flick left
+    const fl = K(u, [[2.0,0],[2.55,1]], xo);
+    dRing.setAttribute('transform', `translate(${-fl*420} 40)`);
+    paHand.pose(POSES.thumbR);
+    const flick = K(u, [[1.9,0],[2.15,1],[2.5,0]], eio);
+    paHand.at(600, 160 , -6 - 24*flick);
+    [...streakA.children].forEach((s, i) => { setT(s, 470 - flick*130 - i*26, 150 + i*10, 1, -12); O(s, flick * (0.75 - i*.2)); });
+    for (let i = 0; i < 3; i++) desks[i].setAttribute('opacity', i === 1 - Math.round(fl) ? 1 : .58);
+    // B: snap with streaks
+    const sA = K(u, [[3.55,0],[4.05,1]], xo), sB = K(u, [[4.35,0],[4.85,1]], xo);
+    wA.setAttribute('transform', `translate(${-215 + sA*(-548+59+215)} ${-145 + sA*(-178+58+145)}) scale(${1 - sA*.02})`);
+    wB.setAttribute('transform', `translate(${58 + sB*(62-58)} ${-42 + sB*(-178+58+42)}) scale(${1 - sB*.02})`);
+    O(gridL, sA > 0 && sA < 1 ? .9 : (sA >= 1 ? .22 : 0));
+    O(gridR, sB > 0 && sB < 1 ? .9 : (sB >= 1 ? .22 : 0));
+    [...streakB.children].forEach((s, i) => {
+      const act = (sA > .05 && sA < .95) ? sA : (sB > .05 && sB < .95) ? sB : -1;
+      if (act < 0) { O(s, 0); return; }
+      const left = sA > .05 && sA < .95;
+      setT(s, (left ? -80 : 240) - act*160*(left?1:-1) * 0 + (left? -act*180 : act*180), -60 + i*40, 1, left ? 12 : -12);
+      O(s, Math.sin(act*Math.PI) * (0.7 - i*.18));
+    });
+    // C: voice
+    const said = 'Pawvis, open Notes';
+    const nch = Math.floor(K(u, [[6.3,0],[8.0,said.length]], lin));
+    bubTxt.textContent = said.slice(0, nch) + (nch < said.length && (u*2)%1 < .5 ? '▌' : '');
+    const env = K(u, [[6.2,0],[6.5,1],[8.0,1],[8.4,.25],[12,.25]]);
+    radBars.forEach((b, i) => {
+      const a = i*15*Math.PI/180;
+      const h = 76 + (6 + 22 * env * Math.abs(Math.sin(u*6.4 + i*1.7)));
+      b.setAttribute('x2', Math.cos(a)*h); b.setAttribute('y2', Math.sin(a)*h);
+    });
+    const nv = K(u, [[8.5,0],[9.0,1]], spring);
+    notes.setAttribute('transform', `translate(430 40) scale(${nv})`); O(notes, u > 8.5 ? 1 : 0);
+    fadeIO(onDev, u, 8.9, 9.4, 1e9, 1e9);
+    const msv = K(u, [[8.9,0],[9.5,1]], xo);
+    menuShot.setAttribute('transform', `translate(150 ${262 - msv*44}) rotate(2) scale(.92)`);
+    O(menuShot, msv);
+    camMove(g, u, 1.004, .004, punch(u, 8.55));
+    lt.reveal(u, 0.6);
+  };
+});
+
+// ---------------------------------------------------------------- S9 · outro
+scene('s9', (g) => {
+  const aur1 = el('ellipse', { cx:600, cy:260, rx:900, ry:420, fill:'url(#glowP)', opacity:.9 }, g);
+  const aur2 = el('ellipse', { cx:1400, cy:820, rx:900, ry:460, fill:'url(#glowB)', opacity:.9 }, g);
+  const sparkles = [];
+  for (let i = 0; i < 30; i++) sparkles.push(el('circle', { r: 1.6 + (i%3), fill: i%2 ? PURPLE_L : BLUE_L }, g));
+  const glow = el('ellipse', { cx:960, cy:392, rx:380, ry:280, fill:'url(#glowP)' }, g);
+  const iconG = grp(g);
+  const iwrap = grp(iconG, { 'clip-path': clipRect(-155, -155, 310, 310, 70) });
+  el('image', { x:-155, y:-155, width:310, height:310, href:'../../icon.png' }, iwrap);
+  el('rect', { x:-155, y:-155, width:310, height:310, rx:70, fill:'none', stroke:'rgba(239,236,248,0.2)', 'stroke-width':2.5 }, iconG);
+  el('rect', { x:-155, y:-155, width:310, height:130, rx:70, fill:'#FFF', opacity:.05 }, iconG);
+  // staggered wordmark — offsets measured from the loaded font on first use
+  const wordG = grp(g);
+  const letters = [];
+  'Pawvis'.split('').forEach((ch) => {
+    letters.push(label(wordG, { x:0, y:660, s:128, w:800, f:FD, fill:INK, a:'start' }, ch));
+  });
+  let wordLaidOut = false;
+  function layoutWord() {
+    const widths = letters.map(L => L.getComputedTextLength());
+    const total = widths.reduce((a, b) => a + b, 0);
+    let x = 960 - total/2;
+    letters.forEach((L, i) => { L.setAttribute('x', x); x += widths[i]; });
+    wordLaidOut = true;
+  }
+  const tag = label(g, { x:960, y:724, s:47, f:FS, it:true, fill:PURPLE_L, w:400 }, 'your hand is the mouse.');
+  const badges = grp(g);
+  const bdefs = [['Free', PURPLE_L, 140], ['Open source · MIT', BLUE_L, 290], ['macOS 14+', INK2, 195]];
+  let bx = 960 - (140+290+195+2*22)/2;
+  for (const [t2, c, wd] of bdefs) {
+    const b = grp(badges);
+    el('rect', { x:bx, y:762, width:wd, height:56, rx:28, fill:'rgba(20,15,36,0.92)', stroke:c, 'stroke-width':2 }, b);
+    label(b, { x:bx+wd/2, y:799, s:23, w:650, fill:c }, t2);
+    bx += wd + 22;
+  }
+  const urlP = grp(g);
+  el('rect', { x:960-280, y:864, width:560, height:98, rx:49, fill:'rgba(20,15,36,0.96)', stroke:LINE, 'stroke-width':2, filter:'url(#shLg)' }, urlP);
+  label(urlP, { x:960, y:931, s:58, w:750, f:FD, fill:'url(#brand)' }, 'pawvis.app');
+  const shineW = grp(urlP, { 'clip-path': clipRect(960-280, 864, 560, 98, 49) });
+  const shine = el('rect', { x:-80, y:854, width:90, height:120, fill:'#FFF', opacity:.14, transform:'skewX(-18)' }, shineW);
+  const cameo = grp(g); setT(cameo, 1700, 985);
+  const cmaya = person(cameo, { skin:SKIN, hair:HAIR, shirt:SWEATER, shirtD:SWEATER_D, style:'bun' });
+  const chand = makeHand(cameo, { scale:.205, noShadow:true });
+  chand.pose(POSES.shaka); chand.at(92, 4, 22);
+  const cat = makeCat(cameo); setT(cat.g, -150, 66, .8);
+  const blackout = el('rect', { width:W, height:H, fill:'#000', opacity:0 }, g);
+  return (u) => {
+    aur1.setAttribute('transform', `rotate(${u*2.2} 600 260)`);
+    aur2.setAttribute('transform', `rotate(${-u*1.8} 1400 820)`);
+    for (let i = 0; i < 30; i++) {
+      const ang = i*1.31 + u*.1, rr = 300 + (i%5)*135;
+      sparkles[i].setAttribute('cx', 960 + Math.cos(ang)*rr*1.55);
+      sparkles[i].setAttribute('cy', 425 + Math.sin(ang)*rr*.6);
+      O(sparkles[i], (.2 + .5*Math.abs(Math.sin(u*1.3 + i))) * K(u, [[.4,0],[1.4,1]]));
+    }
+    if (!wordLaidOut && document.fonts.status === 'loaded') layoutWord();
+    const iv = K(u, [[0.25,0],[0.85,1]], spring);
+    setT(iconG, 960, 392 + 8*Math.sin(u*1.1), iv);
+    letters.forEach((L, i) => {
+      const lv = K(u, [[0.85 + i*.07,0],[1.25 + i*.07,1]], xo);
+      O(L, lv);
+      L.setAttribute('transform', `translate(0 ${(1-lv)*40})`);
+    });
+    O(tag, K(u, [[1.6,0],[2.1,1]]));
+    fadeIO(badges, u, 3.1, 3.7, 1e9, 1e9);
+    const uv = fadeIO(urlP, u, 5.0, 5.6, 1e9, 1e9);
+    urlP.setAttribute('transform', `translate(0 ${(1-uv)*50})`);
+    const sh = ((u - 5.6) / 2.2) % 1;
+    shine.setAttribute('x', u > 5.6 ? 620 + sh*720 : -200);
+    O(shine, u > 5.6 && sh < .5 ? .14 : 0);
+    fadeIO(cameo, u, 2.4, 3.0, 1e9, 1e9);
+    setT(cameo, 1690, 985 - K(u, [[2.4,0],[3.0,58]], xo));
+    chand.at(92, 4, 22 + 9*Math.sin(u*6) * clamp(1-(u-3)/2, 0, 1));
+    cat.paw.setAttribute('transform', u > 3.4 ? `rotate(${-32 - 8*Math.sin(u*5)} -58 18)` : '');
+    cat.tail.setAttribute('transform', `rotate(${Math.sin(u*2.2)*13} 48 2)`);
+    O(blackout, K(u, [[8.55,0],[9.05,1]], eio));
+  };
+});
+
+// ================================================================ wipes
+const wipeG = grp(stage);
+const wipes = [];
+for (const b of [6, 22.8, 31.2, 39.6, 46.5, 55, 66.3, 78.4]) {
+  const gw = grp(wipeG);
+  const panel = el('rect', { x:0, y:-140, width:W*1.5, height:H+280, fill:'#150F2E', transform:'skewX(-11)' }, gw);
+  const gradBar = el('rect', { x:0, y:-140, width:W*1.5, height:H+280, fill:'url(#brand)', transform:'skewX(-11)' }, gw);
+  const streaks = grp(gw);
+  for (let i = 0; i < 3; i++)
+    el('rect', { x:0, y:250 + i*230, width:640, height:64, rx:32, fill:'#FFF', opacity:.1 - i*.02, transform:'skewX(-11)' }, streaks);
+  wipes.push({ b, gw, panel, gradBar, streaks });
+}
+el('rect', { width:W, height:H, fill:'url(#vin)', 'pointer-events':'none' }, stage);
+el('rect', { width:W, height:H, fill:'url(#leak)', 'pointer-events':'none' }, stage);
+const grainRect = el('rect', { width:W, height:H, filter:'url(#grain)', opacity:.045, 'pointer-events':'none' }, stage);
+
+// ================================================================ seek
+window.SEEK = function (t) {
+  t = clamp(t, 0, DUR);
+  orbA.setAttribute('cx', 380 + 55*Math.sin(t*.12));
+  orbA.setAttribute('cy', 210 + 30*Math.sin(t*.16+2));
+  orbB.setAttribute('cx', 1600 + 60*Math.sin(t*.1+1));
+  orbB.setAttribute('cy', 920 + 36*Math.sin(t*.14));
+  orbC.setAttribute('cx', 1250 + 40*Math.sin(t*.09+3));
+  turb.setAttribute('seed', 1 + Math.floor(t*30) % 211);
+  for (const s of SCENES) {
+    const vis = t >= s.a - .08 && t <= s.b + .08;
+    s.g.style.display = vis ? '' : 'none';
+    if (vis) s.fn(t - s.a, t);
+  }
+  for (const { b, gw, panel, gradBar, streaks } of wipes) {
+    const on = t > b - .34 && t < b + .34;
+    gw.style.display = on ? '' : 'none';
+    if (on) {
+      const x1 = K(t, [[b-.34, -3150], [b+.30, 2400]], eio);
+      const x2 = K(t, [[b-.30, -3150], [b+.34, 2400]], eio);
+      gradBar.setAttribute('transform', `translate(${x1} 0)`);
+      panel.setAttribute('transform', `translate(${x2} 0)`);
+      streaks.setAttribute('transform', `translate(${x1*1.12 + 500} 0)`);
+    }
+  }
+  return true;
+};
+SEEK(0);
+window.READY = true;
+</script>
+</body>
+</html>
