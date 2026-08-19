@@ -32,6 +32,8 @@ your Mac; the one exception is the opt-in agent hand-off below.
 
 [![Watch the Pawvis demo](https://img.youtube.com/vi/xDQwwXdeuUs/maxresdefault.jpg)](https://youtu.be/xDQwwXdeuUs)
 
+[Watch the demo film on YouTube](https://youtu.be/xDQwwXdeuUs)
+
 > [!IMPORTANT]
 > **Pawvis really does control your Mac.** It moves the cursor and posts real
 > clicks, drags and scrolls, so an accidental finger dip is an accidental
