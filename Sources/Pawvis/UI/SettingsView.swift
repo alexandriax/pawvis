@@ -295,6 +295,20 @@ private struct TrackingSettingsTab: View {
             Divider()
 
             SettingToggle(
+                title: "Only control while you face the screen",
+                caption: "The camera that watches your hands also watches your head: turn away — or step out of frame — for a moment and pointer, click and gesture actions pause until you look back. Brief glances cost nothing, a press or drag in flight is never cut short, and voice control keeps working with your back turned.",
+                isOn: $store.settings.attention.enabled)
+
+            LabeledSlider(
+                label: "Sensitivity",
+                caption: "Right: strict — little more than a glance off-screen pauses control. Left: relaxed — only turning well away (or leaving) pauses, the safer end if your cursor spans several displays.",
+                value: $store.settings.attention.sensitivity,
+                range: 0...1)
+                .disabled(!store.settings.attention.enabled)
+
+            Divider()
+
+            SettingToggle(
                 title: "Wave both hands to stop tracking",
                 caption: "Hold up both hands open with fingers spread wide, like a double high-five, then cross them over each other and back. Once they've traded sides enough times, hand tracking switches off entirely — the same as the menu bar switch.",
                 isOn: $store.settings.gestures.crissCrossDisableEnabled)

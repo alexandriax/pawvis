@@ -164,6 +164,30 @@ func runSelfTest() -> Int32 {
     check("firstRun.automatedRunsStayHeadless", FirstRunPolicy.verdict(
         completed: false, cameraGranted: false, automated: true) == .proceedNormally)
 
+    // Look-to-control: off by default; enabled, only a *sustained* look
+    // away closes the gate, a press in flight holds it open, and looking
+    // back reopens it.
+    check("attention.defaultsOff", !PawvisSettings.default.attention.enabled)
+    var attentionOn = AttentionConfig()
+    attentionOn.enabled = true
+    var attentionGate = AttentionGate(config: attentionOn.gateConfig())
+    let attentionAway = AttentionGate.Observation(faceSeen: true, yaw: 1.2)
+    check("attention.glanceCostsNothing",
+          attentionGate.assess(attentionAway, interacting: false, at: 0)
+          && attentionGate.assess(attentionAway, interacting: false, at: 0.5))
+    check("attention.sustainedAwayCloses",
+          !attentionGate.assess(attentionAway, interacting: false, at: 1.5))
+    check("attention.heldPressHoldsOpen", {
+        var gate = AttentionGate(config: attentionOn.gateConfig())
+        _ = gate.assess(attentionAway, interacting: true, at: 0)
+        return gate.assess(attentionAway, interacting: true, at: 30)
+    }())
+    check("attention.lookingBackReopens", {
+        let facing = AttentionGate.Observation(faceSeen: true, yaw: 0, pitch: 0)
+        _ = attentionGate.assess(facing, interacting: false, at: 2)
+        return attentionGate.assess(facing, interacting: false, at: 2.5)
+    }())
+
     // Voice parser: one-shot commands, wake word required for each.
     let parser = VoiceControlParser()
     let typed = parser.parse("Pawvis type hello world")

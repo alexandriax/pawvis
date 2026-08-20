@@ -77,6 +77,7 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
     public var voiceControl: VoiceControlConfig = VoiceControlConfig()
     public var overlay: OverlayConfig = OverlayConfig()
     public var general: GeneralConfig = GeneralConfig()
+    public var attention: AttentionConfig = AttentionConfig()
 
     public init() {}
 
@@ -84,6 +85,7 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case gestures, customGestures, trainedGestures, voiceControl, overlay, general
+        case attention
         case dictation // legacy (pre-voice-control builds)
     }
 
@@ -95,6 +97,7 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
         try c.encode(voiceControl, forKey: .voiceControl)
         try c.encode(overlay, forKey: .overlay)
         try c.encode(general, forKey: .general)
+        try c.encode(attention, forKey: .attention)
         // The legacy `dictation` key is read-only (decode migration) and is
         // deliberately not re-encoded.
     }
@@ -108,6 +111,8 @@ public struct PawvisSettings: Codable, Equatable, Sendable {
             ?? TrainedGestureSettings()
         overlay = (try? c.decodeIfPresent(OverlayConfig.self, forKey: .overlay)) ?? OverlayConfig()
         general = (try? c.decodeIfPresent(GeneralConfig.self, forKey: .general)) ?? GeneralConfig()
+        attention = (try? c.decodeIfPresent(AttentionConfig.self, forKey: .attention))
+            ?? AttentionConfig()
         if let v = try? c.decodeIfPresent(VoiceControlConfig.self, forKey: .voiceControl) {
             voiceControl = v
         } else if let legacy = try? c.decodeIfPresent(LegacyDictationConfig.self, forKey: .dictation) {
