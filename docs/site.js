@@ -1,7 +1,7 @@
 /* Pawvis site.js
-   No frameworks. The only third-party requests on the page are the analytics
-   tag and the hero's YouTube embed, both in index.html; everything else is
-   served from this repo. */
+   No frameworks. The only third-party request on the page is the analytics
+   tag in index.html; everything else is served from this repo (the demo film
+   links out to YouTube in a new tab rather than embedding). */
 (function () {
   "use strict";
 
@@ -53,31 +53,5 @@
     }
   }
 
-  /* ------------------------------------------------ hero film
-     The hero shows the film's own loop (above) until someone presses play,
-     then swaps in the YouTube player. Nothing reaches youtube.com before
-     that click. Without JS the cover stays a plain link to the video. */
-  var film = document.getElementById("demoVideo");
-
-  if (film && film.dataset.embed) {
-    film.addEventListener("click", function (event) {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-      event.preventDefault();
-
-      var player = document.createElement("iframe");
-      player.id = "demoVideo";
-      player.src = film.dataset.embed;
-      player.width = 1280;
-      player.height = 720;
-      player.title = film.dataset.title;
-      player.referrerPolicy = "strict-origin-when-cross-origin";
-      player.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-      player.allowFullscreen = true;
-
-      if (loop) loop.pause();
-      film.replaceWith(player);
-      player.focus();
-    });
-  }
 
 })();
