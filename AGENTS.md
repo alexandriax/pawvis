@@ -35,6 +35,11 @@ Extras:
   clip of the gesture and ask the machine, because synthetic tests cannot
   tell you what Vision does to a real hand mid-swipe. Every threshold in
   `CustomGestureDetector` was tuned against such clips; retune the same way.
+- `Pawvis --attention-eval <video…> [--sensitivity 0…1] [--verbose]` — run
+  the real face-detection + attention-gate pipeline (look-to-control) over a
+  recorded clip and print every pause/resume transition (per-sample head
+  yaw/pitch with `--verbose`). Same reasoning as `--gesture-eval`: what
+  Vision reports for a real head mid-turn is a question for the machine.
 - `Pawvis --action-eval <kind> [argument…]` — perform one gesture action
   through the real `GestureActionRunner` and print the pill outcome.
   "Does desktopRight actually switch the desktop on this machine" is a
@@ -179,6 +184,21 @@ to shutdown, so the app owns two rest states (`PawvisController`):
   Power Mode shortens the no-hands delay to 3 s and sparsens the probe to
   one frame in fifteen (~2 fps). The thresholds are constants, chosen
   rather than measured; make them settings only if someone actually asks.
+- **Look-to-control is a third, opt-in rest state** (`AttentionGate`, pure
+  PawvisCore, hosted in `AttentionGateBox` at the camera tap). With
+  Tracking → "Only control while you face the screen" on, Vision's face
+  detector (rectangles revision 3 — the cheap one, sampled one frame in
+  three) watches head yaw/pitch; a sustained look away closes the gate and
+  frames skip hand-pose inference wholesale until the user looks back. The
+  angle limit rides the sensitivity slider (`AttentionConfig.gateConfig()`);
+  the away/return delays and hysteresis margin are constants. The gate can
+  never close mid-press (the `interacting` mirror exempts it, and the away
+  transition force-releases anyway to cover the one-frame mirror lag), no
+  face means away (an operator the camera cannot see must not move the
+  cursor), and a Vision *error* holds the last verdict instead — "couldn't
+  look" must not read as "looked away". Voice control is deliberately
+  outside the gate: "Pawvis stop" must work precisely when you're not
+  looking.
 - **Skipped frames never reach the gesture engine**, whose only clock is
   the timestamps of the frames it is given — a delivery gap reads as a slow
   camera, which the tracking-loss grace already tolerates. A held button,

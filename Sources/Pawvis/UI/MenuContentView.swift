@@ -313,6 +313,9 @@ struct MenuContentView: View {
         // Paused (the lock screen), not stopped: the toggle stays on, and
         // the reason takes the status line until tracking resumes.
         if let reason = controller.pauseReason { return reason }
+        // Look-to-control: the camera is fine and hands may be in view, but
+        // actions wait for the user to face the screen again.
+        if controller.attentionPaused { return "Paused until you face the screen" }
         switch controller.handsDetected {
         case 0: return "No hands in view"
         case 1: return modeText

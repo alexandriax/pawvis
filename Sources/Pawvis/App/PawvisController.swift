@@ -29,9 +29,18 @@ final class PawvisController: ObservableObject {
     /// screen), for the menu's status line. nil whenever tracking is live —
     /// a pause is not a stop, so the toggle stays on.
     @Published private(set) var pauseReason: String?
+    /// Whether look-to-control is holding actions closed because the user
+    /// faces away from the screen. A pause like the lock screen's — the
+    /// toggle stays on — except the camera keeps running: its frames carry
+    /// the face that will reopen the gate.
+    @Published private(set) var attentionPaused = false
 
     private let camera = CameraManager()
     private let tracking = HandTrackingService()
+    private let faceTracking = FaceAttentionService()
+    /// The look-to-control policy's thread-safe face, consulted at the
+    /// camera tap (see `AttentionGateBox`).
+    private let attention = AttentionGateBox()
     /// The idle frame-skip policy's thread-safe face, consulted at the
     /// camera tap (see `FrameThrottleBox`).
     private let throttle = FrameThrottleBox()
@@ -49,6 +58,7 @@ final class PawvisController: ObservableObject {
         self.settingsStore = settingsStore
         let settings = settingsStore.settings
         engine = GestureEngine(config: settings.gestures)
+        attention.setConfig(settings.attention.gateConfig())
         projector = ScreenProjector(controlAllDisplays: settings.general.controlAllDisplays)
         mouse = MouseController(projector: projector)
         actionRunner.stopTracking = { [weak self] in self?.stopTracking() }
@@ -71,6 +81,20 @@ final class PawvisController: ObservableObject {
             // watchdog asks whether the camera is delivering, and a frame
             // the throttle skips is still proof that it is.
             guard self.throttle.shouldRunInference(at: CACurrentMediaTime()) else { return }
+            // Look-to-control, decided here at the tap like the idle
+            // throttle: while the user faces away, hand-pose inference is
+            // skipped wholesale and the (far cheaper, sampled) face
+            // detector is the only Vision work left, watching for them to
+            // look back. A skipped frame never reaches the gesture engine;
+            // the main actor hears about verdict changes only.
+            let (attentive, attentionChanged) = self.attention.assess(
+                at: CACurrentMediaTime()) { self.faceTracking.observe(in: sampleBuffer) }
+            if attentionChanged {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self.attentionDidChange(attentive) }
+                }
+            }
+            guard attentive else { return }
             // Camera queue: run Vision synchronously, then hop to main.
             // DispatchQueue.main (not Task) — the main queue is FIFO, so
             // down/drag/up frame batches can never arrive reordered.
@@ -243,6 +267,8 @@ final class PawvisController: ObservableObject {
     private func activateTrackingEffects() {
         engine.reset()
         throttle.reset()
+        attention.reset()
+        attentionPaused = false
         refreshProjector()
         overlay.show()
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
@@ -278,7 +304,9 @@ final class PawvisController: ObservableObject {
         // real stop: unlock must not resurrect the camera.
         pausedForLock = false
         pauseReason = nil
+        attentionPaused = false
         throttle.setInteracting(false)
+        attention.setInteracting(false)
 
         guard !trainingActive else {
             // Stopping the capture session here would cut the trainer's own
@@ -361,6 +389,11 @@ final class PawvisController: ObservableObject {
         grabbing = false
         controlArmed = true
         throttle.setInteracting(false)
+        attention.setInteracting(false)
+        // The lock outranks the gate, and unlock starts attentive: whoever
+        // just typed the password is at the machine, facing it.
+        attention.reset()
+        attentionPaused = false
         Log.app.info("Tracking paused: screen locked")
     }
 
@@ -374,6 +407,7 @@ final class PawvisController: ObservableObject {
         guard trackingActive else { return }
         engine.reset()
         throttle.reset()
+        attention.reset()
         overlay.show()
         // Arm the stall clock HERE, not only from `onRunningChanged`: that
         // callback hops the camera queue and a slow `startRunning`, and the
@@ -384,6 +418,40 @@ final class PawvisController: ObservableObject {
         armStallClock(grace: Self.startupGraceSeconds)
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         Log.app.info("Tracking resumed: screen unlocked")
+    }
+
+    // MARK: - Look-to-control
+
+    /// The attention gate's verdict crossed over, reported from the camera
+    /// tap (or forced by wake/settings reconciles). Away mirrors the
+    /// lock-screen pause — release, reset, overlay hidden — except the
+    /// camera stays up: its frames carry the face that reopens the gate.
+    private func attentionDidChange(_ attentive: Bool) {
+        if attentive {
+            guard attentionPaused else { return }
+            attentionPaused = false
+            guard trackingActive, !trainingActive else { return }
+            engine.reset()
+            overlay.show()
+            Log.app.info("Control resumed: facing the screen again")
+        } else {
+            guard !attentionPaused, trackingActive, !trainingActive,
+                  !pausedForLock else { return }
+            attentionPaused = true
+            // The gate holds open while a press or scroll is in flight, but
+            // its interacting mirror lags the engine by a frame: release
+            // through the same paced path every other pause uses, so a stuck
+            // synthetic button stays impossible even across that race.
+            releaseEverything()
+            engine.reset()
+            handsDetected = 0
+            grabbing = false
+            controlArmed = true
+            throttle.setInteracting(false)
+            attention.setInteracting(false)
+            overlay.hide()
+            Log.app.info("Control paused: facing away from the screen")
+        }
     }
 
     // MARK: - Gesture training
@@ -402,6 +470,7 @@ final class PawvisController: ObservableObject {
         // The trainer wants every frame: a throttled preview would record
         // throttled templates.
         throttle.setTraining(true)
+        attention.setTraining(true)
         if trackingActive {
             // Let go of anything in flight and hide the overlay; the camera
             // keeps running, now feeding only the trainer.
@@ -436,6 +505,7 @@ final class PawvisController: ObservableObject {
         trainingActive = false
         trainingFrameTap = nil
         throttle.setTraining(false)
+        attention.setTraining(false)
         // `trackingActive` may have changed while the trainer had the
         // camera — `startTracking`/`stopTracking` deliberately keep the menu
         // switch (and any other caller) live during training instead of
@@ -571,6 +641,11 @@ final class PawvisController: ObservableObject {
     private func systemDidWake() {
         asleep = false
         guard trackingActive || trainingActive else { return }
+        // Whoever woke the machine is at it: the attention gate starts
+        // fresh, and a pause left over from before sleep resumes now (the
+        // resume path is what re-shows the overlay it hid).
+        attention.reset()
+        attentionDidChange(true)
         armStallClock(grace: Self.startupGraceSeconds)
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
         Log.app.info("System woke; resuming camera")
@@ -651,8 +726,12 @@ final class PawvisController: ObservableObject {
         // clock isn't even running — but the guard is explicit rather than
         // inferred: dropping frames mid-press is the one failure this
         // feature must not be able to cause.
-        throttle.setInteracting(
-            overlayState.grabbed || overlayState.rightGrabbed || overlayState.isScrolling)
+        let interacting = overlayState.grabbed || overlayState.rightGrabbed
+            || overlayState.isScrolling
+        throttle.setInteracting(interacting)
+        // The attention gate must never close mid-press either: same fact,
+        // same mirror, second consumer.
+        attention.setInteracting(interacting)
 
         overlay.render(
             overlay: overlayState,
@@ -748,6 +827,11 @@ final class PawvisController: ObservableObject {
         // Trained gestures share the custom library's master switch.
         engine.trainedConfig = settings.trainedGestures.detectorConfig(
             enabled: settings.customGestures.enabled)
+        attention.setConfig(settings.attention.gateConfig())
+        // Toggling look-to-control off resets the gate to attentive without
+        // a frame in flight to say so: reconcile the published pause here
+        // rather than waiting on a verdict change the gate will never emit.
+        if attentionPaused, attention.attentive { attentionDidChange(true) }
         overlay.setConfig(settings.overlay)
         voice.setConfig(settings.voiceControl)
         voice.transcriptOverlay.showInScreenCapture = settings.overlay.showInScreenCapture
