@@ -964,6 +964,13 @@ private struct AboutTab: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 5) {
+                Button("Replay the welcome tour") { WelcomeWindow.show() }
+                CaptionText("The first-run walkthrough: what Pawvis does, the permissions it needs, and the two gestures that carry most of the work. A new install sees it automatically — this is how to find it again.")
+            }
+
+            Divider()
+
             CaptionText("Hand tracking and voice control run entirely on-device — speech, and the screen context used for visual commands, never leave your Mac.")
 
             Divider()
