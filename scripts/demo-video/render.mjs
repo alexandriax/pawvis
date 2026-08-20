@@ -31,6 +31,19 @@ if (mode === 'probe') {
     await p.evaluate(`SEEK(${t})`);
     await p.screenshot({ path: `${OUTDIR}/t${t.toFixed(2).replace('.', '_')}.png` });
   }
+} else if (mode === 'range') {
+  // A contiguous slice of the film: `node render.mjs range <t0> <t1>` writes
+  // frames f00000.png upward, numbered from t0 so ffmpeg can eat the
+  // directory directly. Used by hero_loop.sh for the site's hero loop.
+  mkdirSync(OUTDIR, { recursive: true });
+  const t0 = parseFloat(args[1]), t1 = parseFloat(args[2]);
+  const first = Math.round(t0 * FPS), last = Math.round(t1 * FPS);
+  const p = await makePage();
+  for (let f = first; f < last; f++) {
+    await p.evaluate(`SEEK(${(f / FPS).toFixed(4)})`);
+    await p.screenshot({ path: `${OUTDIR}/f${String(f - first).padStart(5, '0')}.png` });
+  }
+  console.log(`rendered ${last - first} frames (${t0}s to ${t1}s)`);
 } else {
   mkdirSync(OUTDIR, { recursive: true });
   const SHARDS = 4;
