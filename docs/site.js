@@ -31,10 +31,32 @@
     revealed.forEach(function (el) { el.classList.add("is-visible"); });
   }
 
+  /* ------------------------------------------------ hero loop
+     The cover is a muted, self-hosted loop of the film's point and
+     click-and-drag scenes. It only runs when motion is welcome, and only
+     while it's actually on screen; reduced-motion visitors keep the poster
+     still, exactly what the cover was before it moved. */
+  var loop = document.getElementById("heroLoop");
+  if (loop && !reducedMotion) {
+    var playLoop = function () {
+      var attempt = loop.play();
+      if (attempt && attempt.catch) attempt.catch(function () {});
+    };
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) { playLoop(); } else { loop.pause(); }
+        });
+      }, { threshold: 0.15 }).observe(loop);
+    } else {
+      playLoop();
+    }
+  }
+
   /* ------------------------------------------------ hero film
-     The hero shows the film's own still until someone presses play, then
-     swaps in the YouTube player. Nothing reaches youtube.com before that
-     click. Without JS the cover stays a plain link to the video. */
+     The hero shows the film's own loop (above) until someone presses play,
+     then swaps in the YouTube player. Nothing reaches youtube.com before
+     that click. Without JS the cover stays a plain link to the video. */
   var film = document.getElementById("demoVideo");
 
   if (film && film.dataset.embed) {
@@ -52,6 +74,7 @@
       player.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
       player.allowFullscreen = true;
 
+      if (loop) loop.pause();
       film.replaceWith(player);
       player.focus();
     });

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pawvis: touch-free hand control for your Mac</title>
   <meta name="description" content="Pawvis turns your webcam into a touch-free pointing device: raise your hand in the air and the cursor follows, dip a finger to click, fold two fingers to scroll. All processing 100% on-device.">
-  <link rel="canonical" href="https://alexandriax.github.io/pawvis/">
+  <link rel="canonical" href="https://pawvis.app/">
   <meta name="theme-color" content="#0B0912">
 
   <!-- Open Graph / Twitter -->
@@ -13,15 +13,15 @@
   <meta property="og:site_name" content="Pawvis">
   <meta property="og:title" content="Pawvis: touch-free hand control for your Mac">
   <meta property="og:description" content="A mouse made of thin air: raise your hand and the cursor follows, dip a finger to click. Hand tracking runs entirely on your own machine.">
-  <meta property="og:url" content="https://alexandriax.github.io/pawvis/">
-  <meta property="og:image" content="https://alexandriax.github.io/pawvis/banner.png">
+  <meta property="og:url" content="https://pawvis.app/">
+  <meta property="og:image" content="https://pawvis.app/banner.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Pawvis: a mouse made of thin air. Your hand is the cursor.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Pawvis: touch-free hand control for your Mac">
   <meta name="twitter:description" content="A mouse made of thin air. Your hand is the cursor. Everything on-device.">
-  <meta name="twitter:image" content="https://alexandriax.github.io/pawvis/banner.png">
+  <meta name="twitter:image" content="https://pawvis.app/banner.png">
 
   <!-- Icons -->
   <link rel="icon" type="image/png" sizes="64x64" href="assets/favicon-64.png">
@@ -108,8 +108,16 @@
         <a class="film" id="demoVideo" href="https://www.youtube.com/watch?v=xDQwwXdeuUs"
            data-embed="https://www.youtube.com/embed/xDQwwXdeuUs?cc_load_policy=0&amp;autoplay=1"
            data-title="Pawvis demo film: a hand raised in front of a MacBook moves the on-screen cursor without touching the machine.">
-          <img src="assets/demo-cover.jpg" width="1280" height="720"
-               alt="A shaka gesture opens a video call on a Mac, with the webcam panel beside it tracking the hand's joints.">
+          <!-- The loop is the film's own point + click-and-drag scenes,
+               cut wipe-to-wipe (scripts/demo-video/hero_loop.sh), so the
+               page shows the product doing its job before anyone clicks.
+               Muted and self-hosted; site.js starts it only when motion is
+               welcome, so reduced-motion (and no-JS) visitors keep the
+               still cover this replaces. -->
+          <video id="heroLoop" muted playsinline loop preload="metadata"
+                 poster="assets/demo-cover.jpg" width="1280" height="720"
+                 src="assets/hero-loop.mp4"
+                 aria-label="A hand raised at the webcam moves the claw cursor, then dips a finger to click and drag — looping silently; press to play the full film."></video>
           <span class="film-play" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 6.5v11l9-5.5z"/></svg>
           </span>

@@ -5,3 +5,4 @@ preview*/
 *.mp4
 ffmpeg2pass-*.log*
 audio/mix.wav
+frames-hero/

@@ -409,7 +409,8 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   overflow: hidden;
   background: var(--bg-raised);
 }
-.film img {
+.film img,
+.film video {
   display: block;
   width: 100%;
   height: auto;
