@@ -164,10 +164,10 @@ func runSelfTest() -> Int32 {
     check("firstRun.automatedRunsStayHeadless", FirstRunPolicy.verdict(
         completed: false, cameraGranted: false, automated: true) == .proceedNormally)
 
-    // Look-to-control: off by default; enabled, only a *sustained* look
-    // away closes the gate, a press in flight holds it open, and looking
-    // back reopens it.
-    check("attention.defaultsOff", !PawvisSettings.default.attention.enabled)
+    // Look-to-control: on by default; only a *sustained* look away closes
+    // the gate, a press in flight holds it open, and looking back reopens
+    // it.
+    check("attention.defaultsOn", PawvisSettings.default.attention.enabled)
     var attentionOn = AttentionConfig()
     attentionOn.enabled = true
     var attentionGate = AttentionGate(config: attentionOn.gateConfig())

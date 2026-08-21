@@ -184,8 +184,8 @@ to shutdown, so the app owns two rest states (`PawvisController`):
   Power Mode shortens the no-hands delay to 3 s and sparsens the probe to
   one frame in fifteen (~2 fps). The thresholds are constants, chosen
   rather than measured; make them settings only if someone actually asks.
-- **Look-to-control is a third, opt-in rest state** (`AttentionGate`, pure
-  PawvisCore, hosted in `AttentionGateBox` at the camera tap). With
+- **Look-to-control is a third rest state, on by default** (`AttentionGate`,
+  pure PawvisCore, hosted in `AttentionGateBox` at the camera tap). With
   Tracking → "Only control while you face the screen" on, Vision's face
   detector (rectangles revision 3 — the cheap one, sampled one frame in
   three) watches head yaw/pitch; a sustained look away closes the gate and
@@ -198,7 +198,14 @@ to shutdown, so the app owns two rest states (`PawvisController`):
   cursor), and a Vision *error* holds the last verdict instead — "couldn't
   look" must not read as "looked away". Voice control is deliberately
   outside the gate: "Pawvis stop" must work precisely when you're not
-  looking.
+  looking. It shipped off by default in v0.27.0 and became the default two
+  days later; `SettingsStore` migration v9
+  (`PawvisMigration.attentionOnByDefault`) carries existing installs over,
+  because every settings file written by v0.27.x has the old `false` in it
+  and a bool cannot say whether that `false` was chosen or inherited. The
+  welcome tour's camera card is where a new user is told about it, next to
+  the frames-are-discarded promise — the head is the second thing the camera
+  is watching, so it is disclosed where the camera is asked for.
 - **Skipped frames never reach the gesture engine**, whose only clock is
   the timestamps of the frames it is given — a delivery gap reads as a slow
   camera, which the tracking-loss grace already tolerates. A held button,
