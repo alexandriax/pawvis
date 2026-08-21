@@ -163,21 +163,23 @@ final class AttentionGateTests: XCTestCase {
 
     func testSettingsRoundTripAndTolerantDecode() throws {
         var settings = PawvisSettings()
-        settings.attention.enabled = true
+        settings.attention.enabled = false
         settings.attention.sensitivity = 0.8
         let decoded = try JSONDecoder().decode(
             PawvisSettings.self, from: JSONEncoder().encode(settings))
-        XCTAssertEqual(decoded.attention, settings.attention)
+        XCTAssertEqual(decoded.attention, settings.attention,
+                       "a switched-off gate survives the round trip, default or not")
 
-        // Off by default, and a settings file that predates the section (or
+        // On by default, and a settings file that predates the section (or
         // corrupts it) keeps the default instead of failing the tree.
-        XCTAssertFalse(PawvisSettings.default.attention.enabled)
+        XCTAssertTrue(PawvisSettings.default.attention.enabled)
         let legacy = try JSONDecoder().decode(PawvisSettings.self, from: Data("{}".utf8))
         XCTAssertEqual(legacy.attention, AttentionConfig())
         let corrupt = try JSONDecoder().decode(
             PawvisSettings.self,
             from: Data(#"{"attention":{"enabled":"yes","sensitivity":9.5}}"#.utf8))
-        XCTAssertFalse(corrupt.attention.enabled)
+        XCTAssertTrue(corrupt.attention.enabled,
+                      "a wrongly-typed flag falls back to the default, like every other field")
         XCTAssertEqual(corrupt.attention.sensitivity, 1.0,
                        "a well-typed, out-of-range sensitivity clamps to the slider's range")
     }

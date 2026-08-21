@@ -1,12 +1,16 @@
 import Foundation
 
 /// The look-to-control settings: pause mouse and gesture actions while the
-/// user faces away from the screen. Off by default — an availability gate on
-/// every action is opt-in, never a surprise. Voice control is deliberately
-/// outside it: speech works with your back turned, and "Pawvis stop" must
-/// keep working precisely when you are not looking.
+/// user faces away from the screen. On by default — the camera watching your
+/// hands is already watching your head, and a cursor that holds still while
+/// you turn to talk to someone is what people expect of it. The default
+/// sensitivity is deliberately the relaxed middle, and only a *sustained*
+/// look away closes the gate, so the cost of being wrong is a moment's pause
+/// rather than a lost click. Voice control is deliberately outside it:
+/// speech works with your back turned, and "Pawvis stop" must keep working
+/// precisely when you are not looking.
 public struct AttentionConfig: Codable, Equatable, Sendable {
-    public var enabled: Bool = false
+    public var enabled: Bool = true
     /// One dial, 0…1. Left: relaxed — only turning well away (or leaving the
     /// frame) pauses control. Right: strict — a small turn of the head is
     /// enough. Mapped onto the gate's angle limit by `gateConfig()`.

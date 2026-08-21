@@ -117,6 +117,10 @@ struct WelcomeView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("The same frames show it your face: turn away and pointer, click and gesture actions pause until you look back — brief glances cost nothing, and voice control works with your back turned. It starts on; the switch is in Settings → Tracking.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if camera == .denied {
                 Text("Camera access was denied, so tracking can't run. Enable Pawvis under Privacy & Security → Camera.")
                     .font(.callout)

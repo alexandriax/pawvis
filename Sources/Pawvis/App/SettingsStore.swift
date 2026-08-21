@@ -46,6 +46,17 @@ final class SettingsStore: ObservableObject {
             settings.gestures.poseThresholds.adoptRetunedOpenHandFloor()
             defaults.set(true, forKey: "PawvisMigration.retunedOpenHandFloor")
         }
+        // v9: look-to-control became the default. Same reasoning as v8 — a
+        // new default alone reaches fresh installs only, because every
+        // settings file written since v0.27.0 has the old `false` in it —
+        // but a bool keeps no record of *why* it is off, so unlike the
+        // open-hand floor this cannot spare a deliberate one. It runs once,
+        // two days into the life of the shipped feature, and the toggle in
+        // Tracking is one click away for anyone who wants it back off.
+        if !defaults.bool(forKey: "PawvisMigration.attentionOnByDefault") {
+            settings.attention.enabled = true
+            defaults.set(true, forKey: "PawvisMigration.attentionOnByDefault")
+        }
     }
 
     private func persist() {
