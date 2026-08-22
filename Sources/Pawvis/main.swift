@@ -27,5 +27,8 @@ if let gestureIndex = CommandLine.arguments.firstIndex(of: "--gesture-eval") {
 if let attentionIndex = CommandLine.arguments.firstIndex(of: "--attention-eval") {
     exit(runAttentionEval(Array(CommandLine.arguments[(attentionIndex + 1)...])))
 }
+if let camerasIndex = CommandLine.arguments.firstIndex(of: "--cameras") {
+    exit(runCameraList(Array(CommandLine.arguments[(camerasIndex + 1)...])))
+}
 
 PawvisApp.main()

@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreVideo
 import Foundation
+import PawvisCore
 
 /// Owns the AVCaptureSession and delivers frames to the hand tracker on a
 /// dedicated queue. 720p to match the tracking quality sporecaster targets;
@@ -31,6 +32,8 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     var onInterruption: ((String?) -> Void)?
 
     private(set) var isRunning = false
+    /// The persisted pick (`general.cameraDeviceID`); nil is Automatic. What
+    /// actually feeds the session is `activeInputDeviceID()`.
     private var currentDeviceID: String?
     private var observers: [NSObjectProtocol] = []
 
@@ -43,25 +46,48 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         observers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
-    static func availableCameras() -> [(id: String, name: String)] {
-        let discovery = AVCaptureDevice.DiscoverySession(
+    // MARK: - Discovery and selection
+
+    /// Every camera macOS will let us capture from, in discovery order.
+    /// Continuity Cameras (an iPhone offered as a webcam, over a cable or
+    /// not) are typed `.continuityCamera` only because the bundle opts in
+    /// with `NSCameraUseContinuityCameraDeviceType`: without that key macOS
+    /// still lists the phone, but as `.external` (measured on macOS 26; the
+    /// header says `.builtInWideAngleCamera` for 14), which is what made
+    /// "prefer the built-in camera" a coin toss between the Mac and the
+    /// phone. Desk View is left out on purpose: it points at the desk.
+    static func discover() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
             mediaType: .video,
-            position: .unspecified)
-        return discovery.devices.map { ($0.uniqueID, $0.localizedName) }
+            position: .unspecified).devices
     }
 
-    private static func device(withID id: String?) -> AVCaptureDevice? {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
-            mediaType: .video,
-            position: .unspecified)
-        if let id, let match = discovery.devices.first(where: { $0.uniqueID == id }) {
-            return match
+    static func kind(of device: AVCaptureDevice) -> CameraSelectionPolicy.Kind {
+        switch device.deviceType {
+        case .builtInWideAngleCamera: return .builtIn
+        case .continuityCamera: return .continuity
+        default: return .other
         }
-        // Prefer the built-in camera (it faces the user), then anything.
-        return discovery.devices.first(where: { $0.deviceType == .builtInWideAngleCamera })
-            ?? discovery.devices.first
+    }
+
+    private static func candidates(_ devices: [AVCaptureDevice]) -> [CameraSelectionPolicy.Candidate] {
+        devices.map { CameraSelectionPolicy.Candidate(id: $0.uniqueID, kind: kind(of: $0)) }
+    }
+
+    static func availableCameras() -> [(id: String, name: String)] {
+        discover().map { ($0.uniqueID, $0.localizedName) }
+    }
+
+    /// The camera `CameraSelectionPolicy` lands on for `pick` right now: the
+    /// pick itself while present, else the built-in camera, else the first
+    /// camera at all. Never an iPhone or a webcam unasked — Pawvis does not
+    /// switch cameras on its own. Every configure path asks this, so the
+    /// rule lives in one tested place.
+    static func chosenDevice(forPick pick: String?) -> AVCaptureDevice? {
+        let devices = discover()
+        let choice = CameraSelectionPolicy.choose(pick: pick, available: candidates(devices))
+        return devices.first { $0.uniqueID == choice }
     }
 
     func start(deviceID: String?) {
@@ -174,9 +200,9 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 
     /// The active camera vanished (unplugged, Continuity Camera walked away).
-    /// Reconfigure around it: the requested device lookup already falls back
-    /// to the built-in camera, then anything — and the report says honestly
-    /// which of those happened.
+    /// Reconfigure around it: the selection rule already falls back to the
+    /// built-in camera, then anything — and the report says honestly which
+    /// of those happened.
     private func handleDeviceDisconnected(_ note: Notification) {
         guard let device = note.object as? AVCaptureDevice else { return }
         let goneID = device.uniqueID
@@ -205,21 +231,36 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
 
-    /// A camera appeared. Only interesting while running with no camera at
-    /// all (the one we lost came back) or when the user's chosen device
-    /// returns while we ride a fallback — anything else would thrash the
-    /// session every time a virtual camera registers itself.
+    /// A camera appeared: the one we lost came back, or the user's pick
+    /// returned while we ride a fallback. The selection rule decides; a
+    /// device that leaves the verdict unchanged (a virtual camera
+    /// registering itself, an iPhone coming into range) must not touch the
+    /// session — Pawvis never switches cameras on its own.
     private func handleDeviceConnected(_ note: Notification) {
         guard let device = note.object as? AVCaptureDevice,
               device.hasMediaType(.video) else { return }
-        let newID = device.uniqueID
+        reconcileDevice(reason: "\(device.localizedName) connected")
+    }
+
+    /// Re-run the selection rule against what is present now, and
+    /// reconfigure only if it lands somewhere other than the camera feeding
+    /// the session, which is what keeps the session from thrashing on
+    /// events that leave the verdict alone. While stopped (the lock screen,
+    /// tracking off) the stale input is dropped instead, so the next `start`
+    /// configures onto the new verdict rather than resuming the old camera:
+    /// a pick that reconnected behind the lock screen must be the camera
+    /// after unlock.
+    private func reconcileDevice(reason: String) {
         frameQueue.async { [self] in
-            guard isRunning else { return }
-            let active = activeInputDeviceID()
-            let cameraless = active == nil
-            let chosenReturned = currentDeviceID == newID && active != newID
-            guard cameraless || chosenReturned else { return }
-            Log.camera.info("Camera connected, reconfiguring")
+            let wanted = Self.chosenDevice(forPick: currentDeviceID)?.uniqueID
+            guard wanted != activeInputDeviceID() else { return }
+            guard isRunning else {
+                session.beginConfiguration()
+                for input in session.inputs { session.removeInput(input) }
+                session.commitConfiguration()
+                return
+            }
+            Log.camera.info("Camera reconfiguring: \(reason, privacy: .public)")
             DispatchQueue.main.async { self.onWillReconfigure?() }
             configureIfNeeded(deviceID: currentDeviceID, force: true)
         }
@@ -248,7 +289,7 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
         for input in session.inputs { session.removeInput(input) }
 
-        guard let device = Self.device(withID: deviceID) else {
+        guard let device = Self.chosenDevice(forPick: deviceID) else {
             Log.camera.error("No camera device available")
             return
         }

@@ -164,6 +164,23 @@ func runSelfTest() -> Int32 {
     check("firstRun.automatedRunsStayHeadless", FirstRunPolicy.verdict(
         completed: false, cameraGranted: false, automated: true) == .proceedNormally)
 
+    // Camera selection: an explicit pick wins; Automatic is the built-in
+    // camera and never an iPhone that happens to be around; a pick that
+    // walked away is Automatic until it returns.
+    let builtInCamera = CameraSelectionPolicy.Candidate(id: "mac", kind: .builtIn)
+    let phoneCamera = CameraSelectionPolicy.Candidate(id: "phone", kind: .continuity)
+    let usbCamera = CameraSelectionPolicy.Candidate(id: "usb", kind: .other)
+    check("camera.pickWins", CameraSelectionPolicy.choose(
+        pick: "phone", available: [builtInCamera, phoneCamera, usbCamera]) == "phone")
+    check("camera.automaticIsBuiltIn", CameraSelectionPolicy.choose(
+        pick: nil, available: [usbCamera, phoneCamera, builtInCamera]) == "mac")
+    check("camera.automaticNeverTakesTheIPhone", CameraSelectionPolicy.choose(
+        pick: nil, available: [phoneCamera, builtInCamera]) == "mac")
+    check("camera.noBuiltInMeansFirstCamera", CameraSelectionPolicy.choose(
+        pick: nil, available: [phoneCamera, usbCamera]) == "phone")
+    check("camera.missingPickIsAutomatic", CameraSelectionPolicy.choose(
+        pick: "gone", available: [builtInCamera, phoneCamera]) == "mac")
+
     // Look-to-control: on by default; only a *sustained* look away closes
     // the gate, a press in flight holds it open, and looking back reopens
     // it.
