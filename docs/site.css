@@ -304,6 +304,13 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   backdrop-filter: blur(8px);
 }
 .btn-ghost:hover { border-color: rgba(196, 181, 253, 0.4); }
+/* The ghost shape in Pawvis teal — the film link sitting beside GitHub's. */
+.btn-video {
+  color: #fff;
+  background: #42a79a;
+  border: 1px solid #42a79a;
+}
+.btn-video:hover { color: #fff; border-color: #58c2b4; background: #48b4a6; }
 .btn-sm { padding: 9px 20px; font-size: 0.92rem; }
 
 .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 2.2rem; }
@@ -417,9 +424,12 @@ h3 { font-size: 1.2rem; font-weight: 650; line-height: 1.25; }
   aspect-ratio: 16 / 9;
   object-fit: cover;
 }
-/* The watch button sits tighter under the frame than a section's CTA row —
-   it belongs to the cover above it, not to the hero's buttons. */
-.film-cta { margin-top: 18px; }
+/* The watch button stands well clear of the frame and reads a size up: it is
+   the one invitation to the full film, so it carries more weight than a
+   section's CTA row. */
+.film-cta { margin-top: 53px; }
+.film-cta .btn { font-size: 24px; }
+.film-cta .btn svg { width: 20px; height: 20px; }
 
 /* ----------------------------------------------------------- 9. Sections */
 .gestures, .voice, .privacy, .usecases, .compare, .faq, .install {
