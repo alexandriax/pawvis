@@ -21,8 +21,7 @@ struct PawvisApp: App {
         Settings {
             SettingsView(store: appDelegate.controller.settingsStore,
                          updater: appDelegate.updater,
-                         loginItem: appDelegate.loginItem,
-                         controller: appDelegate.controller)
+                         loginItem: appDelegate.loginItem)
         }
 
         Window("Pawvis Gesture Guide", id: GuideWindow.id) {

@@ -254,16 +254,13 @@ install live. **Check Now** on that page runs the check on demand.
 
 Any camera macOS can see works: the one built into your Mac, a USB webcam,
 or your iPhone as a [Continuity Camera](https://support.apple.com/en-us/102546).
-**Automatic** (the default) uses the built-in camera and switches to your
-iPhone whenever macOS offers it, the same hand-over FaceTime follows: phone
-in landscape, locked, stationary and near your Mac, over a cable or not.
-When the phone walks away, tracking falls back to the built-in camera on its
-own. To pin a particular camera, pick it in **Settings → General** or from
-the menu bar (the picker appears once more than one camera is around); a
-pinned camera stays yours, and if it unplugs, Pawvis rides the built-in
-camera until it returns. A USB webcam is never chosen unasked, even when
-macOS ranks it first: a camera Pawvis switched to on its own could be
-pointing anywhere.
+**Automatic** (the default) is the built-in camera, and Pawvis never
+switches cameras on its own. When macOS offers your iPhone (nearby, signed
+in to the same Apple Account, over a cable or not) it simply appears in the
+camera picker in **Settings → General** and in the menu bar, next to any
+webcam, and using it is one pick. A picked camera stays yours: if it unplugs
+or walks away, tracking rides the built-in camera until it returns, then
+goes back to it.
 
 ### Permissions
 

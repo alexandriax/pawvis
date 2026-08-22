@@ -25,11 +25,6 @@ final class PawvisController: ObservableObject {
     /// frames arriving. The menu status line and the overlay pill read it;
     /// frames resuming clears it.
     @Published private(set) var cameraFailure: String?
-    /// The camera the capture session is configured onto, by name, or nil
-    /// while there is none. On Automatic this is how the UI says which
-    /// camera macOS handed over (a mounted iPhone, or the built-in camera
-    /// again once the phone walks away).
-    @Published private(set) var activeCameraName: String?
     /// Why tracking is resting while `trackingActive` stays true (the lock
     /// screen), for the menu's status line. nil whenever tracking is live —
     /// a pause is not a stop, so the toggle stays on.
@@ -138,19 +133,6 @@ final class PawvisController: ObservableObject {
         camera.onFailure = { [weak self] reason in
             MainActor.assumeIsolated {
                 self?.enterCameraFailure(reason)
-            }
-        }
-        // A switch mid-session gets a pill notice; the first camera of a
-        // session does not (one per launch would be noise), and neither
-        // does a failure path — the disconnect fallback already reports.
-        camera.onDeviceChanged = { [weak self] name in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let previous = self.activeCameraName
-                self.activeCameraName = name
-                guard self.trackingActive, let name, let previous, previous != name else { return }
-                self.gestureNotice = (text: "🐾 Switched to \(name)",
-                                      until: CACurrentMediaTime() + Self.gestureNoticeSeconds)
             }
         }
         camera.onInterruption = { [weak self] reason in
