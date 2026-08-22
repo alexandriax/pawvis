@@ -290,6 +290,51 @@ implementation (2026-08-22, macOS 26.5, two iPhones in range):
 - **Desk View is excluded from discovery** on purpose; it points at the
   desk.
 
+### The iPhone is the rear camera, and a black feed is a real state
+
+Continuity Camera streams the iPhone's **rear** camera (plus a Desk View
+crop); Apple exposes no front/selfie device to a Mac app, and the iPhone's
+`AVCaptureDevice.position` reads `.unspecified` (0), so there is nothing to
+build a "Front / Rear" picker from and the copy says so instead of offering
+a control that can't work. This was the ask in the 2026-08-22 session;
+the answer is a hard no from AVFoundation, confirmed by research and by the
+device on hand.
+
+The failure that session opened with — "iPhone connected, no cursor, no
+tracking, as if no signal" — was **a black feed, not a capture bug**.
+Measured with a throwaway `--camera-probe` flag (removed after; recreate it
+if needed — it configured a camera exactly as `CameraManager` does, counted
+frames, ran the face and hand requests at every `CGImagePropertyOrientation`,
+and saved a snapshot):
+
+- **Frames arrived fine** (48–209 over the window, 1920×1080, the app's own
+  `420f`), so the stall watchdog stayed quiet. But **mean luminance was ~1.8
+  / 255** — the rear lens was facing the desk. With the phone aimed at the
+  user, luminance was ~105 and Vision found a face and a hand **at
+  orientation `.up`** (and every other orientation), which is the one the
+  app uses: there is no rotation or mirroring bug, and the feed is upright
+  and unmirrored as delivered.
+- A black feed has **no hands** (engine: "no hands in view") and **no face**
+  (attention gate: "facing away") — both true, both hiding the cause. So
+  `CameraSignalMonitor` (pure PawvisCore, unit-tested) names it: mean
+  luminance below `darkLuma` (8) for `darkDelay` (2 s) is a dark feed,
+  recovery is instant on the first real frame, an unreadable frame holds the
+  verdict, and a feed dark from the first sample still trips (timed from that
+  sample — the face-down case). `CameraSignalBox` is its camera-queue face
+  (mirrors `FrameThrottleBox`), sampling luminance one frame in five off a
+  coarse grid of the luma plane. It runs at the tap **before** the idle
+  throttle and the attention gate, because a black feed is exactly the frame
+  both of those would skip. The controller publishes `cameraSignalDark`; the
+  menu warning and status line lead with it (above "facing away" and "no
+  hands"), pointing at the rear lens. Verified end to end: the real app on a
+  face-down iPhone logged `Camera feed went dark (no image)` ~2.7 s in
+  (the 2 s delay plus the sample cadence).
+- The thresholds are constants, chosen not measured; make them settings only
+  if someone asks. The dark state is menu-only on purpose: when the feed is
+  dark the attention gate has already parked control and hidden the overlay,
+  so there is no pill to write to, and the menu is where the camera is
+  picked and its status read.
+
 ## Gesture engine
 
 `PawvisCore` is pure logic — no AppKit, no AVFoundation, no clocks. All timing

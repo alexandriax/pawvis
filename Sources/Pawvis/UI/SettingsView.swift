@@ -182,7 +182,7 @@ private struct GeneralSettingsTab: View {
 
             SettingRow(
                 title: "Camera",
-                caption: "Automatic uses your Mac's built-in camera. Your iPhone appears here as a Continuity Camera whenever macOS offers it (nearby, same Apple Account, plugged in or not); pick it to use it. Pawvis never switches cameras on its own, and a picked camera that walks away hands tracking to the built-in one until it returns."
+                caption: "Automatic uses your Mac's built-in camera. Your iPhone appears here as a Continuity Camera whenever macOS offers it (nearby, same Apple Account, plugged in or not); pick it to use it. It uses the iPhone's rear lenses, so point the back of the phone at you. Pawvis never switches cameras on its own, and a picked camera that walks away hands tracking to the built-in one until it returns."
             ) {
                 Picker("", selection: Binding(
                     get: { store.settings.general.cameraDeviceID ?? "" },

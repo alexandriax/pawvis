@@ -34,6 +34,13 @@ final class PawvisController: ObservableObject {
     /// toggle stays on — except the camera keeps running: its frames carry
     /// the face that will reopen the gate.
     @Published private(set) var attentionPaused = false
+    /// True when the camera is delivering frames but they carry no image (a
+    /// near-black picture) — most often an iPhone Continuity Camera whose
+    /// rear lens faces the desk, or a covered or shuttered webcam. The menu
+    /// and the status pill say so, because "no hands" and "facing away" are
+    /// both true and both useless when the real problem is that the camera
+    /// sees nothing.
+    @Published private(set) var cameraSignalDark = false
 
     private let camera = CameraManager()
     private let tracking = HandTrackingService()
@@ -44,6 +51,9 @@ final class PawvisController: ObservableObject {
     /// The idle frame-skip policy's thread-safe face, consulted at the
     /// camera tap (see `FrameThrottleBox`).
     private let throttle = FrameThrottleBox()
+    /// The black-feed policy's thread-safe face, consulted at the camera tap
+    /// (see `CameraSignalBox`).
+    private let signal = CameraSignalBox()
     private let engine: GestureEngine
     private let mouse: MouseController
     private let overlay = OverlayController()
@@ -71,6 +81,20 @@ final class PawvisController: ObservableObject {
 
         camera.onFrame = { [weak self] sampleBuffer in
             guard let self else { return }
+            // Black-feed check first, before the throttle and gate can skip
+            // this frame: a camera pointed at nothing (an iPhone rear lens
+            // facing the desk, a covered webcam) has no hands and no face,
+            // so both of those would drop the frame — yet a black feed is
+            // exactly the state the user needs named. The box samples on its
+            // own sparse cadence, so running it every frame is cheap.
+            // Only a verdict *change* is worth a main hop; the handler then
+            // reads the box's current state rather than a value that may be
+            // stale by the time it runs (a reset can land in between).
+            if self.signal.assess(sampleBuffer, at: CACurrentMediaTime())?.changed == true {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { self.reconcileCameraSignal() }
+                }
+            }
             // Idle throttle, decided here at the tap: with no hands around
             // for a while, most frames skip Vision entirely — the cheap,
             // glitch-free lever (the AVCaptureSession itself is never
@@ -127,7 +151,13 @@ final class PawvisController: ObservableObject {
         // warm-up leash a fresh session gets.
         camera.onWillReconfigure = { [weak self] in
             MainActor.assumeIsolated {
-                self?.armStallClock(grace: Self.startupGraceSeconds)
+                guard let self else { return }
+                self.armStallClock(grace: Self.startupGraceSeconds)
+                // A different camera is warming up: forget the old feed's
+                // brightness history so the new one is judged from scratch,
+                // and drop any stale dark warning until it has looked.
+                self.signal.reset()
+                self.cameraSignalDark = false
             }
         }
         camera.onFailure = { [weak self] reason in
@@ -269,6 +299,8 @@ final class PawvisController: ObservableObject {
         throttle.reset()
         attention.reset()
         attentionPaused = false
+        signal.reset()
+        cameraSignalDark = false
         refreshProjector()
         overlay.show()
         camera.start(deviceID: settingsStore.settings.general.cameraDeviceID)
@@ -330,6 +362,8 @@ final class PawvisController: ObservableObject {
         releaseEverything()
         overlay.hide()
         cameraFailure = nil // leaving tracking on purpose: nothing is failing
+        signal.reset()
+        cameraSignalDark = false
         permissionPollTimer?.invalidate()
         permissionPollTimer = nil
         watchdogTimer?.invalidate()
@@ -394,6 +428,10 @@ final class PawvisController: ObservableObject {
         // just typed the password is at the machine, facing it.
         attention.reset()
         attentionPaused = false
+        // The camera is stopped now, so any "shows no image" verdict is
+        // stale: clear it rather than warn about a feed that isn't running.
+        signal.reset()
+        cameraSignalDark = false
         Log.app.info("Tracking paused: screen locked")
     }
 
@@ -408,6 +446,8 @@ final class PawvisController: ObservableObject {
         engine.reset()
         throttle.reset()
         attention.reset()
+        signal.reset()
+        cameraSignalDark = false
         overlay.show()
         // Arm the stall clock HERE, not only from `onRunningChanged`: that
         // callback hops the camera queue and a slow `startRunning`, and the
@@ -452,6 +492,27 @@ final class PawvisController: ObservableObject {
             overlay.hide()
             Log.app.info("Control paused: facing away from the screen")
         }
+    }
+
+    /// The black-feed verdict crossed over, reported from the camera tap.
+    /// Nothing to release or reset — a dark feed produces no hands and no
+    /// face, so control is already parked by the ordinary paths; this only
+    /// publishes the reason so the menu and pill can say "the camera sees
+    /// nothing" instead of the true-but-useless "no hands" / "facing away".
+    ///
+    /// The verdict is read from the box *now*, not taken from the parameter:
+    /// this hop is async from the camera queue, so a device switch or lock
+    /// can run `signal.reset()` on the main actor between the tap computing
+    /// `dark` and this handler running. Trusting the stale parameter would
+    /// then republish `true` over the reset and pin the warning on forever
+    /// (the freshly reset box never emits another change). Reading `isDark`
+    /// makes a late notification converge to the truth instead.
+    private func reconcileCameraSignal() {
+        guard trackingActive else { return }
+        let dark = signal.isDark
+        guard cameraSignalDark != dark else { return }
+        cameraSignalDark = dark
+        Log.camera.info("Camera feed \(dark ? "went dark (no image)" : "has an image again", privacy: .public)")
     }
 
     // MARK: - Gesture training

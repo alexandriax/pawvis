@@ -181,6 +181,12 @@ func runSelfTest() -> Int32 {
     check("camera.missingPickIsAutomatic", CameraSelectionPolicy.choose(
         pick: "gone", available: [builtInCamera, phoneCamera]) == "mac")
 
+    // Black-feed monitor: a feed dark from the start trips only after the
+    // delay, and the first real image clears it at once.
+    var signal = CameraSignalMonitor(config: .init(darkLuma: 8, darkDelay: 2.0))
+    check("signal.darkFromStartWaitsForDelay", !signal.sample(luma: 2, at: 0.0) && signal.sample(luma: 2, at: 2.0))
+    check("signal.brightRecoversInstantly", !signal.sample(luma: 90, at: 2.1) && !signal.isDark)
+
     // Look-to-control: on by default; only a *sustained* look away closes
     // the gate, a press in flight holds it open, and looking back reopens
     // it.

@@ -121,7 +121,7 @@ struct WelcomeView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Any camera macOS can see works, your iPhone included: when it's nearby as a Continuity Camera it appears in the picker in Settings → General, one pick away. Pawvis never switches cameras on its own.")
+            Text("Any camera macOS can see works, your iPhone included: when it's nearby as a Continuity Camera it appears in the picker in Settings → General, one pick away. It uses the iPhone's rear lenses, so point the back of the phone at you. Pawvis never switches cameras on its own.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
