@@ -65,6 +65,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key><true/>
     <key>NSCameraUsageDescription</key>
     <string>Pawvis uses your camera to track hand gestures. Frames are processed entirely on this Mac and never leave it.</string>
+    <!-- Continuity Camera opt-in (macOS 14+). Without it macOS still lists
+         an iPhone, but typed as a plain external (or built-in) camera, so
+         Pawvis could not tell the phone from the Mac's own camera — and
+         Automatic's "built-in first" rule became a coin toss. AGENTS.md →
+         Cameras has the measurements. -->
+    <key>NSCameraUseContinuityCameraDeviceType</key>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Pawvis uses your microphone for voice control. Speech recognition runs entirely on this Mac — audio never leaves it.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

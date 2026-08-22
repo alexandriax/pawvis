@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreVideo
 import Foundation
+import PawvisCore
 
 /// Owns the AVCaptureSession and delivers frames to the hand tracker on a
 /// dedicated queue. 720p to match the tracking quality sporecaster targets;
@@ -29,39 +30,75 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     /// app claimed the device, …) with a reason, and again with nil when the
     /// interruption ends.
     var onInterruption: ((String?) -> Void)?
+    /// Called on the main queue each time the session is configured onto a
+    /// camera, with that camera's name — or with nil when there was none to
+    /// configure. The settings caption and the menu show it, and the
+    /// controller announces a switch mid-session from it.
+    var onDeviceChanged: ((String?) -> Void)?
 
     private(set) var isRunning = false
+    /// The persisted pick (`general.cameraDeviceID`); nil is Automatic. What
+    /// actually feeds the session is `activeInputDeviceID()`.
     private var currentDeviceID: String?
     private var observers: [NSObjectProtocol] = []
 
     override init() {
         super.init()
         observeCaptureLifecycle()
+        observeSystemPreferredCamera()
     }
 
     deinit {
         observers.forEach { NotificationCenter.default.removeObserver($0) }
+        (AVCaptureDevice.self as AnyObject).removeObserver(
+            self, forKeyPath: Self.preferredCameraKeyPath, context: Self.preferredCameraContext)
+    }
+
+    // MARK: - Discovery and selection
+
+    /// Every camera macOS will let us capture from, in discovery order.
+    /// Continuity Cameras (an iPhone offered as a webcam, over a cable or
+    /// not) are typed `.continuityCamera` only because the bundle opts in
+    /// with `NSCameraUseContinuityCameraDeviceType`: without that key macOS
+    /// still lists the phone, but as `.external` (measured on macOS 26; the
+    /// header says `.builtInWideAngleCamera` for 14), which is what made
+    /// "prefer the built-in camera" a coin toss between the Mac and the
+    /// phone. Desk View is left out on purpose: it points at the desk.
+    static func discover() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
+            mediaType: .video,
+            position: .unspecified).devices
+    }
+
+    static func kind(of device: AVCaptureDevice) -> CameraSelectionPolicy.Kind {
+        switch device.deviceType {
+        case .builtInWideAngleCamera: return .builtIn
+        case .continuityCamera: return .continuity
+        default: return .other
+        }
+    }
+
+    private static func candidates(_ devices: [AVCaptureDevice]) -> [CameraSelectionPolicy.Candidate] {
+        devices.map { CameraSelectionPolicy.Candidate(id: $0.uniqueID, kind: kind(of: $0)) }
     }
 
     static func availableCameras() -> [(id: String, name: String)] {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
-            mediaType: .video,
-            position: .unspecified)
-        return discovery.devices.map { ($0.uniqueID, $0.localizedName) }
+        discover().map { ($0.uniqueID, $0.localizedName) }
     }
 
-    private static func device(withID id: String?) -> AVCaptureDevice? {
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
-            mediaType: .video,
-            position: .unspecified)
-        if let id, let match = discovery.devices.first(where: { $0.uniqueID == id }) {
-            return match
-        }
-        // Prefer the built-in camera (it faces the user), then anything.
-        return discovery.devices.first(where: { $0.deviceType == .builtInWideAngleCamera })
-            ?? discovery.devices.first
+    /// The camera `CameraSelectionPolicy` lands on for `pick` right now: the
+    /// pick itself while present, else the built-in camera, except that a
+    /// Continuity Camera macOS currently prefers (a mounted iPhone) takes
+    /// Automatic. Every configure path asks this, so the rule lives in one
+    /// tested place.
+    static func chosenDevice(forPick pick: String?) -> AVCaptureDevice? {
+        let devices = discover()
+        let choice = CameraSelectionPolicy.choose(
+            pick: pick,
+            available: candidates(devices),
+            systemPreferred: AVCaptureDevice.systemPreferredCamera?.uniqueID)
+        return devices.first { $0.uniqueID == choice }
     }
 
     func start(deviceID: String?) {
@@ -174,9 +211,9 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
 
     /// The active camera vanished (unplugged, Continuity Camera walked away).
-    /// Reconfigure around it: the requested device lookup already falls back
-    /// to the built-in camera, then anything — and the report says honestly
-    /// which of those happened.
+    /// Reconfigure around it: the selection rule already falls back to the
+    /// built-in camera (or the iPhone macOS prefers), then anything — and
+    /// the report says honestly which of those happened.
     private func handleDeviceDisconnected(_ note: Notification) {
         guard let device = note.object as? AVCaptureDevice else { return }
         let goneID = device.uniqueID
@@ -205,21 +242,72 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         }
     }
 
-    /// A camera appeared. Only interesting while running with no camera at
-    /// all (the one we lost came back) or when the user's chosen device
-    /// returns while we ride a fallback — anything else would thrash the
-    /// session every time a virtual camera registers itself.
+    /// A camera appeared: the one we lost came back, the user's pick
+    /// returned while we ride a fallback, or an iPhone arrived that macOS
+    /// already prefers. The selection rule decides; a device that leaves
+    /// the verdict unchanged (a virtual camera registering itself, a phone
+    /// merely coming into range) must not touch the session.
     private func handleDeviceConnected(_ note: Notification) {
         guard let device = note.object as? AVCaptureDevice,
               device.hasMediaType(.video) else { return }
-        let newID = device.uniqueID
+        reconcileDevice(reason: "\(device.localizedName) connected")
+    }
+
+    // MARK: - The system's preferred camera
+
+    private static let preferredCameraKeyPath = "systemPreferredCamera"
+    /// A stable KVO context. `&someStoredProperty` would only be valid for
+    /// the duration of the call it is passed to.
+    private static let preferredCameraContext = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
+
+    /// `AVCaptureDevice.systemPreferredCamera` is how macOS says which camera
+    /// it would use itself — and the only signal that an iPhone has been
+    /// *mounted* as a Continuity Camera rather than merely being nearby.
+    /// Apple's contract is to observe it and follow; Automatic does, within
+    /// `CameraSelectionPolicy`'s rule. It is a class property, so the
+    /// observed object is the class itself, an NSObject like any other
+    /// under the hood, addressed through AnyObject because Swift exposes no
+    /// `addObserver` on a metatype.
+    private func observeSystemPreferredCamera() {
+        (AVCaptureDevice.self as AnyObject).addObserver(
+            self, forKeyPath: Self.preferredCameraKeyPath, options: [.new],
+            context: Self.preferredCameraContext)
+    }
+
+    override func observeValue(
+        forKeyPath keyPath: String?,
+        of object: Any?,
+        change: [NSKeyValueChangeKey: Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        guard context == Self.preferredCameraContext else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            return
+        }
+        let preferred = AVCaptureDevice.systemPreferredCamera?.localizedName ?? "none"
+        Log.camera.info("System preferred camera is now: \(preferred, privacy: .public)")
+        reconcileDevice(reason: "system preferred camera changed")
+    }
+
+    /// Re-run the selection rule against what is present now, and
+    /// reconfigure only if it lands somewhere other than the camera feeding
+    /// the session. Every "something changed" signal funnels through here,
+    /// which is what keeps the session from thrashing on events that leave
+    /// the verdict alone. While stopped (the lock screen, tracking off) the
+    /// stale input is dropped instead, so the next `start` configures onto
+    /// the new verdict rather than resuming the old camera — an iPhone
+    /// mounted behind the lock screen must be the camera after unlock.
+    private func reconcileDevice(reason: String) {
         frameQueue.async { [self] in
-            guard isRunning else { return }
-            let active = activeInputDeviceID()
-            let cameraless = active == nil
-            let chosenReturned = currentDeviceID == newID && active != newID
-            guard cameraless || chosenReturned else { return }
-            Log.camera.info("Camera connected, reconfiguring")
+            let wanted = Self.chosenDevice(forPick: currentDeviceID)?.uniqueID
+            guard wanted != activeInputDeviceID() else { return }
+            guard isRunning else {
+                session.beginConfiguration()
+                for input in session.inputs { session.removeInput(input) }
+                session.commitConfiguration()
+                return
+            }
+            Log.camera.info("Camera reconfiguring: \(reason, privacy: .public)")
             DispatchQueue.main.async { self.onWillReconfigure?() }
             configureIfNeeded(deviceID: currentDeviceID, force: true)
         }
@@ -248,19 +336,22 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
 
         for input in session.inputs { session.removeInput(input) }
 
-        guard let device = Self.device(withID: deviceID) else {
+        guard let device = Self.chosenDevice(forPick: deviceID) else {
             Log.camera.error("No camera device available")
+            DispatchQueue.main.async { self.onDeviceChanged?(nil) }
             return
         }
         do {
             let input = try AVCaptureDeviceInput(device: device)
             guard session.canAddInput(input) else {
                 Log.camera.error("Cannot add camera input")
+                DispatchQueue.main.async { self.onDeviceChanged?(nil) }
                 return
             }
             session.addInput(input)
         } catch {
             Log.camera.error("Camera input error: \(error.localizedDescription)")
+            DispatchQueue.main.async { self.onDeviceChanged?(nil) }
             return
         }
 
@@ -286,7 +377,9 @@ final class CameraManager: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                 session.addOutput(output)
             }
         }
-        Log.camera.info("Camera configured: \(device.localizedName, privacy: .public)")
+        let name = device.localizedName
+        Log.camera.info("Camera configured: \(name, privacy: .public)")
+        DispatchQueue.main.async { self.onDeviceChanged?(name) }
     }
 
     /// Pin capture to a steady 30 fps. Left free-running, auto-exposure

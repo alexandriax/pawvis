@@ -156,13 +156,33 @@ struct MenuContentView: View {
         cameras.count >= 2 || settingsStore.settings.general.cameraDeviceID != nil
     }
 
+    /// The picker plus, on Automatic while tracking, the camera it resolved
+    /// to: the one line in the menu that says "this is your iPhone now"
+    /// after macOS hands the session over, and "back on the built-in
+    /// camera" once the phone walks away. A pinned camera needs no such
+    /// line — the picker already names it.
+    private var cameraRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            cameraPickerRow
+            if settingsStore.settings.general.cameraDeviceID == nil,
+               controller.trackingActive,
+               let name = controller.activeCameraName {
+                Text("Using \(name)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 26)
+            }
+        }
+    }
+
     /// Quick camera switch. A picker row, not a chip (AGENTS.md: hue is
     /// meaning, and this row means nothing by color), so it keeps the
     /// menu's plain icon/text/control shape instead of `PawvisButtonStyle`.
     /// Reads and writes `settings.general.cameraDeviceID` directly, the
     /// exact setting Settings → General's picker uses, so the two views can
     /// never disagree about which camera is selected.
-    private var cameraRow: some View {
+    private var cameraPickerRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "camera.fill")
                 .foregroundStyle(.secondary)

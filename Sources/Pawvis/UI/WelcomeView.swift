@@ -121,6 +121,10 @@ struct WelcomeView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("Any camera macOS can see works, your iPhone included: mount it as a Continuity Camera and Pawvis switches to it the way FaceTime does. Pick any camera in Settings → General to pin it.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if camera == .denied {
                 Text("Camera access was denied, so tracking can't run. Enable Pawvis under Privacy & Security → Camera.")
                     .font(.callout)

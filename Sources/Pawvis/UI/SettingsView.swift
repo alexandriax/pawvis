@@ -105,13 +105,14 @@ struct SettingsView: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var updater: UpdateChecker
     @ObservedObject var loginItem: LoginItemController
+    @ObservedObject var controller: PawvisController
     /// Lets the update notification (and the menu bar's update row) land the
     /// user on About rather than wherever they last were.
     @ObservedObject private var router = SettingsRouter.shared
 
     var body: some View {
         TabView(selection: $router.tab) {
-            GeneralSettingsTab(store: store, loginItem: loginItem)
+            GeneralSettingsTab(store: store, loginItem: loginItem, controller: controller)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag(SettingsTab.general)
             TrackingSettingsTab(store: store)
@@ -156,7 +157,19 @@ struct SettingsView: View {
 private struct GeneralSettingsTab: View {
     @ObservedObject var store: SettingsStore
     @ObservedObject var loginItem: LoginItemController
+    @ObservedObject var controller: PawvisController
     private var cameras: [(id: String, name: String)] { CameraManager.availableCameras() }
+
+    /// Automatic's rule, in the user's terms, plus the camera it is on right
+    /// now while tracking: once macOS can hand the session to an iPhone,
+    /// "which camera is this" stops being obvious from the picker alone.
+    private var cameraCaption: String {
+        var caption = "Automatic uses your Mac's built-in camera, and switches to your iPhone whenever macOS offers it as a Continuity Camera (in landscape, locked and near your Mac, plugged in or not), the same way FaceTime does. Pick a camera to pin it instead."
+        if controller.trackingActive, let name = controller.activeCameraName {
+            caption += " Using now: \(name)."
+        }
+        return caption
+    }
 
     var body: some View {
         SettingsPage {
@@ -180,7 +193,7 @@ private struct GeneralSettingsTab: View {
 
             Divider()
 
-            SettingRow(title: "Camera") {
+            SettingRow(title: "Camera", caption: cameraCaption) {
                 Picker("", selection: Binding(
                     get: { store.settings.general.cameraDeviceID ?? "" },
                     set: { store.settings.general.cameraDeviceID = $0.isEmpty ? nil : $0 })) {

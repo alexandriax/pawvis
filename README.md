@@ -250,6 +250,21 @@ announces itself in a macOS notification, once per version, with an **Install…
 button that opens **Settings → About** where the release notes and the one-click
 install live. **Check Now** on that page runs the check on demand.
 
+### Cameras
+
+Any camera macOS can see works: the one built into your Mac, a USB webcam,
+or your iPhone as a [Continuity Camera](https://support.apple.com/en-us/102546).
+**Automatic** (the default) uses the built-in camera and switches to your
+iPhone whenever macOS offers it, the same hand-over FaceTime follows: phone
+in landscape, locked, stationary and near your Mac, over a cable or not.
+When the phone walks away, tracking falls back to the built-in camera on its
+own. To pin a particular camera, pick it in **Settings → General** or from
+the menu bar (the picker appears once more than one camera is around); a
+pinned camera stays yours, and if it unplugs, Pawvis rides the built-in
+camera until it returns. A USB webcam is never chosen unasked, even when
+macOS ranks it first: a camera Pawvis switched to on its own could be
+pointing anywhere.
+
 ### Permissions
 
 On first run Pawvis asks for:
@@ -309,8 +324,9 @@ Sources/
     VoiceControl/      wake-word + command parser · spoken URLs & key chords
     Update/            semantic versions · check / offer / notify policy
     Config/            settings tree (field-tolerant decoding)
+    Camera/            camera selection policy · idle throttle · stall clock · attention gate
   Pawvis/              the menu bar app
-    Camera/            AVCaptureSession · Vision hand pose
+    Camera/            AVCaptureSession · Continuity Camera hand-over · Vision hand pose
     Control/           CGEvent mouse + keyboard synthesis
     Overlay/           click-through claw cursor and indicators
     VoiceControl/      on-device speech engine · command executor ·

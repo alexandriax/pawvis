@@ -40,6 +40,12 @@ Extras:
   recorded clip and print every pause/resume transition (per-sample head
   yaw/pitch with `--verbose`). Same reasoning as `--gesture-eval`: what
   Vision reports for a real head mid-turn is a question for the machine.
+- `Pawvis --cameras [uniqueID]` — list every camera macOS offers the binary,
+  typed the way `CameraSelectionPolicy` sees them, with the camera macOS
+  currently prefers and where Automatic (or the given pick) lands. Run it
+  from `build/Pawvis.app/Contents/MacOS/Pawvis`: the Continuity Camera
+  typing and the system's preference both need the bundle (see
+  [Cameras](#cameras)).
 - `Pawvis --action-eval <kind> [argument…]` — perform one gesture action
   through the real `GestureActionRunner` and print the pill outcome.
   "Does desktopRight actually switch the desktop on this machine" is a
@@ -223,6 +229,77 @@ to shutdown, so the app owns two rest states (`PawvisController`):
   swaps) arms the clock *synchronously* with the warm-up grace; the
   asynchronous `onRunningChanged` re-arm is the second belt, because a
   watchdog tick can beat it after an unlock.
+
+## Cameras
+
+Which camera feeds the session is a pure rule, `CameraSelectionPolicy`
+(PawvisCore, unit-tested); `CameraManager` only enumerates devices, reads
+what macOS calls its preferred camera, and performs the verdict. Every
+configure path (start, settings switch, disconnect fallback, a device
+appearing, the system's preference changing) goes through `chosenDevice`,
+so there is exactly one place that decides. The rule: an explicit pick
+(`general.cameraDeviceID`) wins while present; Automatic is the built-in
+camera, except that a Continuity Camera macOS *currently prefers* takes it;
+a pick that walked away is Automatic until it returns; no built-in camera
+(a Mac mini) means the first camera at all. Measured facts behind it, all
+from 2026-08-22 on macOS 26.5 with two iPhones in range:
+
+- **`NSCameraUseContinuityCameraDeviceType` is what makes an iPhone an
+  iPhone.** Without that Info.plist key macOS still lists the phone, but
+  typed `.external` here (the AVFoundation header says
+  `.builtInWideAngleCamera` for macOS 14, which would have made "prefer the
+  built-in camera" a coin toss between the Mac and the phone). With the key
+  it is `.continuityCamera`. The key lives in `scripts/make_app.sh`'s plist,
+  so it is **bundle-only**: a bare `swift run` binary sees the phone as
+  `.other`, which Automatic never adopts. Measure Continuity behavior from
+  `build/Pawvis.app`, never from the binary.
+- **Presence is not mounting.** Both phones sat in the discovery list while
+  `systemPreferredCamera` stayed on the FaceTime HD Camera. The system's
+  preference is the only signal that an iPhone has been positioned as a
+  webcam (landscape, locked, stationary, near the Mac, cable or not), the
+  same signal FaceTime switches on, so Automatic follows *that*, not the
+  list. The hand-over is key-value observed on the `AVCaptureDevice` class
+  object (a class property, so the observed object is the class itself,
+  reached through `AnyObject` because Swift exposes no `addObserver` on a
+  metatype), with a heap-allocated context because `&storedProperty` is
+  only valid for the call it is passed to.
+- **`systemPreferredCamera` is nil at launch and arrives by KVO.** Read
+  synchronously at process start it was nil with three cameras present and
+  the camera grant in hand; the observer delivered "FaceTime HD Camera"
+  within 2 s, grant or no grant (`--cameras` prints both readings). So the
+  value is never read once and trusted: the policy treats nil as "no
+  opinion" (falling through to the built-in camera), and the observation
+  re-runs the rule when the real answer lands. Relatedly, a binary launched
+  from a terminal is judged by the terminal's camera grant, not the app's
+  (`authorizationStatus` read "not determined" from Terminal and "granted"
+  via `open`), which matters for anything that actually captures.
+- **Automatic never follows the system to a USB webcam**, even one macOS
+  ranks first. The built-in camera faces the user by construction and a
+  mounted iPhone has passed macOS's positioning heuristics, but a webcam
+  that registered itself could be pointing anywhere, and a hand tracker
+  switching to it unasked simply goes blind. It stays one pick away.
+- **`userPreferredCamera` is deliberately never set.** Apple suggests it for
+  apps whose only mode is automatic; here it would make
+  `systemPreferredCamera` keep returning the last manual pick until reboot,
+  so choosing "Automatic" after pinning the iPhone would silently stay on
+  the iPhone. Pawvis persists its own pick and ignores the system while one
+  is in effect.
+- **Every change signal funnels through `reconcileDevice`**, which re-runs
+  the rule and reconfigures only if the verdict differs from the input
+  actually feeding the session. That is what keeps a virtual camera
+  registering itself, or a phone merely coming into range, from touching a
+  running session. While the session is stopped (the lock screen, tracking
+  off) it drops the stale input instead, so the next `start` lands on the
+  new verdict: an iPhone mounted behind the lock screen is the camera after
+  unlock.
+- **Desk View is excluded from discovery** on purpose; it points at the
+  desk.
+- The copy that restates the rule lives in four places and goes stale
+  together: the README's *Cameras* section, the site's iPhone FAQ, the
+  Settings → General caption, and the welcome tour's camera card. The menu's
+  camera row shows the camera Automatic resolved to while tracking, and a
+  switch mid-session posts a "Switched to …" pill notice through the
+  controller's `onDeviceChanged` hook.
 
 ## Gesture engine
 

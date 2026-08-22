@@ -164,6 +164,23 @@ func runSelfTest() -> Int32 {
     check("firstRun.automatedRunsStayHeadless", FirstRunPolicy.verdict(
         completed: false, cameraGranted: false, automated: true) == .proceedNormally)
 
+    // Camera selection: an explicit pick wins; Automatic is the built-in
+    // camera unless macOS prefers a mounted iPhone (never a USB webcam it
+    // happens to rank first); a pick that walked away is Automatic.
+    let builtInCamera = CameraSelectionPolicy.Candidate(id: "mac", kind: .builtIn)
+    let phoneCamera = CameraSelectionPolicy.Candidate(id: "phone", kind: .continuity)
+    let usbCamera = CameraSelectionPolicy.Candidate(id: "usb", kind: .other)
+    check("camera.pickWins", CameraSelectionPolicy.choose(
+        pick: "usb", available: [builtInCamera, phoneCamera, usbCamera], systemPreferred: "phone") == "usb")
+    check("camera.automaticIsBuiltIn", CameraSelectionPolicy.choose(
+        pick: nil, available: [usbCamera, phoneCamera, builtInCamera], systemPreferred: nil) == "mac")
+    check("camera.automaticFollowsMountedIPhone", CameraSelectionPolicy.choose(
+        pick: nil, available: [builtInCamera, phoneCamera], systemPreferred: "phone") == "phone")
+    check("camera.automaticIgnoresPreferredWebcam", CameraSelectionPolicy.choose(
+        pick: nil, available: [builtInCamera, usbCamera], systemPreferred: "usb") == "mac")
+    check("camera.missingPickIsAutomatic", CameraSelectionPolicy.choose(
+        pick: "gone", available: [builtInCamera, phoneCamera], systemPreferred: "phone") == "phone")
+
     // Look-to-control: on by default; only a *sustained* look away closes
     // the gate, a press in flight holds it open, and looking back reopens
     // it.
