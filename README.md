@@ -264,6 +264,14 @@ webcam, and using it is one pick. A picked camera stays yours: if it unplugs
 or walks away, tracking rides the built-in camera until it returns, then
 goes back to it.
 
+One thing to know about the iPhone: Continuity Camera uses its **rear**
+camera (the lenses on the back), not the selfie camera, so point the back of
+the phone at you, screen facing away. If Pawvis says the camera shows no
+image, the lens is looking at nothing (a phone lying face-down, or a covered
+webcam); aim it at you and tracking resumes on its own. Apple does not let a
+Mac app use the iPhone's front camera, so there is no front/rear choice for
+the phone.
+
 ### Permissions
 
 On first run Pawvis asks for:

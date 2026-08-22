@@ -208,6 +208,17 @@ struct MenuContentView: View {
                 action: "Open Settings",
                 handler: { Permissions.openCameraSettings() }))
         }
+        // Frames are arriving but black: name it, because "no hands" and
+        // "facing away" are both true and both hide the real cause. The
+        // commonest is an iPhone Continuity Camera whose rear lens faces the
+        // desk (it uses the rear camera, not the selfie one), so the copy
+        // leads with that; a covered or shuttered webcam does the same.
+        if controller.trackingActive, controller.cameraSignalDark, controller.cameraFailure == nil {
+            result.append(Warning(
+                text: "The camera isn't showing an image (it looks black). If it's your iPhone, point its rear lens at you — Continuity Camera uses the back camera. Otherwise check for a lens cover, or pick another camera.",
+                action: "Camera…",
+                handler: { openSettingsInFront(tab: .general) }))
+        }
         if controller.trackingActive, !controller.accessibilityGranted {
             result.append(Warning(
                 text: "Clicks are blocked: grant Pawvis Accessibility in System Settings → Privacy & Security. If it already shows as enabled there, remove it and add it again.",
@@ -304,6 +315,10 @@ struct MenuContentView: View {
         // Paused (the lock screen), not stopped: the toggle stays on, and
         // the reason takes the status line until tracking resumes.
         if let reason = controller.pauseReason { return reason }
+        // A black feed outranks both pauses below it: when the camera shows
+        // no image there is neither a face to gate on nor a hand to see, so
+        // "facing away" and "no hands" would only mislead.
+        if controller.cameraSignalDark { return "Camera shows no image — is it pointed at you?" }
         // Look-to-control: the camera is fine and hands may be in view, but
         // actions wait for the user to face the screen again.
         if controller.attentionPaused { return "Paused until you face the screen" }
