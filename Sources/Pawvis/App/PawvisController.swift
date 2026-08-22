@@ -87,9 +87,12 @@ final class PawvisController: ObservableObject {
             // so both of those would drop the frame — yet a black feed is
             // exactly the state the user needs named. The box samples on its
             // own sparse cadence, so running it every frame is cheap.
-            if let (dark, changed) = self.signal.assess(sampleBuffer, at: CACurrentMediaTime()), changed {
+            // Only a verdict *change* is worth a main hop; the handler then
+            // reads the box's current state rather than a value that may be
+            // stale by the time it runs (a reset can land in between).
+            if self.signal.assess(sampleBuffer, at: CACurrentMediaTime())?.changed == true {
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { self.cameraSignalDidChange(dark) }
+                    MainActor.assumeIsolated { self.reconcileCameraSignal() }
                 }
             }
             // Idle throttle, decided here at the tap: with no hands around
@@ -496,8 +499,18 @@ final class PawvisController: ObservableObject {
     /// face, so control is already parked by the ordinary paths; this only
     /// publishes the reason so the menu and pill can say "the camera sees
     /// nothing" instead of the true-but-useless "no hands" / "facing away".
-    private func cameraSignalDidChange(_ dark: Bool) {
-        guard trackingActive, cameraSignalDark != dark else { return }
+    ///
+    /// The verdict is read from the box *now*, not taken from the parameter:
+    /// this hop is async from the camera queue, so a device switch or lock
+    /// can run `signal.reset()` on the main actor between the tap computing
+    /// `dark` and this handler running. Trusting the stale parameter would
+    /// then republish `true` over the reset and pin the warning on forever
+    /// (the freshly reset box never emits another change). Reading `isDark`
+    /// makes a late notification converge to the truth instead.
+    private func reconcileCameraSignal() {
+        guard trackingActive else { return }
+        let dark = signal.isDark
+        guard cameraSignalDark != dark else { return }
         cameraSignalDark = dark
         Log.camera.info("Camera feed \(dark ? "went dark (no image)" : "has an image again", privacy: .public)")
     }
