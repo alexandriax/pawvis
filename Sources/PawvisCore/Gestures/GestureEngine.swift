@@ -139,12 +139,19 @@ public final class GestureEngine {
     private struct HandSlot {
         let id: Int
         var filters: [OneEuroFilter2D]
+        /// The button bank: the same joints through `buttonSmoothing`, read
+        /// only by the dip differentials. A finger dip is a short pulse; the
+        /// cursor's heavy low-pass delayed it by ~200 ms and flattened quick
+        /// taps below the engage threshold altogether.
+        var buttonFilters: [OneEuroFilter2D]
         var lastSeen: TimeInterval = -.infinity
         var matchPalm: Vec2 = .zero
 
         init(id: Int, params: OneEuroFilter.Params) {
             self.id = id
             self.filters = Array(repeating: OneEuroFilter2D(params: params), count: HandJoint.allCases.count)
+            self.buttonFilters = Array(repeating: OneEuroFilter2D(params: GestureEngine.buttonSmoothing),
+                                       count: HandJoint.allCases.count)
         }
 
         mutating func setFilterParams(_ params: OneEuroFilter.Params) {
@@ -153,8 +160,14 @@ public final class GestureEngine {
 
         mutating func reset() {
             for i in filters.indices { filters[i].reset() }
+            for i in buttonFilters.indices { buttonFilters[i].reset() }
         }
     }
+
+    /// Smoothing for the click differentials only: light enough that a dip
+    /// crosses the engage threshold within a frame or two of Vision seeing
+    /// it, while `pinchDebounceFrames` still rejects single-frame spikes.
+    static let buttonSmoothing = OneEuroFilter.Params(minCutoff: 5.0, beta: 10, dCutoff: 1.0)
 
     private struct PressState {
         var button: MouseButton
@@ -274,6 +287,20 @@ public final class GestureEngine {
     private var slots: [HandSlot]
     private var primarySlotID: Int?
     private var lastHandTime: TimeInterval = -.infinity
+    /// Set when the hand was lost (its press, if any, force-released): no
+    /// button may engage again until every click finger has been seen
+    /// lifted. A hand that comes back still dipped would otherwise press
+    /// anew wherever it re-entered.
+    private var awaitingLift = false
+
+    /// How long a vanished hand keeps its state: longer while a button is
+    /// held, so a drag survives the hand brushing out of frame.
+    private var lossGrace: TimeInterval {
+        let held = press != nil || leftButton.engaged || rightButton.engaged
+            || middleButton.engaged
+        return held ? max(config.heldPressLossGrace, config.trackingLossGrace)
+            : config.trackingLossGrace
+    }
 
     /// Whether the control trigger currently lets the hand drive the cursor.
     /// Always true in `.anyHand` mode.
@@ -352,6 +379,7 @@ public final class GestureEngine {
         primarySlotID = nil
         cursor = nil
         lastHandTime = -.infinity
+        awaitingLift = false
         smoothedHandScale = nil
         armed = config.controlTrigger == .anyHand
         armFrames = 0
@@ -536,8 +564,21 @@ public final class GestureEngine {
         // gesture must not also be a click. Engage-only, as always.
         let trainedDwellBlock = trainedDetector.config.overridesMouse
             && trainedDetector.candidateActive
-        let ratio = armed ? clickRatio(features) : nil
+        // The dip differentials read the lightly smoothed button bank, not
+        // `features`: the cursor's low-pass is what made clicks late.
+        let buttonFeatures = HandFeatures(
+            hand: primary.buttonHand,
+            thresholds: config.poseThresholds,
+            minJointConfidence: config.minJointConfidence)
+        let ratio = armed ? clickRatio(buttonFeatures) : nil
         if armed {
+            let rightRatioNow = rightRatio(buttonFeatures)
+            let middleRatioNow = middleRatio(buttonFeatures)
+            if awaitingLift, let ratio, ratio > config.releaseRatio,
+               (rightRatioNow ?? .infinity) > config.rightReleaseRatio,
+               (middleRatioNow ?? .infinity) > config.middleReleaseRatio {
+                awaitingLift = false
+            }
             let rightHeld = isHeld(.right)
             let middleHeld = isHeld(.middle)
             updateButton(.left, state: &leftButton, ratio: ratio,
@@ -545,24 +586,26 @@ public final class GestureEngine {
                          confident: engageConfident(primary.hand),
                          blocked: rightHeld || middleHeld || scroll.active
                              || crissCross.engaged || sweeping || pointedParked
-                             || trainedDwellBlock,
+                             || trainedDwellBlock || awaitingLift,
                          at: frame.time, events: &events)
             let leftHeld = isHeld(.left)
-            updateButton(.right, state: &rightButton, ratio: rightRatio(features),
+            updateButton(.right, state: &rightButton, ratio: rightRatioNow,
                          engage: config.rightEngageRatio, release: config.rightReleaseRatio,
                          confident: rightEngageConfident(primary.hand),
                          blocked: leftHeld || middleHeld || scroll.active
                              || crissCross.engaged
                              || scrollPoseBlocksDip(of: config.rightClickFinger, features)
-                             || sweeping || pointedParked || trainedDwellBlock,
+                             || sweeping || pointedParked || trainedDwellBlock
+                             || awaitingLift,
                          at: frame.time, events: &events)
-            updateButton(.middle, state: &middleButton, ratio: middleRatio(features),
+            updateButton(.middle, state: &middleButton, ratio: middleRatioNow,
                          engage: config.middleEngageRatio, release: config.middleReleaseRatio,
                          confident: middleEngageConfident(primary.hand),
                          blocked: isHeld(.left) || isHeld(.right) || scroll.active
                              || crissCross.engaged
                              || scrollPoseBlocksDip(of: config.middleClickFinger, features)
-                             || sweeping || pointedParked || trainedDwellBlock,
+                             || sweeping || pointedParked || trainedDwellBlock
+                             || awaitingLift,
                          at: frame.time, events: &events)
         }
 
@@ -625,7 +668,7 @@ public final class GestureEngine {
         }
         if config.controlTrigger == .openHand, armed, let id = primarySlotID,
            let lastSeen = slots.first(where: { $0.id == id })?.lastSeen,
-           time - lastSeen <= config.trackingLossGrace {
+           time - lastSeen <= lossGrace {
             return nil // the armed hand may be right back: hold, never flap
         }
         let primary = tracked.max(by: { $0.hand.confidence < $1.hand.confidence })!
@@ -638,6 +681,7 @@ public final class GestureEngine {
             // a merely visible hand must never drag the cursor — so the
             // survivor keeps control only if it is showing the trigger.
             events += forceRelease(at: time)
+            awaitingLift = true
             armFrames = 0
             disarmFrames = 0
             if armFeatures(of: primary.hand)?.isOpenHand() != true {
@@ -1240,8 +1284,9 @@ public final class GestureEngine {
 
         // Within the grace window, hold all state — a one-frame dropout must
         // not release a drag (sporecaster keeps slots alive 300 ms).
-        if time - lastHandTime > config.trackingLossGrace {
+        if time - lastHandTime > lossGrace {
             events.append(contentsOf: forceRelease(at: time))
+            awaitingLift = true
             scroll = ScrollState() // a returning hand re-anchors from scratch
             dwell = DwellState() // …and must settle all over again to dwell
             crissCross = CrissCrossState() // hands truly gone: the wave restarts
@@ -1339,8 +1384,9 @@ public final class GestureEngine {
 
     private struct TrackedHand {
         var slotID: Int
-        var hand: Hand // screen-space, smoothed
-        var raw: Hand  // camera-space, exactly as tracked (auto reach measures this)
+        var hand: Hand       // screen-space, smoothed
+        var buttonHand: Hand // screen-space, lightly smoothed (click differentials only)
+        var raw: Hand        // camera-space, exactly as tracked (auto reach measures this)
     }
 
     private func rawPalm(of hand: Hand) -> Vec2 {
@@ -1393,7 +1439,12 @@ public final class GestureEngine {
                 let mapped = mapper.map(p, clamped: false)
                 return slots[s].filters[joint.rawValue].filter(mapped, at: time)
             }
-            result.append(TrackedHand(slotID: slots[s].id, hand: screenHand, raw: capped[h]))
+            let buttonHand = capped[h].mapPointsWithJoint { joint, p in
+                let mapped = mapper.map(p, clamped: false)
+                return slots[s].buttonFilters[joint.rawValue].filter(mapped, at: time)
+            }
+            result.append(TrackedHand(slotID: slots[s].id, hand: screenHand,
+                                      buttonHand: buttonHand, raw: capped[h]))
         }
         return result.sorted { $0.slotID < $1.slotID }
     }

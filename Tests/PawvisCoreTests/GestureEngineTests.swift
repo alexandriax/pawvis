@@ -157,7 +157,7 @@ final class GestureEngineTests: XCTestCase {
 
     func testDefaultConfigMatchesSporecasterTuning() {
         let c = GestureConfig.default
-        XCTAssertEqual(c.smoothing, .landmark, "sporecaster smoothed every landmark at 1.4/0.014/1.0")
+        XCTAssertEqual(c.smoothing, .normalizedLandmark, "beta sized for screen-normalized landmarks")
         XCTAssertEqual(c.pinchEngageRatio, 0.45)
         XCTAssertEqual(c.pinchReleaseRatio, 0.53, accuracy: 1e-9,
                        "release tracks engage + hysteresis, so it follows the sensitivity slider")
@@ -311,7 +311,11 @@ final class GestureEngineTests: XCTestCase {
         config.controlTrigger = .anyHand
         engine = GestureEngine(config: config)
 
-        let events = tapClick(from: 0)
+        // Longer lift than `tapClick`: at this threshold release sits at ~98%
+        // of the idle ratio, which the click bank's light smoothing reaches
+        // in ~5 frames. Reachability is the point here, not timing.
+        let events = feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0, count: 3)
+            + feedFrames([SyntheticHand.mouseTap(indexDown: false)], from: 0.1, count: 10)
         XCTAssertEqual(downs(events).count, 1, "a real tap still engages the button")
         XCTAssertEqual(ups(events).count, 1,
                        "…and releases it — unclamped, this release threshold was unreachable")
@@ -713,9 +717,11 @@ final class GestureEngineTests: XCTestCase {
         feedFrames([SyntheticHand.mouseTap(indexDown: true)], from: 0.1, count: 3)
 
         XCTAssertTrue(ups(feed([], at: 0.30).events).isEmpty, "grace holds the press")
-        let e = feed([], at: 0.55).events
+        XCTAssertTrue(ups(feed([], at: 0.55).events).isEmpty,
+                      "a held press gets the longer heldPressLossGrace")
+        let e = feed([], at: 2.0).events
         XCTAssertEqual(ups(e).count, 1, "held button must release after tracking loss")
-        XCTAssertTrue(ups(feed([], at: 0.7).events).isEmpty, "no repeated releases")
+        XCTAssertTrue(ups(feed([], at: 2.2).events).isEmpty, "no repeated releases")
     }
 
     func testBriefDropoutKeepsDrag() {
@@ -1275,9 +1281,11 @@ final class GestureEngineTests: XCTestCase {
         feedFrames([SyntheticHand.fingerDip(.ring)], from: 0.1, count: 3)
 
         XCTAssertTrue(middleUps(feed([], at: 0.30).events).isEmpty, "grace holds the press")
-        let e = feed([], at: 0.55).events
+        XCTAssertTrue(middleUps(feed([], at: 0.55).events).isEmpty,
+                      "a held press gets the longer heldPressLossGrace")
+        let e = feed([], at: 2.0).events
         XCTAssertEqual(middleUps(e).count, 1, "held button must release after tracking loss")
-        XCTAssertTrue(middleUps(feed([], at: 0.7).events).isEmpty, "no repeated releases")
+        XCTAssertTrue(middleUps(feed([], at: 2.2).events).isEmpty, "no repeated releases")
     }
 
     func testOverlayReportsTheMiddleButton() {
@@ -2153,9 +2161,10 @@ final class GestureEngineTests: XCTestCase {
 
         // The pressing hand leaves for good; only the bystander remains, so
         // the all-hands-gone path never runs — the handoff owns the release.
+        // Two seconds: a held press gets `heldPressLossGrace` (1.5 s).
         var events: [GestureEvent] = []
         var lastOverlay = OverlayState()
-        for i in 0..<30 {
+        for i in 0..<60 {
             let r = feed([SyntheticHand.halfClosed(wrist: Vec2(0.75, 0.7))],
                          at: 0.5 + Double(i) / 30)
             events += r.events
