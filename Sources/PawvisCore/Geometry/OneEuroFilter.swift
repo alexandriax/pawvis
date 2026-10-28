@@ -22,6 +22,14 @@ public struct OneEuroFilter: Sendable {
 
         /// sporecaster's landmark filter tuning (minCutoff 1.4, beta 0.014).
         public static let landmark = Params()
+        /// Pawvis's landmark tuning. `beta` scales speed in *input units per
+        /// second*, and the engine filters screen-normalized points that move
+        /// ~1 unit/s: sporecaster's 0.014 adds ~0.01 Hz there, leaving a fixed
+        /// 1.4 Hz low-pass that trailed a moving hand by ~200 ms. This beta
+        /// is sized for that unit; the lower floor keeps rest as steady.
+        public static let normalizedLandmark = Params(minCutoff: 1.0, beta: 6.0, dCutoff: 1.0)
+        /// The Responsiveness slider's span over `beta`, on the normalized scale.
+        public static let responsivenessRange: ClosedRange<Double> = 1.0...15.0
         /// Snappier tuning for driving a cursor, where lag is more noticeable
         /// than jitter during fast motion.
         public static let cursor = Params(minCutoff: 1.4, beta: 0.03, dCutoff: 1.0)

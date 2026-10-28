@@ -192,9 +192,10 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// so they suit control styles whose clicks move no fingers — dwell
     /// clicking above all.
     public var pointerSource: PointerSource = .palmCenter
-    /// sporecaster's landmark tuning, applied to every joint. Vision is noisier
-    /// than MediaPipe, so this is the floor for smoothing, not the ceiling.
-    public var smoothing: OneEuroFilter.Params = .landmark
+    /// Landmark smoothing for the cursor and the poses, applied to every
+    /// joint (the click differentials have their own lighter bank — see
+    /// `GestureEngine.buttonSmoothing`).
+    public var smoothing: OneEuroFilter.Params = .normalizedLandmark
 
     // MARK: Pose classification thresholds (used by hand features)
     public var poseThresholds: PoseThresholds = PoseThresholds()
@@ -205,6 +206,12 @@ public struct GestureConfig: Codable, Equatable, Sendable {
     /// If tracking drops out mid-pinch, keep state alive this long before
     /// releasing the button (sporecaster resets slots at 300 ms).
     public var trackingLossGrace: TimeInterval = 0.30
+    /// The same grace while a button is held. A drag carries the hand toward
+    /// the screen's edge, which is the camera frame's edge too, and the
+    /// hand slips out for a moment: releasing at 300 ms dropped the drag.
+    /// Coming back within this window, a still-dipped finger keeps dragging
+    /// and a lifted one releases there.
+    public var heldPressLossGrace: TimeInterval = 1.5
 
     // MARK: Mapping
     /// The manual box, and the starting point the automatic one drifts from.
@@ -229,7 +236,7 @@ public struct GestureConfig: Codable, Equatable, Sendable {
         case doubleClickInterval, doubleClickSlop, dragActivationDistance
         case dragStartDelay, dragIntentDistance, jitterDeadband
         case pointerSource, smoothing, poseThresholds
-        case minHandConfidence, minJointConfidence, trackingLossGrace
+        case minHandConfidence, minJointConfidence, trackingLossGrace, heldPressLossGrace
         case interactionBox, reachMode, mirrorCamera
     }
 
@@ -331,7 +338,9 @@ public struct GestureConfig: Codable, Equatable, Sendable {
             // well short of making the cursor feel stuck (default 0.004).
             jitterDeadband = v.clamped(to: 0...0.05)
         }
-        if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) { smoothing = v }
+        if let v = try? c.decodeIfPresent(OneEuroFilter.Params.self, forKey: .smoothing) {
+            smoothing = Self.migratedSmoothing(v)
+        }
         if let v = try? c.decodeIfPresent(PoseThresholds.self, forKey: .poseThresholds) { poseThresholds = v }
         if let v = try? c.decodeIfPresent(Double.self, forKey: .minHandConfidence) {
             // No slider. A Vision confidence score, physically bounded to
@@ -350,8 +359,36 @@ public struct GestureConfig: Codable, Equatable, Sendable {
             // button held long after the hand — and the user — are gone.
             trackingLossGrace = v.clamped(to: 0...5)
         }
+        if let v = try? c.decodeIfPresent(TimeInterval.self, forKey: .heldPressLossGrace) {
+            // No slider. Same bounds as trackingLossGrace: a held button
+            // must never outlive a hand that is truly gone by much.
+            heldPressLossGrace = v.clamped(to: 0...5)
+        }
         if let v = try? c.decodeIfPresent(InteractionBox.self, forKey: .interactionBox) { interactionBox = v }
         if let v = try? c.decodeIfPresent(ReachMode.self, forKey: .reachMode) { reachMode = v }
         if let v = try? c.decodeIfPresent(Bool.self, forKey: .mirrorCamera) { mirrorCamera = v }
+    }
+}
+
+extension GestureConfig {
+    /// The old Responsiveness slider (beta 0.005…0.09) lived on a scale where
+    /// every position behaved identically. A stored value from it keeps its
+    /// *slider position* on the new range, with the new rest floor; any beta
+    /// already on the normalized scale (or the test suite's disabled filter)
+    /// passes through untouched.
+    static func migratedSmoothing(_ stored: OneEuroFilter.Params) -> OneEuroFilter.Params {
+        let old: ClosedRange<Double> = 0.005...0.09
+        guard stored.beta > 0, stored.beta <= old.upperBound + 1e-9,
+              stored.minCutoff == OneEuroFilter.Params.landmark.minCutoff else { return stored }
+        let position = (stored.beta.clamped(to: old) - old.lowerBound)
+            / (old.upperBound - old.lowerBound)
+        let range = OneEuroFilter.Params.responsivenessRange
+        var migrated = OneEuroFilter.Params.normalizedLandmark
+        // The shipped default (0.014) lands on the new default, not on its
+        // raw slider position, so an untouched slider gets the tuned value.
+        if abs(stored.beta - OneEuroFilter.Params.landmark.beta) > 1e-9 {
+            migrated.beta = range.lowerBound + position * (range.upperBound - range.lowerBound)
+        }
+        return migrated
     }
 }

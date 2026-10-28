@@ -257,7 +257,7 @@ private struct GeneralSettingsTab: View {
                 value: Binding(
                     get: { store.settings.gestures.smoothing.beta },
                     set: { store.settings.gestures.smoothing.beta = $0 }),
-                range: 0.005...0.09)
+                range: OneEuroFilter.Params.responsivenessRange)
 
             SettingRow(
                 title: "Reach",
